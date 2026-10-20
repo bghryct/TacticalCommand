@@ -1,0 +1,534 @@
+{
+ "credits": "Every clip is cut from the USC Sound Effects Library on archive.org \u2014 the Red, Gold and Sunset Editorial collections, digitised by Craig Smith (USC) \u2014 plus The Designer's Choice UCS Collection: VOICES (Nicholas Judy). All are released CC0 1.0 Universal (https://creativecommons.org/publicdomain/zero/1.0/) per their own archive.org licenseurl. Rifles, submachine guns, ricochets, bullet cracks and mechanism: SSE Library: GUNS. Machine guns: Red Library: Guns Machine (R12-06 single shots, R12-18 bursts, R30-31 'all ambience cut out', R12-16, R12-01). Field guns and tank main armament: Red Library: Guns Artillery (R12-37 and R12-15 are a 75 mm \u2014 the Sherman's own gun \u2014 plus R12-07, R12-38, R12-36) and SSE Library: GUNS. Explosions and the incoming shell: SSE Library: EXPLOSIONS and Red Library: Explosions. Tanks, tracks and engines: GOLD TAPE 15 Tanks Bulldozers (the M-4 cuts are a Sherman). Footsteps: Red Library Footsteps 1 and 3, SSE Library: FOOTSTEPS. Birds and wind: Red Library Animals Birds, SSE Library: WIND. Wounded and dying men: The Designer's Choice VOICES (modern, full-bandwidth male screams, grunts and crying) with support from Red Library Fights, Red Library Voices Men 1 and 2, SSE Library: VOICES. NO CLIP IN THIS BANK HAS A VOICE IN IT EXCEPT THE FOUR voice.* BANKS, and those carry no words. Takes were chosen from each library's MASTER CATALOGUE, not from filenames, because the names hide things: 'R30-03 Artillery Gun Sequence' is a man shouting 'Ready, Fire!' in Mandarin, 'GUNArtl_squad firing 37mm anti tank guns' has the detachment shouting over it (it was in this bank and is not now), 'R15-49 Man Hyperventilating and Screaming' is 'sort of saying no in the beginning', and 'R16-09 Men Grunting and Shrieking' is 'similar to apes in a fight'. None of those are in the game. Every cut is then screened by tools/audio_speech.py, which finds a human vowel by its harmonic comb in the cepstrum: a cut bound for a gun bank is rejected if it has a voice in it, and a cut bound for a voice bank is rejected if it is too continuously voiced to be a cry rather than a word. No attribution is required under CC0; it is recorded because knowing where a sound came from is worth more than the licence obliges. Several cuts are marked 'from optical' in the source, meaning they were lifted from wartime film soundtracks. Prepared with tools/audio_slice.py, tools/audio_slice2.py, tools/audio_voices.py, tools/audio_recut.py and tools/audio_thin.py: transient-sliced to one-shots (or crossfade-looped for the beds), mono, 44.1 kHz, normalised to -3 dBFS, Ogg Vorbis q5. ALSO, the second bank (round 103, tools/audio_slice3.py): modern full-range recordings from freesound.org, cut into one-shots, loops and windows, levelled and re-encoded (modified). CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), each by its author: mosin shots by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/255265/; mg42 solo by Lubini, https://freesound.org/s/338242/; maxim sustained by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/255270/; ppsh41 by Lubini, https://freesound.org/s/338323/; mp38 by Lubini, https://freesound.org/s/338046/; sten near by poissonmort, https://freesound.org/s/157206/; p38 pistol by Lubini, https://freesound.org/s/338045/; sw38 revolver by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/255272/; cannon 76mm by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/332935/; cannon 155mm by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/332934/; shell wail impact by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/258206/; grenade echo by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/256300/; near explosion debris by juskiddink, https://freesound.org/s/108641/; distant explosion by juskiddink, https://freesound.org/s/108640/; ricochets by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/401921/; sherman e8 start idle by nicStage, https://freesound.org/s/368670/; tank pass tracks by YleArkisto (Yle, the Finnish Broadcasting Company archive), https://freesound.org/s/386590/. CC0 1.0: garand shot by MPierluissi, https://freesound.org/s/460851/; garand clip by MPierluissi, https://freesound.org/s/460848/; k98 shot by Walking.With.Microphones, https://freesound.org/s/802675/; k98 bolt by Walking.With.Microphones, https://freesound.org/s/802673/; enfield shot by kyles, https://freesound.org/s/450853/; colt1911 by areniporgen, https://freesound.org/s/740897/; zis3 76mm by Walking.With.Microphones, https://freesound.org/s/556132/; mortar shots by qubodup, https://freesound.org/s/184382/; tnt 4kg debris by sidohzen, https://freesound.org/s/165808/; zis3 salute 1200m by Walking.With.Microphones, https://freesound.org/s/634629/.",
+ "clips": {
+  "rifle": [
+   "rifle_01.ogg",
+   "rifle_02.ogg",
+   "rifle_03.ogg",
+   "rifle_04.ogg",
+   "rifle_05.ogg",
+   "rifle_06.ogg",
+   "rifle_07.ogg",
+   "rifle_08.ogg",
+   "rifle_09.ogg"
+  ],
+  "rifle.sniper": [
+   "riflefar_01.ogg",
+   "riflefar_02.ogg",
+   "riflefar_03.ogg"
+  ],
+  "rifle.gersniper": [
+   "riflefar_01.ogg",
+   "riflefar_02.ogg",
+   "riflefar_03.ogg"
+  ],
+  "rifle.sovsniper": [
+   "riflefar_01.ogg",
+   "riflefar_02.ogg",
+   "riflefar_03.ogg"
+  ],
+  "rifle.usbar": [
+   "bar_01.ogg",
+   "bar_02.ogg",
+   "bar_03.ogg"
+  ],
+  "rifle.ussmg": [
+   "smg_01.ogg",
+   "smg_02.ogg",
+   "smg_03.ogg"
+  ],
+  "rifle.usgrease": [
+   "smg_01.ogg",
+   "smg_02.ogg",
+   "smg_03.ogg"
+  ],
+  "mg": [
+   "mg_01.ogg",
+   "mg_02.ogg",
+   "mg_03.ogg",
+   "mg_04.ogg",
+   "mg_05.ogg",
+   "mg_06.ogg",
+   "mg_07.ogg",
+   "mg_08.ogg",
+   "mg_09.ogg",
+   "mg_10.ogg"
+  ],
+  "mg.fiftycal": [
+   "fifty_01.ogg",
+   "fifty_02.ogg",
+   "fifty_03.ogg",
+   "fifty_04.ogg",
+   "fifty_05.ogg"
+  ],
+  "mg.rip": [
+   "mgrip_01.ogg",
+   "mgrip_02.ogg",
+   "mgrip_03.ogg",
+   "mgrip_04.ogg"
+  ],
+  "ricochet": [
+   "ric_01.ogg",
+   "ric_02.ogg",
+   "ric_03.ogg",
+   "ric_04.ogg",
+   "ric_05.ogg",
+   "ric_06.ogg",
+   "ric_07.ogg",
+   "ricy_01.ogg",
+   "ricy_02.ogg",
+   "ricy_03.ogg",
+   "ricy_04.ogg",
+   "ricy_05.ogg",
+   "ricy_06.ogg",
+   "ricy_07.ogg",
+   "ricy_08.ogg",
+   "ricy_09.ogg"
+  ],
+  "snap": [
+   "snap_01.ogg",
+   "snap_02.ogg",
+   "snap_03.ogg",
+   "snap_04.ogg"
+  ],
+  "cannon": [
+   "gun76_01.ogg",
+   "gun76_02.ogg",
+   "gun76_03.ogg",
+   "gun76_04.ogg",
+   "gun76_05.ogg",
+   "zis3_01.ogg",
+   "zis3_02.ogg",
+   "zis3_03.ogg"
+  ],
+  "cannon.big": [
+   "gun155_01.ogg",
+   "gun155_02.ogg",
+   "cannonbig_01.ogg",
+   "cannonbig_02.ogg",
+   "cannonbig_03.ogg",
+   "cannonbig_04.ogg"
+  ],
+  "cannon.usmortar": [
+   "mortarq_01.ogg",
+   "mortarq_02.ogg",
+   "mortarq_03.ogg",
+   "mortarq_04.ogg",
+   "mortar_01.ogg",
+   "mortar_02.ogg",
+   "mortar_03.ogg"
+  ],
+  "cannon.germortar": [
+   "mortarq_01.ogg",
+   "mortarq_02.ogg",
+   "mortarq_03.ogg",
+   "mortarq_04.ogg",
+   "mortar_01.ogg",
+   "mortar_02.ogg",
+   "mortar_03.ogg"
+  ],
+  "cannon.ukmortar3": [
+   "mortarq_01.ogg",
+   "mortarq_02.ogg",
+   "mortarq_03.ogg",
+   "mortarq_04.ogg",
+   "mortar_01.ogg",
+   "mortar_02.ogg",
+   "mortar_03.ogg"
+  ],
+  "cannon.sovmortar": [
+   "mortarq_01.ogg",
+   "mortarq_02.ogg",
+   "mortarq_03.ogg",
+   "mortarq_04.ogg",
+   "mortar_01.ogg",
+   "mortar_02.ogg",
+   "mortar_03.ogg"
+  ],
+  "cannon.us60mm": [
+   "mortarq_01.ogg",
+   "mortarq_02.ogg",
+   "mortarq_03.ogg",
+   "mortarq_04.ogg",
+   "mortar_01.ogg",
+   "mortar_02.ogg",
+   "mortar_03.ogg"
+  ],
+  "cannon.us37mm": [
+   "atgun_01.ogg",
+   "atgun_02.ogg",
+   "atgun_03.ogg",
+   "atgun_04.ogg"
+  ],
+  "cannon.gerpak38": [
+   "atgun_01.ogg",
+   "atgun_02.ogg",
+   "atgun_03.ogg",
+   "atgun_04.ogg"
+  ],
+  "cannon.sov45mm": [
+   "atgun_01.ogg",
+   "atgun_02.ogg",
+   "atgun_03.ogg",
+   "atgun_04.ogg"
+  ],
+  "boom": [
+   "boom_01.ogg",
+   "boom_02.ogg",
+   "boom_03.ogg",
+   "boom_04.ogg",
+   "boom_05.ogg",
+   "boom_06.ogg",
+   "boom_07.ogg",
+   "boomnear_01.ogg",
+   "shellhit_01.ogg",
+   "shellhit_02.ogg"
+  ],
+  "boom.big": [
+   "boombig_01.ogg",
+   "boombig_02.ogg",
+   "boombig_03.ogg",
+   "boombig_04.ogg",
+   "boombig_05.ogg",
+   "boomtnt_01.ogg"
+  ],
+  "boom.small": [
+   "grenade_01.ogg",
+   "grenade_02.ogg",
+   "grenade_03.ogg",
+   "grenade_04.ogg",
+   "grenadeecho_01.ogg"
+  ],
+  "boom.far": [
+   "boomfar_01.ogg",
+   "boomfar_02.ogg",
+   "boomfar_03.ogg",
+   "boomfar_04.ogg",
+   "boomdist_01.ogg"
+  ],
+  "rumble": [
+   "rumble_01.ogg",
+   "rumble_02.ogg",
+   "rumblezis_01.ogg",
+   "rumblezis_02.ogg",
+   "rumblezis_03.ogg",
+   "rumblezis_04.ogg",
+   "rumblezis_05.ogg"
+  ],
+  "rocket": [
+   "rocket_01.ogg"
+  ],
+  "whistle": [
+   "whistle_03.ogg",
+   "whistle_04.ogg",
+   "whistle_05.ogg",
+   "whistle_06.ogg",
+   "whistle_07.ogg",
+   "whistle_08.ogg",
+   "whistle_09.ogg",
+   "whistle_10.ogg",
+   "shellwail_01.ogg",
+   "shellwail_02.ogg"
+  ],
+  "breech": [
+   "breech_01.ogg",
+   "breech_02.ogg",
+   "breech_03.ogg",
+   "breech_05.ogg"
+  ],
+  "breech.close": [
+   "breechc_01.ogg",
+   "breechc_02.ogg",
+   "breechc_03.ogg",
+   "breechc_05.ogg"
+  ],
+  "engine.tank": [
+   "enginee8_01.ogg"
+  ],
+  "engine.light": [
+   "enginelight_01.ogg"
+  ],
+  "engine.halftrack": [
+   "enginehalftrack_01.ogg"
+  ],
+  "engine.truck": [
+   "enginetruck_01.ogg"
+  ],
+  "tracks": [
+   "tracks_01.ogg",
+   "tracks_02.ogg",
+   "tracks_03.ogg",
+   "tracks_04.ogg",
+   "tracks_05.ogg",
+   "tracks_06.ogg",
+   "trackyle_01.ogg",
+   "trackyle_02.ogg",
+   "trackyle_03.ogg",
+   "trackyle_04.ogg",
+   "trackyle_05.ogg",
+   "trackyle_06.ogg"
+  ],
+  "step": [
+   "step_01.ogg",
+   "step_02.ogg",
+   "step_03.ogg",
+   "step_04.ogg",
+   "step_05.ogg",
+   "step_06.ogg",
+   "step_07.ogg",
+   "step_08.ogg",
+   "step_09.ogg",
+   "step_10.ogg",
+   "step_12.ogg",
+   "step_13.ogg",
+   "march_01.ogg",
+   "march_02.ogg",
+   "march_03.ogg",
+   "march_04.ogg"
+  ],
+  "step.run": [
+   "steprun_01.ogg",
+   "steprun_03.ogg",
+   "steprun_05.ogg",
+   "steprun_06.ogg",
+   "steprun_07.ogg"
+  ],
+  "step.gravel": [
+   "stepgravel_01.ogg",
+   "stepgravel_02.ogg",
+   "stepgravel_03.ogg",
+   "stepgravel_04.ogg"
+  ],
+  "step.rubble": [
+   "stepgravel_01.ogg",
+   "stepgravel_02.ogg",
+   "stepgravel_03.ogg",
+   "stepgravel_04.ogg"
+  ],
+  "step.cobble": [
+   "stepgravel_01.ogg",
+   "stepgravel_02.ogg",
+   "stepgravel_03.ogg",
+   "stepgravel_04.ogg"
+  ],
+  "step.stone": [
+   "stepgravel_01.ogg",
+   "stepgravel_02.ogg",
+   "stepgravel_03.ogg",
+   "stepgravel_04.ogg"
+  ],
+  "step.road": [
+   "stepgravel_01.ogg",
+   "stepgravel_02.ogg",
+   "stepgravel_03.ogg",
+   "stepgravel_04.ogg"
+  ],
+  "ambient.birds": [
+   "ambientbirds_01.ogg",
+   "ambientbirds_02.ogg",
+   "ambientbirds_03.ogg",
+   "ambientbirds_04.ogg"
+  ],
+  "ambient.wind": [
+   "ambientwind_01.ogg",
+   "ambientwind_02.ogg",
+   "ambientwind_03.ogg"
+  ],
+  "voice.hit": [
+   "hit_01.ogg",
+   "hit_02.ogg",
+   "hit_03.ogg",
+   "hit_04.ogg",
+   "hit_05.ogg",
+   "hit_06.ogg",
+   "hit_07.ogg",
+   "hit_08.ogg",
+   "hit_09.ogg"
+  ],
+  "voice.agony": [
+   "agony_01.ogg",
+   "agony_02.ogg",
+   "agony_03.ogg",
+   "agony_04.ogg",
+   "agony_05.ogg",
+   "agony_06.ogg",
+   "agony_07.ogg",
+   "agony_08.ogg",
+   "agony_09.ogg",
+   "agony_10.ogg"
+  ],
+  "voice.death": [
+   "death_01.ogg",
+   "death_02.ogg",
+   "death_03.ogg",
+   "death_04.ogg",
+   "death_05.ogg",
+   "death_06.ogg"
+  ],
+  "voice.groan": [
+   "groan_01.ogg",
+   "groan_02.ogg",
+   "groan_03.ogg",
+   "groan_04.ogg",
+   "groan_05.ogg",
+   "groan_06.ogg",
+   "groan_07.ogg",
+   "groan_08.ogg"
+  ],
+  "rifle.garand": [
+   "garand_01.ogg",
+   "garand_02.ogg",
+   "garand_03.ogg",
+   "garand_04.ogg",
+   "garand_05.ogg",
+   "garand_06.ogg",
+   "garand_07.ogg",
+   "garand_08.ogg"
+  ],
+  "garand.ping": [
+   "garandping_01.ogg",
+   "garandping_02.ogg",
+   "garandping_03.ogg"
+  ],
+  "rifle.kar98k": [
+   "k98_01.ogg",
+   "k98_02.ogg",
+   "k98_03.ogg"
+  ],
+  "rifle.mosin": [
+   "mosin_01.ogg",
+   "mosin_02.ogg",
+   "mosin_03.ogg",
+   "mosin_04.ogg",
+   "mosin_05.ogg"
+  ],
+  "rifle.no4": [
+   "no4_01.ogg"
+  ],
+  "breech.kar98k": [
+   "k98open_01.ogg"
+  ],
+  "breech.kar98k.close": [
+   "k98close_01.ogg"
+  ],
+  "breech.kar98k.cycle": [
+   "k98cycle_01.ogg"
+  ],
+  "breech.kar98kzf": [
+   "k98open_01.ogg"
+  ],
+  "breech.kar98kzf.close": [
+   "k98close_01.ogg"
+  ],
+  "breech.kar98kzf.cycle": [
+   "k98cycle_01.ogg"
+  ],
+  "breech.mosin.cycle": [
+   "mosinbolt_01.ogg",
+   "mosinbolt_02.ogg"
+  ],
+  "breech.mosinpu.cycle": [
+   "mosinbolt_01.ogg",
+   "mosinbolt_02.ogg"
+  ],
+  "rifle.ppsh41": [
+   "ppsh_01.ogg",
+   "ppsh_02.ogg",
+   "ppsh_03.ogg",
+   "ppsh_04.ogg",
+   "ppsh_05.ogg",
+   "ppsh_06.ogg",
+   "ppsh_07.ogg",
+   "ppsh_08.ogg"
+  ],
+  "rifle.mp40": [
+   "mp40_01.ogg",
+   "mp40_02.ogg",
+   "mp40_03.ogg",
+   "mp40_04.ogg",
+   "mp40_05.ogg",
+   "mp40_06.ogg",
+   "mp40_07.ogg",
+   "mp40_08.ogg",
+   "mp40_09.ogg",
+   "mp40_10.ogg"
+  ],
+  "rifle.sten": [
+   "sten_01.ogg",
+   "sten_02.ogg",
+   "sten_03.ogg",
+   "sten_04.ogg",
+   "sten_05.ogg",
+   "sten_06.ogg",
+   "sten_07.ogg",
+   "sten_08.ogg",
+   "sten_09.ogg",
+   "sten_10.ogg"
+  ],
+  "mg.mg42.rip": [
+   "mg42rip_01.ogg",
+   "mg42rip_02.ogg",
+   "mg42rip_03.ogg",
+   "mg42rip_04.ogg",
+   "mg42rip_05.ogg",
+   "mg42rip_06.ogg",
+   "mg42rip_07.ogg"
+  ],
+  "mg.maxim": [
+   "maxim_01.ogg",
+   "maxim_02.ogg",
+   "maxim_03.ogg",
+   "maxim_04.ogg",
+   "maxim_05.ogg",
+   "maxim_06.ogg",
+   "maxim_07.ogg",
+   "maxim_08.ogg",
+   "maxim_09.ogg",
+   "maxim_10.ogg"
+  ],
+  "mg.ukvickers": [
+   "maxim_01.ogg",
+   "maxim_02.ogg",
+   "maxim_03.ogg",
+   "maxim_04.ogg",
+   "maxim_05.ogg",
+   "maxim_06.ogg",
+   "maxim_07.ogg",
+   "maxim_08.ogg",
+   "maxim_09.ogg",
+   "maxim_10.ogg"
+  ],
+  "rifle.p38": [
+   "p38_01.ogg",
+   "p38_02.ogg"
+  ],
+  "rifle.enfield2": [
+   "revolver_01.ogg",
+   "revolver_02.ogg"
+  ],
+  "rifle.m1911": [
+   "m1911_01.ogg"
+  ],
+  "rifle.pistol": [
+   "p38_01.ogg",
+   "p38_02.ogg",
+   "revolver_01.ogg",
+   "revolver_02.ogg",
+   "m1911_01.ogg"
+  ]
+ },
+ "full": [
+  "cannon",
+  "cannon.big",
+  "mg.maxim",
+  "mg.mg42.rip",
+  "mg.ukvickers",
+  "rifle.enfield2",
+  "rifle.kar98k",
+  "rifle.m1911",
+  "rifle.mosin",
+  "rifle.no4",
+  "rifle.p38",
+  "rifle.pistol"
+ ]
+}

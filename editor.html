@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tactical Command — Content Editor</title><!-- v1 -->
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0d1117; color: #c8d2dc; user-select: none; }
+#top { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #10151c; border-bottom: 1px solid #2a3a4a; }
+#top h1 { font-size: 14px; color: #c8a060; text-transform: uppercase; letter-spacing: 1px; margin-right: 10px; }
+.btn { padding: 5px 12px; border: 1px solid #3a4a5a; border-radius: 4px; background: #1a2530; color: #b0c0d0; font-size: 12px; cursor: pointer; }
+.btn:hover { background: #2a3a4a; }
+.btn.gold { background: #c8a060; color: #10151c; border-color: #c8a060; font-weight: 700; }
+.btn.danger { border-color: #6a3030; background: #2a1515; color: #c08080; }
+#tabs { display: flex; gap: 2px; margin-left: 16px; }
+.tab { padding: 6px 16px; border-radius: 4px 4px 0 0; background: #131a22; color: #8090a0; font-size: 12px; cursor: pointer; border: 1px solid transparent; }
+.tab.on { background: #1a2530; color: #c8a060; border-color: #2a3a4a; font-weight: 700; }
+#status { margin-left: auto; font-size: 11px; color: #60a070; }
+.page { display: none; padding: 14px; }
+.page.on { display: flex; gap: 14px; align-items: flex-start; }
+.list { width: 190px; background: #10151c; border: 1px solid #2a3a4a; border-radius: 6px; overflow: hidden; }
+.list-item { padding: 8px 12px; font-size: 12px; cursor: pointer; border-bottom: 1px solid #1a2530; display: flex; align-items: center; gap: 8px; }
+.list-item:hover { background: #1a2530; }
+.list-item.on { background: #22303e; color: #e8c060; font-weight: 700; }
+.dot { width: 12px; height: 12px; border-radius: 3px; }
+.card { background: #10151c; border: 1px solid #2a3a4a; border-radius: 6px; padding: 14px; }
+.card h2 { font-size: 13px; color: #c8a060; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.statgrid { display: grid; grid-template-columns: auto 90px auto 90px; gap: 6px 10px; align-items: center; font-size: 12px; }
+.statgrid label { color: #8090a0; text-align: right; }
+.statgrid input, .statgrid select { background: #0d1117; border: 1px solid #2a3a4a; border-radius: 3px; color: #c8d2dc; padding: 4px 6px; font-size: 12px; width: 100%; }
+.statgrid input[type=color] { padding: 0; height: 26px; }
+#unitCanvas { background: #131a22; border-radius: 6px; border: 1px solid #2a3a4a; image-rendering: auto; }
+.rowbtns { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+.mini { padding: 3px 9px; font-size: 11px; border: 1px solid #2a3a4a; border-radius: 3px; background: #131a22; color: #90a0b0; cursor: pointer; }
+.mini.on { background: #c8a060; color: #10151c; font-weight: 700; }
+.hue-dots { display: flex; gap: 5px; margin: 8px 0; }
+.hue-dot { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 2px solid #2a3a4a; }
+.hue-dot.on { border-color: #fff; }
+.slider-row { display: grid; grid-template-columns: 110px 1fr 46px; gap: 8px; align-items: center; font-size: 12px; margin-bottom: 6px; }
+.slider-row label { color: #8090a0; text-align: right; }
+.slider-row input[type=range] { accent-color: #c8a060; }
+#texPreview, #doodadCanvas { border: 1px solid #2a3a4a; border-radius: 6px; }
+.note { font-size: 11px; color: #607080; line-height: 1.6; max-width: 480px; margin-top: 10px; }
+#mapReport { font-size: 12px; line-height: 1.8; white-space: pre-wrap; font-family: ui-monospace, monospace; background: #0d1117; border: 1px solid #2a3a4a; border-radius: 6px; padding: 12px; min-width: 420px; min-height: 200px; }
+</style>
+</head>
+<body>
+
+<div id="top">
+  <h1>⚒ Content Editor</h1>
+  <div id="tabs">
+    <div class="tab on" data-page="units">Units</div>
+    <div class="tab" data-page="doodads">Doodads</div>
+    <div class="tab" data-page="texture">Texture</div>
+    <div class="tab" data-page="maps">Maps</div>
+  </div>
+  <div id="status">saved</div>
+  <button class="btn gold" id="btnDownload">⬇ Download custom.js</button>
+  <button class="btn danger" id="btnClear">Reset all</button>
+  <a class="btn" href="tactical_command.html">▶ Open game</a>
+</div>
+
+<!-- ==================== UNITS ==================== -->
+<div class="page on" id="page-units">
+  <div class="list" id="unitList"></div>
+  <div class="card">
+    <h2 id="unitTitle">Unit</h2>
+    <canvas id="unitCanvas" width="360" height="300"></canvas>
+    <div class="rowbtns" id="seqBtns"></div>
+    <div class="rowbtns">
+      <div class="mini" id="viewL">⟲ rotate</div>
+      <div class="mini" id="viewR">rotate ⟳</div>
+      <div class="mini" id="animToggle">⏸ pause</div>
+    </div>
+    <div class="hue-dots" id="hueDots"></div>
+  </div>
+  <div class="card">
+    <h2>Stats</h2>
+    <div class="statgrid" id="unitStats"></div>
+    <div class="rowbtns">
+      <button class="mini" id="unitReset">Reset this unit</button>
+    </div>
+    <div class="note">Changes save automatically to this browser and apply the next time
+      the game loads. Use <b>Download custom.js</b> and drop the file into <b>assets/</b>
+      to make them portable.</div>
+  </div>
+</div>
+
+<!-- ==================== DOODADS ==================== -->
+<div class="page" id="page-doodads">
+  <div class="list" id="doodadList"></div>
+  <div class="card">
+    <h2 id="doodadTitle">Doodad</h2>
+    <canvas id="doodadCanvas" width="220" height="240"></canvas>
+    <div class="note">Preview shows footprint colour and relative height.</div>
+  </div>
+  <div class="card">
+    <h2>Stats</h2>
+    <div class="statgrid" id="doodadStats"></div>
+    <div class="rowbtns"><button class="mini" id="doodadReset">Reset this doodad</button></div>
+  </div>
+</div>
+
+<!-- ==================== TEXTURE ==================== -->
+<div class="page" id="page-texture">
+  <div class="card">
+    <h2>Terrain Detail Texture</h2>
+    <div id="texSliders"></div>
+    <div class="rowbtns"><button class="mini" id="texReset">Reset texture</button></div>
+    <div class="note">This is the tileable grain multiplied over the terrain colours in-game.
+      Tune mottling weights, contrast, and warmth; the preview regenerates live.</div>
+  </div>
+  <div class="card">
+    <h2>Preview</h2>
+    <canvas id="texPreview" width="256" height="256"></canvas>
+  </div>
+</div>
+
+<!-- ==================== MAPS ==================== -->
+<div class="page" id="page-maps">
+  <div class="card">
+    <h2>Map Inspector</h2>
+    <input type="file" id="mapFile" accept=".json" style="font-size:12px; margin-bottom:10px;">
+    <div id="mapReport">Load an exported map to inspect it.</div>
+    <div class="note">Maps themselves are built in-game: press <b>Tab</b> in the game for the
+      live terrain / doodad / unit map editor, then Export. This inspector summarises a map
+      file and checks it for problems.</div>
+  </div>
+</div>
+
+<!-- assets/units_meta.js (sprite sheets from another game) quarantined in round 106: unused by any unit. See quarantine/myth2/README.md -->
+<script src="assets/custom.js"></script>
+<script>
+'use strict';
+/* ============================================================================
+ * TACTICAL COMMAND — standalone content editor.
+ * Edits are stored in localStorage 'tc_custom' (the game reads it at boot)
+ * and can be downloaded as assets/custom.js for portability.
+ * ========================================================================= */
+
+// ---- The game's default tables (mirror of tactical_command.html) ----------
+const DEFAULT_UNITS = {
+  usrifle:    { name: 'US Rifleman', kind: 'rifle',   hp: 90,  spd: 4.6, dmg: 11, rng: 20,  atkTime: 0.55, armor: 0.1, shield: 0, size: 0.95, vis: 30, scale: 1 },
+  gergren:    { name: 'Grenadier',   kind: 'rifle',   hp: 95,  spd: 4.4, dmg: 16, rng: 24,  atkTime: 1.1,  armor: 0.1, shield: 0, size: 0.95, vis: 30, scale: 1 },
+  sherman:    { name: 'Sherman Jumbo', kind: 'tank',  hp: 700, spd: 2.7, dmg: 70, rng: 26,  atkTime: 5.5,  armor: 0.5, shield: 0, size: 2.3, vis: 30, scale: 1 },
+  panzer4:    { name: 'Panzer IV',   kind: 'tank',    hp: 520, spd: 3.4, dmg: 85, rng: 28,  atkTime: 5.0,  armor: 0.4, shield: 0, size: 2.2, vis: 30, scale: 1 },
+  firefly:    { name: 'Sherman Firefly', kind: 'tank', hp: 600, spd: 3.0, dmg: 115, rng: 30, atkTime: 5.6, armor: 0.42, shield: 0, size: 2.3, vis: 32, scale: 1 },
+  achilles:   { name: 'Achilles TD', kind: 'tank',    hp: 360, spd: 3.5, dmg: 100, rng: 30, atkTime: 5.0, armor: 0.28, shield: 0, size: 2.2, vis: 32, scale: 1 },
+  stug:       { name: 'StuG III',    kind: 'tank',    hp: 470, spd: 3.6, dmg: 88, rng: 28,  atkTime: 4.6, armor: 0.42, shield: 0, size: 2.1, vis: 30, scale: 1 },
+  crocodile:  { name: 'Churchill Crocodile', kind: 'flametank', hp: 950, spd: 2.0, dmg: 22, rng: 9, atkTime: 0.16, armor: 0.55, shield: 0, size: 2.5, vis: 26, scale: 1 },
+  flak88:     { name: '8.8cm Flak',  kind: 'atgun',   hp: 240, spd: 0.6, dmg: 130, rng: 36, atkTime: 4.6, armor: 0.1, shield: 0.6, size: 2.2, vis: 36, scale: 1 },
+  pak75:      { name: '7.5cm PaK 40', kind: 'atgun',  hp: 170, spd: 0.7, dmg: 82, rng: 28,  atkTime: 3.6, armor: 0.08, shield: 0.55, size: 1.7, vis: 30, scale: 1 },
+  ushalftrack:  { name: 'M3 Halftrack', kind: 'apc',  hp: 240, spd: 5.0, dmg: 14, rng: 20, atkTime: 0.24, armor: 0.18, shield: 0, size: 2.0, vis: 30, scale: 1 },
+  gerhalftrack: { name: 'Sd.Kfz. 251', kind: 'apc',   hp: 220, spd: 4.8, dmg: 10, rng: 18, atkTime: 0.22, armor: 0.16, shield: 0, size: 2.0, vis: 30, scale: 1 },
+  bazooka:    { name: 'Bazooka Team', kind: 'rocket', hp: 88, spd: 4.4, dmg: 120, rng: 18, atkTime: 4.4, armor: 0.1, shield: 0, size: 0.95, vis: 30, scale: 1 },
+  panzerfaust:{ name: 'Panzerfaust',  kind: 'rocket', hp: 85, spd: 4.4, dmg: 150, rng: 12, atkTime: 5.0, armor: 0.1, shield: 0, size: 0.95, vis: 28, scale: 1 },
+  fiftycal:   { name: '.50 cal MG',  kind: 'hmg',     hp: 88, spd: 2.6, dmg: 13, rng: 24, atkTime: 0.26, armor: 0.05, shield: 0, size: 0.95, vis: 30, scale: 1 },
+  mg42:       { name: 'MG42',        kind: 'hmg',     hp: 82, spd: 3.2, dmg: 7, rng: 21, atkTime: 0.075, armor: 0.05, shield: 0, size: 0.95, vis: 30, scale: 1 },
+};
+const DEFAULT_DOODADS = {
+  tree:   { hp: 50,  height: 3.2, color: 0x2f5a2f }, bush: { hp: 15, height: 0.9, color: 0x3d5c30 },
+  rock:   { hp: 90,  height: 1.1, color: 0x6a5a4a }, wall: { hp: 110, height: 1.9, color: 0x6b6b66 },
+  house:  { hp: 220, height: 3.4, color: 0x8a7a5a }, tower: { hp: 320, height: 5.5, color: 0x77756e },
+  fence:  { hp: 40,  height: 1.1, color: 0x6a5638 }, menhir: { hp: 150, height: 2.6, color: 0x6e6a62 },
+  crate:  { hp: 25,  height: 0.8, color: 0x8a6a42 }, barrel: { hp: 30, height: 1.0, color: 0x7a4a2a },
+  deadtree: { hp: 30, height: 2.8, color: 0x5a4a3c }, hay: { hp: 20, height: 1.0, color: 0xb09a52 },
+  grave:  { hp: 40,  height: 0.9, color: 0x8a877e }, well: { hp: 120, height: 1.8, color: 0x7d7a70 },
+  campfire: { hp: 25, height: 0.7, color: 0xc06a28 },
+  sandbags: { hp: 90, height: 0.8, color: 0x9a8a5e }, wire: { hp: 25, height: 0.6, color: 0x8a8a80 },
+  hedgehog: { hp: 200, height: 1.1, color: 0x6e6e66 }, dragonteeth: { hp: 260, height: 1.0, color: 0x9a988e },
+  foxhole: { hp: 60, height: 0.4, color: 0x54492f }, oildrum: { hp: 22, height: 1.0, color: 0x556b3a },
+  supplies: { hp: 40, height: 0.9, color: 0x6a6142 },
+};
+const DEFAULT_TEXTURE = { base: 196, contrast: 122, grain: 13, w1: 0.46, w2: 0.26, w3: 0.14, w4: 0.14, rMul: 1.04, gMul: 1.0, bMul: 0.9 };
+const UNIT_FIELDS = ['hp', 'spd', 'dmg', 'rng', 'atkTime', 'armor', 'shield', 'size', 'vis', 'scale'];
+const HUES = [212, 358, 120, 45, 285, 180, 25, 320];
+
+// ---- Live sync with the game (Batch N) ------------------------------------
+// The game publishes its real UNIT_DEFS / OBS_DEF / TYPE_DEF to localStorage
+// (`tc_defs`) on boot. Prefer those so this editor always lists exactly what
+// the game has — including units the player added — instead of the static
+// mirror below, which is only the fallback for a cold first run.
+let KINDS = ['melee', 'arrow', 'javelin', 'bomb', 'fireball', 'suicide', 'rifle', 'tank', 'atgun',
+             'rocket', 'hmg', 'apc', 'flametank', 'flame', 'officer', 'engineer', 'mortar', 'artillery', 'sniper'];
+let LIVE_TYPES = null, LIVE = null;
+try {
+  const raw = localStorage.getItem('tc_defs');
+  if (raw) {
+    LIVE = JSON.parse(raw);
+    if (LIVE && LIVE.units) for (const [k, v] of Object.entries(LIVE.units)) DEFAULT_UNITS[k] = Object.assign({}, DEFAULT_UNITS[k], v);
+    if (LIVE && LIVE.doodads) for (const [k, v] of Object.entries(LIVE.doodads)) DEFAULT_DOODADS[k] = Object.assign({}, DEFAULT_DOODADS[k], v);
+    if (LIVE && LIVE.kinds && LIVE.kinds.length) KINDS = [...new Set([...KINDS, ...LIVE.kinds])];
+    if (LIVE && LIVE.types) LIVE_TYPES = LIVE.types;
+  }
+} catch (e) {}
+
+// ---- Custom state ---------------------------------------------------------
+let cust = { units: {}, doodads: {}, texture: null };
+try {
+  const ls = localStorage.getItem('tc_custom');
+  if (ls) cust = Object.assign({ units: {}, doodads: {}, texture: null }, JSON.parse(ls));
+  else if (window.TC_CUSTOM) cust = Object.assign({ units: {}, doodads: {}, texture: null }, window.TC_CUSTOM);
+} catch (e) {}
+
+function unitVal(key) { return Object.assign({}, DEFAULT_UNITS[key], cust.units[key] || {}); }
+function doodadVal(key) { return Object.assign({}, DEFAULT_DOODADS[key], cust.doodads[key] || {}); }
+function texVal() { return Object.assign({}, DEFAULT_TEXTURE, cust.texture || {}); }
+
+let saveT = null;
+function save() {
+  try { localStorage.setItem('tc_custom', JSON.stringify(cust)); } catch (e) {}
+  const st = document.getElementById('status');
+  st.textContent = 'saved ✓';
+  clearTimeout(saveT);
+  saveT = setTimeout(() => st.textContent = '', 1500);
+}
+
+// ---- Tabs -----------------------------------------------------------------
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id === 'page-' + t.dataset.page));
+}));
+
+// ---- Top bar --------------------------------------------------------------
+document.getElementById('btnDownload').addEventListener('click', () => {
+  const blob = new Blob(['window.TC_CUSTOM=' + JSON.stringify(cust) + ';\n'], { type: 'text/javascript' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'custom.js';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+document.getElementById('btnClear').addEventListener('click', () => {
+  if (!confirm('Discard ALL customizations (units, doodads, texture)?')) return;
+  cust = { units: {}, doodads: {}, texture: null };
+  save();
+  buildUnitStats(); buildDoodads(); buildTexSliders(); renderTexture();
+});
+
+// ===========================================================================
+// UNITS TAB
+// ===========================================================================
+const META = window.MYTH_UNITS_META || {};
+const atlasImgs = {};   // key -> {base, mask, ready}
+const tintCache = {};   // key@hue -> canvas
+
+function loadAtlas(key, cb) {
+  let rec = atlasImgs[key];
+  if (rec) { if (rec.ready) cb(rec); else rec.cbs.push(cb); return; }
+  rec = atlasImgs[key] = { base: null, mask: null, ready: false, cbs: [cb] };
+  const d = META[key]; if (!d) return;
+  let n = 2;
+  const done = () => { if (--n === 0) { rec.ready = true; rec.cbs.forEach(f => f(rec)); } };
+  for (const [slot, src] of [['base', d.atlas.base], ['mask', d.atlas.mask]]) {
+    const img = new Image();
+    img.onload = () => { rec[slot] = img; done(); };
+    img.onerror = () => {};
+    img.src = 'assets/' + src;
+  }
+}
+
+/** Tint a unit atlas to a hue (same rules as the game). */
+function tintedAtlas(key, hue) {
+  const ck = key + '@' + hue;
+  if (tintCache[ck]) return tintCache[ck];
+  const rec = atlasImgs[key];
+  const d = META[key];
+  if (!rec || !rec.ready) return null;
+  const cv = document.createElement('canvas');
+  cv.width = d.atlas.w; cv.height = d.atlas.h;
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(rec.base, 0, 0);
+  try {
+    const slots = d.hue || {};
+    if (slots.p || slots.s) {
+      const mc = document.createElement('canvas');
+      mc.width = cv.width; mc.height = cv.height;
+      const mctx = mc.getContext('2d');
+      mctx.drawImage(rec.mask, 0, 0);
+      const id = ctx.getImageData(0, 0, cv.width, cv.height);
+      const md = mctx.getImageData(0, 0, cv.width, cv.height);
+      const px = id.data, mx = md.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const slot = mx[i] > 128 ? slots.p : mx[i + 1] > 128 ? slots.s : null;
+        if (!slot || px[i + 3] === 0) continue;
+        const r = px[i] / 255, g = px[i + 1] / 255, b = px[i + 2] / 255;
+        const mxv = Math.max(r, g, b), mnv = Math.min(r, g, b), dd = mxv - mnv;
+        let h = 0;
+        if (dd > 0) {
+          if (mxv === r) h = ((g - b) / dd) % 6;
+          else if (mxv === g) h = (b - r) / dd + 2;
+          else h = (r - g) / dd + 4;
+          h *= 60; if (h < 0) h += 360;
+        }
+        const s = mxv === 0 ? 0 : dd / mxv, v = mxv;
+        const nh = (((h - slot.median + hue) % 360) + 360) % 360;
+        const ns = Math.max(slot.minSat, s * slot.coreSat);
+        const c = v * ns, x = c * (1 - Math.abs((nh / 60) % 2 - 1)), m2 = v - c;
+        let nr, ng, nb;
+        if (nh < 60) { nr = c; ng = x; nb = 0; } else if (nh < 120) { nr = x; ng = c; nb = 0; }
+        else if (nh < 180) { nr = 0; ng = c; nb = x; } else if (nh < 240) { nr = 0; ng = x; nb = c; }
+        else if (nh < 300) { nr = x; ng = 0; nb = c; } else { nr = c; ng = 0; nb = x; }
+        px[i] = (nr + m2) * 255; px[i + 1] = (ng + m2) * 255; px[i + 2] = (nb + m2) * 255;
+      }
+      ctx.putImageData(id, 0, 0);
+    }
+  } catch (e) { /* file:// taint: show untinted */ }
+  tintCache[ck] = cv;
+  return cv;
+}
+
+const U = { key: 'usrifle', seq: 'walk', view: 0, hue: 212, frame: 0, t: 0, playing: true };
+
+function buildUnitList() {
+  const el = document.getElementById('unitList');
+  el.innerHTML = '';
+  for (const key of Object.keys(DEFAULT_UNITS)) {
+    const item = document.createElement('div');
+    item.className = 'list-item' + (key === U.key ? ' on' : '');
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.style.background = '#c8a060';
+    item.appendChild(dot);
+    item.appendChild(document.createTextNode(DEFAULT_UNITS[key].name));
+    item.addEventListener('click', () => {
+      U.key = key; U.frame = 0;
+      const d = META[key];
+      if (d && !d.seqs[U.seq]) U.seq = Object.keys(d.seqs)[0];
+      buildUnitList(); buildSeqBtns(); buildUnitStats();
+      document.getElementById('unitTitle').textContent = DEFAULT_UNITS[key].name;
+      loadAtlas(key, () => {});
+    });
+    el.appendChild(item);
+  }
+}
+
+function buildSeqBtns() {
+  const el = document.getElementById('seqBtns');
+  el.innerHTML = '';
+  const d = META[U.key];
+  if (!d) { el.textContent = 'no sprite data'; return; }
+  for (const s of Object.keys(d.seqs)) {
+    const b = document.createElement('div');
+    b.className = 'mini' + (s === U.seq ? ' on' : '');
+    b.textContent = s;
+    b.addEventListener('click', () => { U.seq = s; U.frame = 0; buildSeqBtns(); });
+    el.appendChild(b);
+  }
+}
+
+function buildHueDots() {
+  const el = document.getElementById('hueDots');
+  el.innerHTML = '';
+  for (const h of HUES) {
+    const d = document.createElement('div');
+    d.className = 'hue-dot' + (h === U.hue ? ' on' : '');
+    d.style.background = `hsl(${h},55%,50%)`;
+    d.addEventListener('click', () => { U.hue = h; buildHueDots(); });
+    el.appendChild(d);
+  }
+}
+
+function buildUnitStats() {
+  const el = document.getElementById('unitStats');
+  el.innerHTML = '';
+  const vals = unitVal(U.key);
+  const kindSel = document.createElement('select');
+  for (const k of KINDS) {
+    const o = document.createElement('option');
+    o.value = k; o.textContent = k; if (vals.kind === k) o.selected = true;
+    kindSel.appendChild(o);
+  }
+  const lab = document.createElement('label'); lab.textContent = 'kind';
+  el.appendChild(lab); el.appendChild(kindSel);
+  el.appendChild(document.createElement('span')); el.appendChild(document.createElement('span'));
+  kindSel.addEventListener('change', () => { setUnitStat('kind', kindSel.value); });
+  for (const f of UNIT_FIELDS) {
+    const l = document.createElement('label'); l.textContent = f;
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.step = 'any'; inp.value = vals[f];
+    inp.addEventListener('change', () => setUnitStat(f, parseFloat(inp.value)));
+    el.appendChild(l); el.appendChild(inp);
+  }
+}
+function setUnitStat(field, value) {
+  cust.units[U.key] = cust.units[U.key] || {};
+  cust.units[U.key][field] = value;
+  save();
+}
+document.getElementById('unitReset').addEventListener('click', () => {
+  delete cust.units[U.key]; save(); buildUnitStats();
+});
+document.getElementById('viewL').addEventListener('click', () => { U.view = (U.view + 7) % 8; });
+document.getElementById('viewR').addEventListener('click', () => { U.view = (U.view + 1) % 8; });
+document.getElementById('animToggle').addEventListener('click', e => {
+  U.playing = !U.playing;
+  e.target.textContent = U.playing ? '⏸ pause' : '▶ play';
+});
+
+// Animation loop for the unit preview
+let lastT = performance.now();
+function drawUnit(now) {
+  requestAnimationFrame(drawUnit);
+  const dt = Math.min((now - lastT) / 1000, 0.1);
+  lastT = now;
+  const cv = document.getElementById('unitCanvas');
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#131a22'; ctx.fillRect(0, 0, cv.width, cv.height);
+  const d = META[U.key];
+  if (!d) { ctx.fillStyle = '#607080'; ctx.fillText('no sprite data (primitive unit)', 20, 40); return; }
+  const rec = atlasImgs[U.key];
+  if (!rec || !rec.ready) { loadAtlas(U.key, () => {}); ctx.fillStyle = '#607080'; ctx.fillText('loading atlas…', 20, 40); return; }
+  const atlas = tintedAtlas(U.key, U.hue);
+  const seq = d.seqs[U.seq] || d.seqs[Object.keys(d.seqs)[0]];
+  if (!seq) return;
+  if (U.playing) {
+    U.t += dt * Math.max(4, seq.fps);
+    if (U.t >= 1) { U.frame = (U.frame + Math.floor(U.t)) % seq.frames.length; U.t -= Math.floor(U.t); }
+  }
+  const frame = seq.frames[Math.min(U.frame, seq.frames.length - 1)];
+  const entry = frame[U.view % (seq.views || 8)] || frame[0];
+  if (!entry) return;
+  const [x, y, w, h] = d.cells[entry.c];
+  const scale = Math.min(2.2, 240 / h) * (unitVal(U.key).scale || 1) * 0.8;
+  const dw = w * scale, dh = h * scale;
+  const dx = cv.width / 2 - dw / 2, dy = cv.height - 24 - dh;
+  ctx.save();
+  if (entry.m) { ctx.translate(cv.width, 0); ctx.scale(-1, 1); ctx.drawImage(atlas, x, y, w, h, cv.width - dx - dw, dy, dw, dh); }
+  else ctx.drawImage(atlas, x, y, w, h, dx, dy, dw, dh);
+  ctx.restore();
+  // ground line + info
+  ctx.strokeStyle = '#2a3a4a';
+  ctx.beginPath(); ctx.moveTo(20, cv.height - 22); ctx.lineTo(cv.width - 20, cv.height - 22); ctx.stroke();
+  ctx.fillStyle = '#607080'; ctx.font = '11px sans-serif';
+  ctx.fillText(`${U.seq} · frame ${U.frame + 1}/${seq.frames.length} · view ${U.view} · ${seq.fps}fps`, 20, cv.height - 6);
+}
+requestAnimationFrame(drawUnit);
+
+// ===========================================================================
+// DOODADS TAB
+// ===========================================================================
+const D = { key: 'tree' };
+function buildDoodads() {
+  const el = document.getElementById('doodadList');
+  el.innerHTML = '';
+  for (const key of Object.keys(DEFAULT_DOODADS)) {
+    const item = document.createElement('div');
+    item.className = 'list-item' + (key === D.key ? ' on' : '');
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.style.background = '#' + doodadVal(key).color.toString(16).padStart(6, '0');
+    item.appendChild(dot);
+    item.appendChild(document.createTextNode(key));
+    item.addEventListener('click', () => { D.key = key; buildDoodads(); });
+    el.appendChild(item);
+  }
+  document.getElementById('doodadTitle').textContent = D.key;
+  buildDoodadStats();
+  drawDoodad();
+}
+function buildDoodadStats() {
+  const el = document.getElementById('doodadStats');
+  el.innerHTML = '';
+  const vals = doodadVal(D.key);
+  const fields = [['hp', 'number'], ['height', 'number'], ['color', 'color']];
+  for (const [f, type] of fields) {
+    const l = document.createElement('label'); l.textContent = f;
+    const inp = document.createElement('input');
+    inp.type = type;
+    if (type === 'color') inp.value = '#' + vals.color.toString(16).padStart(6, '0');
+    else { inp.step = 'any'; inp.value = vals[f]; }
+    inp.addEventListener('change', () => {
+      cust.doodads[D.key] = cust.doodads[D.key] || {};
+      cust.doodads[D.key][f] = type === 'color' ? parseInt(inp.value.slice(1), 16) : parseFloat(inp.value);
+      save(); buildDoodads();
+    });
+    el.appendChild(l); el.appendChild(inp);
+  }
+}
+document.getElementById('doodadReset').addEventListener('click', () => {
+  delete cust.doodads[D.key]; save(); buildDoodads();
+});
+function drawDoodad() {
+  const cv = document.getElementById('doodadCanvas');
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#131a22'; ctx.fillRect(0, 0, cv.width, cv.height);
+  const vals = doodadVal(D.key);
+  const maxH = 5.5, ppu = 180 / maxH;
+  const hpx = vals.height * ppu;
+  const col = '#' + vals.color.toString(16).padStart(6, '0');
+  // silhouette: trunk-ish rectangle + width by type feel
+  ctx.fillStyle = col;
+  const w = 46;
+  ctx.fillRect(cv.width / 2 - w / 2, 210 - hpx, w, hpx);
+  // human for scale (2.8wu tall)
+  ctx.fillStyle = '#8090a0';
+  const man = 2.77 * ppu;
+  ctx.fillRect(30, 210 - man, 10, man);
+  ctx.beginPath(); ctx.arc(35, 210 - man - 5, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#2a3a4a';
+  ctx.beginPath(); ctx.moveTo(10, 210); ctx.lineTo(cv.width - 10, 210); ctx.stroke();
+  ctx.fillStyle = '#607080'; ctx.font = '11px sans-serif';
+  ctx.fillText(`${vals.height} wu tall · ${vals.hp} hp`, 14, 230);
+}
+
+// ===========================================================================
+// TEXTURE TAB — same noise math as the game, live preview
+// ===========================================================================
+function hash2(x, z) { const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return n - Math.floor(n); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function vnoise(x, z) {
+  const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx), sz = fz * fz * (3 - 2 * fz);
+  return lerp(lerp(hash2(ix, iz), hash2(ix + 1, iz), sx), lerp(hash2(ix, iz + 1), hash2(ix + 1, iz + 1), sx), sz);
+}
+function fbm(x, z) { return vnoise(x, z) * 0.55 + vnoise(x * 2.1 + 7, z * 2.1 + 3) * 0.28 + vnoise(x * 4.3 + 13, z * 4.3 + 9) * 0.17; }
+
+const TEX_FIELDS = [
+  ['base', 120, 240, 1], ['contrast', 20, 220, 1], ['grain', 0, 40, 1],
+  ['w1', 0, 1, 0.02], ['w2', 0, 1, 0.02], ['w3', 0, 1, 0.02], ['w4', 0, 1, 0.02],
+  ['rMul', 0.7, 1.3, 0.01], ['gMul', 0.7, 1.3, 0.01], ['bMul', 0.7, 1.3, 0.01],
+];
+function buildTexSliders() {
+  const el = document.getElementById('texSliders');
+  el.innerHTML = '';
+  const vals = texVal();
+  for (const [f, mn, mx, st] of TEX_FIELDS) {
+    const row = document.createElement('div'); row.className = 'slider-row';
+    const l = document.createElement('label'); l.textContent = f;
+    const r = document.createElement('input');
+    r.type = 'range'; r.min = mn; r.max = mx; r.step = st; r.value = vals[f];
+    const v = document.createElement('span'); v.textContent = vals[f];
+    r.addEventListener('input', () => {
+      cust.texture = cust.texture || {};
+      cust.texture[f] = parseFloat(r.value);
+      v.textContent = r.value;
+      save(); renderTexture();
+    });
+    row.appendChild(l); row.appendChild(r); row.appendChild(v);
+    el.appendChild(row);
+  }
+}
+document.getElementById('texReset').addEventListener('click', () => {
+  cust.texture = null; save(); buildTexSliders(); renderTexture();
+});
+function renderTexture() {
+  const P = texVal();
+  const cv = document.getElementById('texPreview');
+  const ctx = cv.getContext('2d');
+  const S = 256;
+  const id = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const fx = x / S, fy = y / S;
+    const tor = (kx, ky, ox) => lerp(
+      lerp(fbm(x * kx + ox, y * ky), fbm((x - S) * kx + ox, y * ky), fx),
+      lerp(fbm(x * kx + ox, (y - S) * ky), fbm((x - S) * kx + ox, (y - S) * ky), fx), fy);
+    const n = tor(0.05, 0.05, 0) * P.w1 + tor(0.016, 0.016, 31) * P.w2
+            + tor(0.2, 0.2, 67) * P.w3 + tor(0.012, 0.1, 113) * P.w4;
+    const grain = (hash2(x * 7.13, y * 9.71) - 0.5) * P.grain;
+    const v = clamp(P.base + (n - 0.5) * P.contrast + grain, 110, 255);
+    const i = (y * S + x) * 4;
+    // tint with grass green so the preview approximates in-game turf
+    id.data[i] = clamp(v * P.rMul * 0.42, 0, 255);
+    id.data[i + 1] = clamp(v * P.gMul * 0.52, 0, 255);
+    id.data[i + 2] = clamp(v * P.bMul * 0.3, 0, 255);
+    id.data[i + 3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+// ===========================================================================
+// MAPS TAB
+// ===========================================================================
+document.getElementById('mapFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    const out = [];
+    try {
+      const m = JSON.parse(ev.target.result);
+      out.push(`file:      ${f.name} (${(f.size / 1024).toFixed(1)} KB)`);
+      out.push(`version:   ${m.version || 1}   grid: ${m.grid || '48 (legacy)'}`);
+      if (m.teamHues) out.push(`team hues: T1=${m.teamHues[1]}°  T2=${m.teamHues[2]}°`);
+      const units = m.units || [];
+      const byTeam = { 1: {}, 2: {} };
+      for (const u of units) {
+        const t = u.team === 2 ? 2 : 1;
+        byTeam[t][u.t] = (byTeam[t][u.t] || 0) + 1;
+      }
+      for (const t of [1, 2]) {
+        const parts = Object.entries(byTeam[t]).map(([k, n]) => `${n}×${k}`).join(', ') || 'none';
+        out.push(`team ${t}:    ${Object.values(byTeam[t]).reduce((a, b) => a + b, 0)} units — ${parts}`);
+      }
+      const obs = m.obstacles || [];
+      const byType = {};
+      for (const o of obs) byType[o.t] = (byType[o.t] || 0) + 1;
+      out.push(`doodads:   ${obs.length} — ` + (Object.entries(byType).map(([k, n]) => `${n}×${k}`).join(', ') || 'none'));
+      if (m.terrain && m.terrain.h) {
+        let water = 0, minH = 99, maxH = -99;
+        for (let i = 0; i < m.terrain.h.length; i++) {
+          if (m.terrain.t[i] === 3) water++;
+          minH = Math.min(minH, m.terrain.h[i]); maxH = Math.max(maxH, m.terrain.h[i]);
+        }
+        out.push(`terrain:   height ${minH.toFixed(1)}…${maxH.toFixed(1)} · ${water} water cells (${(water / m.terrain.h.length * 100).toFixed(1)}%)`);
+      }
+      const unknownUnits = [...new Set(units.map(u => u.t))].filter(t => !DEFAULT_UNITS[t]);
+      if (unknownUnits.length) out.push(`⚠ unknown unit types: ${unknownUnits.join(', ')} (need custom.js entries)`);
+      else out.push('✓ no problems found');
+    } catch (err) {
+      out.push('✗ not a valid map file: ' + err.message);
+    }
+    document.getElementById('mapReport').textContent = out.join('\n');
+  };
+  r.readAsText(f);
+  e.target.value = '';
+});
+
+// ---- boot -----------------------------------------------------------------
+buildUnitList(); buildSeqBtns(); buildHueDots(); buildUnitStats();
+document.getElementById('unitTitle').textContent = DEFAULT_UNITS[U.key].name;
+loadAtlas(U.key, () => {});
+buildDoodads();
+buildTexSliders(); renderTexture();
+</script>
+</body>
+</html>
