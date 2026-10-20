@@ -9,7 +9,7 @@ with first-person control of any unit on the field.
 It runs in the browser with nothing to install. There are seven campaigns,
 ninety-six battlefields and a content editor (`editor.html`).
 
-- The first visit downloads about 300 MB of scale models. Tanks may show as
+- The first visit downloads about 200 MB of scale models. Tanks may show as
   plain shapes for a little while, and your browser keeps the models after that.
 - A desktop browser such as Chrome, Edge or Firefox works best.
 - Multiplayer needs the local relay server and is not available on the web page.
