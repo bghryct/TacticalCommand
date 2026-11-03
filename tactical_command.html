@@ -732,7 +732,11 @@ body.fpv #tacMap { display: none !important; }
         <div class="ed-seg" id="edPropMode">
           <div class="on" data-mode="brush">Brush</div><div data-mode="line">Line</div><div data-mode="rect">Rect</div>
         </div></div>
-      <div class="ed-note">Line/Rect lay walls, hedgerows and obstacle belts in one drag.</div>
+      <div class="ed-row"><label>Turn</label>
+        <div class="ed-seg" id="edPropRotMode"><div class="on" data-mode="auto">Auto</div><div data-mode="set">Set</div><div data-mode="along">Along</div></div></div>
+      <div class="ed-row"><label>Angle</label>
+        <input type="range" id="edPropRot" min="0" max="345" step="15" value="0"><span class="val" id="edPropRotVal">auto</span></div>
+      <div class="ed-note">Line/Rect lay walls, hedgerows and obstacle belts in one drag. <b>Auto</b> lays a wall or hedge along its line and turns the rest at random; <b>Set</b> places at the Angle (<b>R</b> / <b>Shift+R</b>: 15° either way); <b>Along</b> lays every piece of a <b>Line</b> drag along the drag, at any angle. <b>⟳ Turn</b> sets a placed prop to the Angle — or, dragged as a Line with Along, lines a run up (Shift+click: 15° on); <b>Alt+click</b> picks a prop and its angle up.</div>
     </div>
 
     <!-- ============================= BUILD ============================= -->
@@ -15986,13 +15990,52 @@ function vnoise(x, z) {
 function fbm(x, z) { return vnoise(x, z) * 0.55 + vnoise(x * 2.1 + 7, z * 2.1 + 3) * 0.28 + vnoise(x * 4.3 + 13, z * 4.3 + 9) * 0.17; }
 /** A geometry from a Blender pack entry (`{pos, nor, col, hk, rim}`, each a
  *  base64 Float32Array) in the canopy shader's attribute layout. */
+/** (round 113) A compact pack entry (`f: 2`, tools/blender/props.py) as float
+ *  arrays: positions, unit normals, colours. Cached on the entry. Also read by
+ *  assets/structures.js for the spill of a shelled wall. */
+function unpackCompact(e) {
+  if (e._un) return e._un;
+  const bytes = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+  const n = e.n, q = new Int16Array(bytes(e.pos).buffer), nn = new Int8Array(bytes(e.nor).buffer), cc = bytes(e.col), cs = e.cs || 1;
+  const P = new Float32Array(n * 3), N = new Float32Array(n * 3), C = new Float32Array(n * 3);
+  for (let i = 0; i < n * 3; i++) {
+    const a = i % 3;
+    P[i] = e.lo[a] + (q[i] + 32767) / 65534 * (e.hi[a] - e.lo[a]);
+    N[i] = nn[i] / 127; C[i] = cc[i] / 255 * cs;
+  }
+  for (let i = 0; i < n; i++) {
+    const l = Math.hypot(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]) || 1;
+    N[i * 3] /= l; N[i * 3 + 1] /= l; N[i * 3 + 2] /= l;
+  }
+  return (e._un = { n, P, N, C });
+}
+window.unpackCompact = unpackCompact;
 function packedGeometry(e) {
-  const f32 = s => {
+  const bytes = s => {
     const b = atob(s), u = new Uint8Array(b.length);
     for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
-    return new Float32Array(u.buffer);
+    return u;
   };
+  const f32 = s => new Float32Array(bytes(s).buffer);
   const g = new THREE.BufferGeometry();
+  if (e.f === 2) {
+    // (round 113) COMPACT: positions as 16-bit fractions of the piece's box,
+    // normals and colours a byte each (colours over `cs`), the kind per corner
+    // from a short table — a third of the bytes of four floats a corner
+    const A = unpackCompact(e), n = e.n;
+    g.setAttribute('position', new THREE.Float32BufferAttribute(A.P, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(A.N, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(A.C, 3));
+    const hk = new Float32Array(n * 3);
+    if (e.kk && e.kinds) {
+      const kk = bytes(e.kk);
+      for (let i = 0; i < n; i++) { const k = e.kinds[kk[i]] || e.kinds[0]; hk[i * 3] = k[0]; hk[i * 3 + 1] = k[1]; hk[i * 3 + 2] = k[2]; }
+    } else if (e.kind) for (let i = 0; i < n; i++) { hk[i * 3] = e.kind[0]; hk[i * 3 + 1] = e.kind[1]; hk[i * 3 + 2] = e.kind[2]; }
+    g.setAttribute('hedge', new THREE.Float32BufferAttribute(hk, 3));
+    g.setAttribute('hedgeRim', new THREE.Float32BufferAttribute(A.N.slice(), 3));
+    g.computeBoundingSphere();
+    return g;
+  }
   g.setAttribute('position', new THREE.Float32BufferAttribute(f32(e.pos), 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(f32(e.nor), 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(f32(e.col), 3));
@@ -21220,6 +21263,16 @@ class Obstacles {
   _rubbleVariant(i) {
     this._rubbleGeos = this._rubbleGeos || [];
     if (this._rubbleGeos[i]) return this._rubbleGeos[i];
+    // (round 113) MODELLED IN BLENDER (tools/blender/props.py): broken brick,
+    // block and plaster lying on and pushed into a dust mound, a charred joist
+    // through every third, Cycles' occlusion in the colour — to each variant's
+    // own top below, which `PROP_VARIANT_H.rubble` is measured off. The page's
+    // heap is the fallback; `game.propPack113 = false` before a map loads.
+    const pk = window.PROP_PACK && window.PROP_PACK.rubble;
+    if (pk && pk[i] && !(window.game && window.game.propPack113 === false)) {
+      const g = packedGeometry(pk[i]); g.userData.packed = true;
+      return (this._rubbleGeos[i] = g);
+    }
     const r = mulberry32(2900 + i * 17);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
@@ -22865,6 +22918,15 @@ class Obstacles {
     for (const o of this.list) {
       const kind = LINE[o.type];
       if (!kind || !o.mesh) continue;
+      // (round 113) turned by hand in the editor: kept at its angle — not laid
+      // along its neighbours, no corner chord, no junction arms — and laid on
+      // the ground along that angle as any other piece is
+      if (o.rot != null) {
+        if (o.mesh.rotation.y !== o.rot) { o.mesh.rotation.y = o.rot; o.mesh.updateMatrix(); }
+        const hb = o.mesh.children[0];
+        if (hb && hb.isMesh && hb.geometry.attributes.hedge) this._shearToGround(o, hb, o.rot);
+        continue;
+      }
       const isH = (x, z) => inGrid(x, z) && H[z * GRID + x] === kind;
       const W = isH(o.gx - 1, o.gz), E = isH(o.gx + 1, o.gz), N = isH(o.gx, o.gz - 1), S = isH(o.gx, o.gz + 1);
       const nx = (W ? 1 : 0) + (E ? 1 : 0), nz = (N ? 1 : 0) + (S ? 1 : 0);
@@ -23414,7 +23476,7 @@ class Obstacles {
     if (H && H[v] != null && PROP_TRUE_H[type]) group.userData.simVK = H[v] * (k || 1) * crown / PROP_TRUE_H[type];
   }
 
-  add(gx, gz, type) {
+  add(gx, gz, type, rot, along, off) {
     if (!inGrid(gx, gz) || this.blocked(gx, gz) || !OBS_DEF[type]) return null;
     const y = this.terrain.height(gx, gz) * HSCALE;
     const group = new THREE.Group();
@@ -23945,6 +24007,22 @@ class Obstacles {
       m.castShadow = true; m.receiveShadow = true; group.add(m);
       group.rotation.y = rng() * Math.PI * 2;
     }
+    // (round 113) A TURN SET IN THE EDITOR (`rot`, radians; the Props tab's
+    // Angle, the Turn tool): it replaces the builder's random yaw and the way
+    // `_orientHedges` lays a wall or a hedge along its line, so a run can be
+    // lined up at any angle. A piece of a line is stretched along its run by
+    // 1 / max(|cos|, |sin|) of the angle — the span of its cell that way — so
+    // a wall laid at 30 or 45 degrees still meets its neighbours end to end.
+    let userRot = typeof rot === 'number' && isFinite(rot) ? rot : null;
+    if (userRot != null && along) {
+      // `along`: `rot` is the heading of the run it was laid in — its long
+      // side goes on it, whichever local axis the builder drew that along
+      group.rotation.y = 0; group.updateMatrixWorld(true);
+      const bb0 = new THREE.Box3().setFromObject(group);
+      if (!PROP_LINE_X.has(type) && type !== 'hedge' && (bb0.max.z - bb0.min.z) > (bb0.max.x - bb0.min.x) * 1.05) userRot += Math.PI / 2;
+    }
+    if (userRot != null) group.rotation.y = userRot;
+    const rotSpan = userRot == null ? 1 : 1 / Math.max(0.5, Math.abs(Math.cos(userRot)), Math.abs(Math.sin(userRot)));
     // THE SCALE AUDIT'S CORRECTION, applied at the one place every prop passes
     // through. See `OBS_SCALE` for what each number is and where it came from.
     const osc = OBS_SCALE[type];
@@ -23971,10 +24049,16 @@ class Obstacles {
           alongX = (bb.max.x - bb.min.x) >= (bb.max.z - bb.min.z);
         }
         const sc = group.scale.clone();
-        group.scale.set(sc.x * (alongX ? 1 : K_PROP), sc.y * K_PROP, sc.z * (alongX ? K_PROP : 1));
+        group.scale.set(sc.x * (alongX ? rotSpan : K_PROP), sc.y * K_PROP, sc.z * (alongX ? K_PROP : rotSpan));
       } else group.scale.multiplyScalar(K_PROP * (PROP_TRUE_FIX[type] || 1));
     }
-    group.position.set(cellCenter(gx), y, cellCenter(gz));
+    if (rotSpan !== 1 && PROP_TRUE_BUILT.has(type)) group.scale.x *= rotSpan;   // a hedge: laid along local X
+    // (round 113) `off`: a piece of an Along line set onto the line it was
+    // dragged along, up to half a cell aside from its cell's centre — so a
+    // wall laid at a shallow angle is straight, not stepped by the grid
+    const offX = off && isFinite(off[0]) ? clamp(off[0], -TILE * 0.5, TILE * 0.5) : 0;
+    const offZ = off && isFinite(off[1]) ? clamp(off[1], -TILE * 0.5, TILE * 0.5) : 0;
+    group.position.set(cellCenter(gx) + offX, y, cellCenter(gz) + offZ);
     this.scene.add(group);
     // Props are static scenery: freeze the whole subtree's local matrices so a
     // thousand doodads stop recomposing position/quaternion/scale every frame.
@@ -23989,6 +24073,8 @@ class Obstacles {
     if ((def.height || 0) < PROP_SHADOW_MIN && !def.shadow) group.traverse(m => { if (m.isMesh) m.castShadow = false; });
     const obs = { gx, gz, type, hp: def.hp, maxHp: def.hp, mesh: group,
                   height: TRUE_SCALE && PROP_TRUE_H[type] != null ? PROP_TRUE_H[type] / METERS_PER_UNIT : def.height * K_PROP };
+    if (userRot != null) obs.rot = userRot;               // (round 113) turned by hand: map data
+    if (offX || offZ) obs.off = [offX, offZ];
     // …and THIS one's size, where the builder drew it from the cell's own seed
     // (round 106): `PROP_TRUE_H` is the type at its median size, measured over
     // many (`TS.simVsDrawn`); one random instance had set it before, which put
@@ -24206,8 +24292,27 @@ class Obstacles {
     this.terrain._touchMiniAll();
     this._rebakeT = 0; this._rebakeDebt = 0;   // re-batch on the very next tick
   }
-  serialize() { return this.list.map(o => ({ x: o.gx, z: o.gz, t: o.type })); }
-  load(data, off) { this.clear(); off = off || 0; for (const o of data) this.add(o.x + off, o.z + off, o.t); }
+  // (round 113) `r`: the turn set in the editor, radians — only where one was
+  serialize() {
+    return this.list.map(o => {
+      const r = { x: o.gx, z: o.gz, t: o.type };
+      if (o.rot != null) r.r = Math.round(o.rot * 1e4) / 1e4;
+      if (o.off) r.o = [Math.round(o.off[0] * 1e3) / 1e3, Math.round(o.off[1] * 1e3) / 1e3];
+      return r;
+    });
+  }
+  load(data, off) { this.clear(); off = off || 0; for (const o of data) this.add(o.x + off, o.z + off, o.t, o.r, false, o.o); }
+  /** (round 113) Turn the prop on a cell to `rot` (radians), or hand it back to
+   *  the automatic laying (`null`): built again from its own cell's seed, so it
+   *  is the same variant, only turned. Returns the new record. */
+  turn(gx, gz, rot, along, off) {
+    const o = this.at(gx, gz);
+    if (!o) return null;
+    const type = o.type;
+    const keep = off !== undefined ? off : o.off;
+    this.remove(gx, gz);
+    return this.add(gx, gz, type, rot == null ? undefined : rot, along, rot == null ? null : keep);
+  }
 }
 // BUILDING A PROP'S PICTURE TOOK THE SIMULATION'S DICE (round 98). `add`
 // makes its choices from a generator seeded by the cell, but every Group,
@@ -43010,6 +43115,13 @@ class Editor {
     this.targetH = 4;          // Set-H / Ramp target
     this.scatter = 3;          // props laid per brush stamp for scatter types
     this.facing = 0;           // degrees, for placed units
+    // (round 113) the turn props are placed at: null = automatic (a wall laid
+    // along its line, the rest at random), else degrees (Props tab: Angle)
+    this.propRot = null;
+    this.propAngle = 0;
+    this.propAlong = false;    // (round 113) a Line drag lays each piece along the drag
+    this._lineRad = null;
+    this._stampFlip = null;
     this.squadSize = 0;        // 0 = single, else place a small group
     this.mirror = 'none';      // none | x | z | xz | rot  (Batch N: symmetric map building)
     this.paintMode = 'brush';  // brush | line | rect | fill
@@ -43202,7 +43314,7 @@ class Editor {
     if (Editor.foliageDef(this.tool)) return 'brush';   // sowing is always a drag
     if (['vpflag', 'routeDraw', 'routeDel'].includes(this.tool)) return 'brush';   // point tools: one click, one action
     if (TYPE[this.tool] !== undefined) return this.paintMode;
-    if (OBS_DEF[this.tool] || this.tool === 'removeObs') return this.propMode;
+    if (OBS_DEF[this.tool] || this.tool === 'removeObs' || this.tool === 'turnObs') return this.propMode;
     return 'brush';
   }
 
@@ -43224,8 +43336,13 @@ class Editor {
       this.stroke = null; return;
     }
     if ((mode === 'line' || mode === 'rect') && gx !== undefined) {
+      // (round 113) the drag's heading, for Turn: Along — a piece's local +X
+      // lies along world (cos a, -sin a), so a = atan2(-dz, dx)
+      this._lineRad = mode === 'line' && (gx !== st.gx0 || gz !== st.gz0) ? Math.atan2(-(gz - st.gz0), gx - st.gx0) : null;
+      this._lineSeg = this._lineRad != null ? [st.gx0, st.gz0, gx, gz] : null;
       if (mode === 'line') this._forLine(st.gx0, st.gz0, gx, gz, (x, z) => this._stamp(x, z));
       else this._forRect(st.gx0, st.gz0, gx, gz, (x, z) => this._stamp(x, z));
+      this._lineRad = null; this._lineSeg = null;
       this.game.obstacles.refreshHeights();
     }
     this.stroke = null;
@@ -43303,7 +43420,57 @@ class Editor {
     // Routes are one-team paths — never mirrored. Flags DO mirror (fair maps).
     if (this.tool === 'routeDraw' || this.tool === 'routeDel') return this._applyPlacement(gx, gz, this.tool);
     if (TYPE[this.tool] !== undefined) { for (const [x, z] of this._mirrored(gx, gz)) this._applyTerrain(x, z, this.tool); return; }
-    for (const [x, z] of this._mirrored(gx, gz)) this._applyPlacement(x, z, this.tool);
+    for (const [x, z] of this._mirrored(gx, gz)) { this._stampFlip = [x !== gx, z !== gz]; this._applyPlacement(x, z, this.tool); }
+    this._stampFlip = null;
+  }
+  /** (round 113) The Angle as radians for a prop placed now, turned through
+   *  the mirror that placed it (an x mirror reflects a heading, a 180° turn
+   *  adds half a turn); undefined when it is automatic. */
+  _propRad() {
+    if (this.propAlong && this._lineRad != null) return this._flipRad(this._lineRad);
+    if (this.propRot == null) return undefined;
+    return this._flipRad(this.propRot * Math.PI / 180);
+  }
+  /** (round 113) Where on the dragged line a piece of an Along line lies,
+   *  as a world offset from its cell's centre (through the mirror that placed
+   *  it); null unless the props are laid Along a Line drag. */
+  _lineOff(gx, gz) {
+    const L = this._lineSeg;
+    if (!this.propAlong || !L) return null;
+    const f = this._stampFlip, M = GRID - 1;
+    // the cell as it lies on the line the user drew (the mirror's inverse)
+    const ox = f && f[0] ? M - gx : gx, oz = f && f[1] ? M - gz : gz;
+    const dx = L[2] - L[0], dz = L[3] - L[1], d2 = dx * dx + dz * dz || 1;
+    const t = ((ox - L[0]) * dx + (oz - L[1]) * dz) / d2;
+    let px = (L[0] + dx * t - ox) * TILE, pz = (L[1] + dz * t - oz) * TILE;
+    if (f && f[0]) px = -px;
+    if (f && f[1]) pz = -pz;
+    return [px, pz];
+  }
+  _flipRad(a) {
+    const f = this._stampFlip;
+    if (f && f[0] && f[1]) a += Math.PI;
+    else if (f && f[0]) a = Math.PI - a;
+    else if (f && f[1]) a = -a;
+    return a;
+  }
+  /** (round 113) Turn the Angle by `deg` (R / Shift+R) and use it. */
+  nudgeRot(deg) {
+    this.propAngle = (((this.propAngle + deg) % 360) + 360) % 360;
+    this.setPropRot(this.propAngle);
+    this.game.ui.toast('Prop angle ' + this.propAngle + '°');
+  }
+  /** (round 113) Set the props' turn: degrees, or null for automatic; the
+   *  Props tab's controls follow. */
+  setPropRot(deg, along) {
+    this.propRot = deg == null ? null : deg;
+    this.propAlong = !!along;
+    if (deg != null) this.propAngle = deg;
+    const mode = document.getElementById('edPropRotMode'), sl = document.getElementById('edPropRot'), val = document.getElementById('edPropRotVal');
+    const m = along ? 'along' : deg == null ? 'auto' : 'set';
+    if (mode) mode.querySelectorAll('div').forEach(x => x.classList.toggle('on', x.dataset.mode === m));
+    if (sl) sl.value = this.propAngle;
+    if (val) val.textContent = m === 'set' ? this.propAngle + '°' : m;
   }
 
   /** Sow (or thin) ground cover under the brush. The falloff and the seeded
@@ -43386,7 +43553,16 @@ class Editor {
         return;
       }
       game.obstacles.remove(gx, gz);
-      if (game.obstacles.add(gx, gz, tool)) game.sfx.place();
+      if (game.obstacles.add(gx, gz, tool, this._propRad(), this.propAlong && this._lineRad != null, this._lineOff(gx, gz))) game.sfx.place();
+    } else if (tool === 'turnObs') {
+      // (round 113) THE TURN TOOL: a placed prop takes the Angle (or goes back
+      // to automatic); Shift+click turns it on by 15 degrees from where it is
+      const o = game.obstacles.at(gx, gz);
+      if (!o || OBS_DEF[o.type].scatter) return;
+      let a = this._propRad();
+      if (this.strokeShift) a = (o.mesh ? o.mesh.rotation.y : (o.rot || 0)) + Math.PI / 12;
+      const alongL = this.propAlong && this._lineRad != null && !this.strokeShift;
+      if (game.obstacles.turn(gx, gz, a, alongL, alongL ? this._lineOff(gx, gz) : undefined)) game.sfx.place();
     } else if (tool === 'removeObs') {
       if (game.obstacles.remove(gx, gz)) game.sfx.place();
     } else if (UNIT_DEFS[tool]) {
@@ -43515,6 +43691,17 @@ class Editor {
   }
   /** Alt+click: pick up whatever surface is under the cursor. */
   eyedrop(gx, gz) {
+    // (round 113) a prop first: its kind, and the angle it was turned to
+    const o = this.game.obstacles.at(gx, gz);
+    if (o && OBS_DEF[o.type]) {
+      this.setTool(o.type);
+      document.querySelectorAll('.tool-btn.selected').forEach(x => x.classList.remove('selected'));
+      const pb = document.querySelector(`.tool-btn[data-tool="${o.type}"]`);
+      if (pb) pb.classList.add('selected');
+      if (o.rot != null) this.setPropRot(((Math.round(o.rot * 180 / Math.PI) % 360) + 360) % 360);
+      this.game.ui.toast('Picked up: ' + o.type + (o.rot != null ? ' at ' + this.propAngle + '°' : ''));
+      return;
+    }
     const name = TYPES[this.game.terrain.typeAt(gx, gz)];
     this.setTool(name);
     document.querySelectorAll('.tool-btn.selected').forEach(x => x.classList.remove('selected'));
@@ -44020,6 +44207,7 @@ class UI {
     for (const [k, def] of Object.entries(OBS_DEF))
       obsRow.appendChild(mkBtn(k, cap(k) + (def.explosive ? '💥' : ''), def.color));
     obsRow.appendChild(mkBtn('removeObs', '✕', 0x4a2a2a));
+    obsRow.appendChild(mkBtn('turnObs', '⟳ Turn', 0x3a4a5a));     // (round 113) turn a placed prop to the Angle
     // Surface swatches live on their own tab now, generated from TYPE_DEF
     const paintRow = document.getElementById('paintTools');
     paintRow.innerHTML = '';
@@ -44126,6 +44314,9 @@ class UI {
     };
     seg('edPaintMode', d => { ed.paintMode = d.mode; });
     seg('edPropMode',  d => { ed.propMode = d.mode; });
+    // (round 113) the props' turn: Auto, or Set to the Angle (its slider is
+    // wired below, with the others: `slider` is declared after this line)
+    seg('edPropRotMode', d => { ed.setPropRot(d.mode === 'set' ? ed.propAngle : null, d.mode === 'along'); });
     seg('edStrMat',    d => { ed.strMat = parseInt(d.m, 10); });
     seg('edStrLevel',  d => { ed.strLevel = parseInt(d.v, 10); });
     seg('edStrMode',   d => { ed.strMode = d.mode; });
@@ -44157,6 +44348,7 @@ class UI {
     });
     const COMPASS8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     slider('edFacing', 'edFacingVal', n => { ed.facing = n; }, n => COMPASS8[Math.round(n / 45) % 8]);
+    slider('edPropRot', 'edPropRotVal', n => { ed.setPropRot(n); }, n => n + '°');   // (round 113)
     slider('edGenRelief', 'edGenReliefVal', () => {});
     slider('edGenWood', 'edGenWoodVal', () => {});
     // search filters
@@ -45082,6 +45274,9 @@ class Input {
   }
 
   _overUI(e) {
+    // (round 113) an event whose target is the document (no `closest`) threw
+    // here, inside the mouse handlers — seen in a headless run's console
+    if (!e.target || typeof e.target.closest !== 'function') return false;
     return e.target.closest('#topBar') || e.target.closest('#editorPanel') || e.target.closest('#minimap')
         || e.target.closest('#commandBar') || e.target.closest('#formationBar') || e.target.closest('#reinforceBar') || e.target.closest('#unitInfo')
         || e.target.closest('#bannerBox') || e.target.closest('#helpBox')
@@ -45745,6 +45940,8 @@ class Input {
         g.editor.brush = v; if (sz) { sz.value = v; document.getElementById('brushSizeVal').textContent = v; }
         return;
       }
+      // (round 113) R / Shift+R: turn the props' Angle by 15 degrees and use it
+      if (e.code === 'KeyR' && !e.altKey) { g.editor.nudgeRot(e.shiftKey ? -15 : 15); return; }
     }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
       e.preventDefault();

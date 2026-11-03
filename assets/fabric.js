@@ -174,7 +174,9 @@
       // its tile then says only what it is made OF: the house's own colour
       // times the tile's light and dark (0.5 is the house), the joint's colour
       // mixed in, the cavity darkened. Mipmapped, so it does not boil at range
-      // and needs none of the fade the arithmetic does. Wood keeps its boards.
+      // and needs none of the fade the arithmetic does. Wood keeps its
+      // arithmetic boards unless the pack carries planks (FAB_PLANKS: round
+      // 113's second batch — six boards on end a tile, grain, knots, nails).
       '#ifdef FAB_TEX',
       // the layer and the coordinates first, and ONE sample outside any
       // branch: a mipmapped lookup needs its neighbours in the same flow
@@ -187,6 +189,8 @@
       '      fbUv = fbL == 3.0 ? vec2(fbAlong / ' + f(6 * o.tileRun) + ', vFabP.y / ' + f(6 * o.tileCourse) + ')',
       '           : fbL == 4.0 ? vec2(fbAlong / ' + f(6 * o.tileRun) + ', vFabP.y / ' + f(8 * o.tileCourse) + ')',
       '           : vec2(fbAlong, vFabP.y) / ' + f(3 * o.wallCourse) + ';',
+      '    } else if (fbWood) {',
+      '      fbL = 6.0; fbUv = vec2(fbAlong / ' + f(6 * o.boardRun) + ', vFabP.y / ' + f(12 * o.boardRun) + ');',
       '    } else if (fbBrick) {',
       '      fbL = 0.0; fbUv = vec2(fbAlong / ' + f(4 * o.brickRun) + ', vFabP.y / ' + f(12 * o.brickCourse) + ');',
       '    } else if (fbLum > 0.5) {',
@@ -196,7 +200,11 @@
       '    }',
       '  }',
       '  vec3 fbT = texture(uFabTex, vec3(fbUv, fbL)).rgb;',
+      '#ifdef FAB_PLANKS',
+      '  if (uFabTexOn > 0.5) {',
+      '#else',
       '  if (uFabTexOn > 0.5 && !fbWood) {',
+      '#endif',
       '    vec3 fbJ = fbL < 1.5 ? vec3(0.30, 0.285, 0.26) : diffuseColor.rgb * 0.5;',
       '    diffuseColor.rgb *= (0.62 + fbT.r * 0.76) * (1.0 - fbT.b * 0.4);',
       '    diffuseColor.rgb = mix(diffuseColor.rgb, fbJ, fbT.g * 0.8);',
@@ -211,6 +219,9 @@
       '}',
     ].join('\n');
   }
+
+  /** (round 113) the pack has a plank layer where the shader expects it */
+  function planks() { var T = root.FABRIC_TEX; return !!(T && T.layers && T.layers[6] === 'planks'); }
 
   /** Patch the structures material. Safe to call twice. */
   F.material = function (m, opts) {
@@ -235,7 +246,8 @@
       if (tex) { sh.uniforms.uFabTex = F.texU; sh.uniforms.uFabTexOn = F.texOn; }
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
         '#include <common>\nvarying vec3 vFabP;\nvarying vec3 vFabN;\nvarying vec3 vFabV;\n'
-        + (tex ? '#define FAB_TEX\nuniform highp sampler2DArray uFabTex;\nuniform float uFabTexOn;\n' : '') + glsl(o));
+        + (tex ? '#define FAB_TEX\nuniform highp sampler2DArray uFabTex;\nuniform float uFabTexOn;\n' : '')
+        + (tex && planks() ? '#define FAB_PLANKS\n' : '') + glsl(o));
       sh.fragmentShader = rep(sh.fragmentShader, '#include <color_fragment>',
         '#include <color_fragment>\n' + chunk(o));
       // the sky's share of a wall in shade (see `sky` above); Lambert only —
@@ -247,7 +259,7 @@
       }
       if (!ok) F.failed = (F.failed || 0) + 1;
     };
-    var key = '|fab6:' + [o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '');
+    var key = '|fab7:' + [o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '') + (planks() ? '|planks' : '');
     m.customProgramCacheKey = function () {
       return (prevKey ? prevKey.call(this) : '') + key;
     };

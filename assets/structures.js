@@ -251,6 +251,40 @@
     this.n += emitted * 4;
   };
 
+  /** (round 113) Append a modelled piece — `m` an unpacked compact entry
+   *  ({n, P, N, C}: corners, non-indexed, C its occlusion) — laid along X
+   *  (`alongX`) or turned onto Z, scaled by (sx along, sy up, sz across) and
+   *  coloured (r, g, b) times its occlusion. */
+  Builder.prototype.mesh = function (m, px, py, pz, alongX, sx, sy, sz, r, g, b) {
+    var nv = m.n;
+    while (this.n + nv > this.cap) this._grow();
+    var P = this.pos, N = this.nrm, C = this.col, I = this.idx, v = this.n * 3, base = this.n, ii = this.ni;
+    for (var k = 0; k < nv; k++) {
+      var lx = m.P[k * 3] * sx, ly = m.P[k * 3 + 1] * sy, lz = m.P[k * 3 + 2] * sz;
+      var nx = m.N[k * 3] / sx, ny = m.N[k * 3 + 1] / sy, nz = m.N[k * 3 + 2] / sz;
+      var nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+      if (alongX) { P[v] = px + lx; P[v + 2] = pz + lz; N[v] = nx; N[v + 2] = nz; }
+      else { P[v] = px + lz; P[v + 2] = pz - lx; N[v] = nz; N[v + 2] = -nx; }    // a quarter turn: a proper rotation, so no face turns inside out
+      P[v + 1] = py + ly; N[v + 1] = ny;
+      var a = m.C[k * 3];
+      C[v] = r * a; C[v + 1] = g * a; C[v + 2] = b * a;
+      I[ii + k] = base + k;
+      v += 3;
+    }
+    this.n += nv; this.ni += nv;
+  };
+
+  /** (round 113) The spill a shelled wall leaves, modelled in Blender
+   *  (tools/blender/props.py -> PROP_PACK.spill), unpacked once; null without
+   *  the pack (the three boxes below stand in) or with `game.propPack113`. */
+  var _spill = null;
+  function spillPieces() {
+    var PK = window.PROP_PACK && window.PROP_PACK.spill;
+    if (!PK || !PK.length || typeof window.unpackCompact !== 'function' || (window.game && window.game.propPack113 === false)) return null;
+    return _spill || (_spill = PK.map(function (e) { return window.unpackCompact(e); }));
+  }
+
   Builder.prototype.reset = function () { this.n = 0; this.ni = 0; };
   /** `slice`, not `subarray`: the geometry has to OWN its buffers, because the
    *  builder itself is reused for the next chunk. */
@@ -307,6 +341,17 @@
       // A masonry wall shot down: a knee-high spill of broken courses. Still
       // worth getting behind, no longer worth hiding behind.
       var rc = shade(mat, seed + 7, 0.35);
+      // (round 113) MODELLED IN BLENDER: a ridge of dust and broken courses
+      // along the wall's line with the occlusion between them, in the wall's
+      // own material — the fabric shader gives its pieces their brick or
+      // stone. 0.42-0.62 of S high: never over the 0.62 the sightline test
+      // gives a rubble wall (`_rayWall`, `aperture`). Three boxes without the pack.
+      var SP = spillPieces();
+      if (SP) {
+        var js = (((seed + 31) * 2654435761) >>> 0) / 4294967296;
+        B.mesh(SP[(seed >>> 0) % SP.length], wx, y, wz, horiz, T * 1.02, (0.42 + js * 0.2) * S, WALL_TH * 3.2, rc.r, rc.g, rc.b);
+        return;
+      }
       for (var i = 0; i < 3; i++) {
         var t = (i - 1) * T * 0.3;
         var jj = (((seed + i * 31) * 2654435761) >>> 0) / 4294967296;
