@@ -126,7 +126,8 @@
   // =========================================================================
   // FOLIAGE KINDS
   // -------------------------------------------------------------------------
-  //  atlas   index into the generated sprite atlas (0..7)
+  //  atlas   index into the sprite atlas (0..7 painted at boot, 8..47 the
+  //          Blender cells from assets/foliage_sprites.js — see `pasteSprites`)
   //  mode    'cross' = 3 static intersecting quads (best for turf/crops)
   //          'card'  = 1 camera-facing billboard (best for round bushes)
   //  w / h   world size of one instance, and the +/- randomisation on it
@@ -140,7 +141,18 @@
   //          hasLOS accumulates these and cuts off past `LOS_BUDGET`
   //  height  world height of the concealing mass (a sightline above it is clear)
   //  burn    catches fire from flame / HE
+  //  root    (Blender kinds) the fraction of the quad below the plant's foot;
+  //          the instance is sunk by that much and ROOT_SINK more
+  //  blend   (Blender kinds) how far the tint follows the ground under it, as
+  //          a share of the field's `groundBlend` — 1 when absent
   // =========================================================================
+  // (round 113) THE FORTY BLENDER KINDS draw their colour from the sprite, so
+  // their tint only has to leave it alone: 0x6c6c6c x 2.35 (the chunk build's
+  // gain) is 1.0, and the other two lean it a shade warm and a shade cool so
+  // neighbouring clumps are not one colour. ROOT is plants.py's ground line,
+  // GROUND_PX of its CELL.
+  var ROOT = 8 / 256, ROOT_SINK = 0.01;
+  var SPRITE_TINT = [0x6c6c6c, 0x716e66, 0x676b65];
   var DEFS = [
     { id: 'grass',     name: 'Meadow grass', atlas: 0, mode: 'cross', w: 1.45, h: 0.46, vary: 0.34,
       per: 7, sway: 0.16, topFade: 0.00, cover: 0.05, conceal: 0.06, los: 0.00, height: 0.5,
@@ -173,6 +185,141 @@
     { id: 'heather',   name: 'Heather',      atlas: 7, mode: 'cross', w: 1.35, h: 0.72, vary: 0.28,
       per: 5,  sway: 0.14, topFade: 0.00, cover: 0.07, conceal: 0.12, los: 0.00, height: 0.5,
       burn: true,  tint: [0x6a5f7a, 0x7a6c86, 0x5a5568], swatch: '#6a5f7a' },
+
+    // ---- (round 113) FORTY MORE: modelled and lit in Blender ------------------
+    // "40 more types of vegetation like the maize and reeds etc. basically more
+    // kinds of optical cover with no real hard cover benefit" — the user. Each
+    // is a plant built in metres at its real size (tools/blender/plants.py);
+    // `w` x `h` is the quad measured off its geometry (the cell is drawn at that
+    // aspect, so it comes back undistorted). The gameplay numbers follow the
+    // eight above, from the height of the concealing mass in metres (H) and how
+    // solid it is to the eye against standing wheat (op):
+    //     conceal = 0.04 + 0.21 H op          (wheat 0.35, maize 0.54, reeds 0.42)
+    //     los     = 0.6 op (H - 0.4)^0.85     (wheat 0.63, maize 1.06), none under 0.6 m
+    //     cover   = 0.02 + 0.012 H            a stalk stops nothing; the woody
+    //                                         few (gorse, vine, bamboo) 0.04-0.08
+    // Crops replace wheat by theatre and field, the wild ones turn up in the
+    // ground they grow in (`flora`); all of them are in the editor's palette.
+    { id: 'clover',     name: 'Clover',     atlas: 8, mode: 'cross', w: 0.95, h: 0.26, vary: 0.25,
+      per: 9, sway: 0.12, topFade: 0.00, cover: 0.02, conceal: 0.08, los: 0.00, height: 0.20,
+      burn: true, root: ROOT, blend: 0.5, tint: SPRITE_TINT, swatch: '#696439' },
+    { id: 'poppies',    name: 'Poppies',    atlas: 9, mode: 'cross', w: 1.04, h: 0.53, vary: 0.28,
+      per: 9, sway: 0.20, topFade: 0.00, cover: 0.02, conceal: 0.07, los: 0.00, height: 0.31,
+      burn: true, root: ROOT, blend: 0.35, tint: SPRITE_TINT, swatch: '#b33e10' },
+    { id: 'beet',       name: 'Sugar beet', atlas: 10, mode: 'cross', w: 1.12, h: 0.28, vary: 0.22,
+      per: 9, sway: 0.10, topFade: 0.00, cover: 0.02, conceal: 0.10, los: 0.00, height: 0.28,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#3c741d' },
+    { id: 'potato',     name: 'Potatoes',   atlas: 11, mode: 'cross', w: 0.98, h: 0.59, vary: 0.22,
+      per: 9, sway: 0.12, topFade: 0.05, cover: 0.03, conceal: 0.14, los: 0.00, height: 0.49,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#3d6b1c' },
+    { id: 'flax',       name: 'Flax',       atlas: 12, mode: 'cross', w: 0.86, h: 0.82, vary: 0.22,
+      per: 9, sway: 0.30, topFade: 0.10, cover: 0.03, conceal: 0.11, los: 0.10, height: 0.62,
+      burn: true, root: ROOT, blend: 0.4, tint: SPRITE_TINT, swatch: '#558070' },
+    { id: 'lavender',   name: 'Lavender',   atlas: 13, mode: 'cross', w: 0.88, h: 0.59, vary: 0.22,
+      per: 9, sway: 0.14, topFade: 0.05, cover: 0.03, conceal: 0.11, los: 0.00, height: 0.44,
+      burn: true, root: ROOT, blend: 0.35, tint: SPRITE_TINT, swatch: '#6d588f' },
+    { id: 'garrigue',   name: 'Garrigue',   atlas: 14, mode: 'card', w: 1.19, h: 0.47, vary: 0.30,
+      per: 3, sway: 0.08, topFade: 0.10, cover: 0.05, conceal: 0.13, los: 0.00, height: 0.44,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#997a68' },
+    { id: 'stubble',    name: 'Stubble',    atlas: 15, mode: 'cross', w: 1.18, h: 0.15, vary: 0.25,
+      per: 9, sway: 0.04, topFade: 0.00, cover: 0.02, conceal: 0.05, los: 0.00, height: 0.12,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#ba993b' },
+    { id: 'rice',       name: 'Rice paddy', atlas: 16, mode: 'cross', w: 0.91, h: 0.80, vary: 0.20,
+      per: 9, sway: 0.30, topFade: 0.20, cover: 0.03, conceal: 0.16, los: 0.18, height: 0.67,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#59971c' },
+    { id: 'sedge',      name: 'Sedge',      atlas: 17, mode: 'cross', w: 1.07, h: 0.69, vary: 0.25,
+      per: 9, sway: 0.26, topFade: 0.10, cover: 0.03, conceal: 0.14, los: 0.12, height: 0.53,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#516825' },
+    { id: 'marram',     name: 'Marram grass', atlas: 18, mode: 'cross', w: 1.02, h: 0.94, vary: 0.28,
+      per: 9, sway: 0.30, topFade: 0.15, cover: 0.03, conceal: 0.14, los: 0.17, height: 0.71,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#8fa26d' },
+    { id: 'barley',     name: 'Barley',     atlas: 19, mode: 'cross', w: 1.15, h: 0.81, vary: 0.18,
+      per: 9, sway: 0.34, topFade: 0.30, cover: 0.03, conceal: 0.20, los: 0.27, height: 0.76,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#c6b23b' },
+    { id: 'oats',       name: 'Oats',       atlas: 20, mode: 'cross', w: 0.95, h: 0.98, vary: 0.18,
+      per: 9, sway: 0.34, topFade: 0.30, cover: 0.03, conceal: 0.21, los: 0.31, height: 0.84,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#85983c' },
+    { id: 'rye',        name: 'Rye',        atlas: 21, mode: 'cross', w: 1.19, h: 1.58, vary: 0.16,
+      per: 7.4, sway: 0.36, topFade: 0.36, cover: 0.04, conceal: 0.32, los: 0.59, height: 1.33,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#a0a553' },
+    { id: 'buckwheat',  name: 'Buckwheat',  atlas: 22, mode: 'cross', w: 0.96, h: 0.85, vary: 0.20,
+      per: 9, sway: 0.22, topFade: 0.15, cover: 0.03, conceal: 0.17, los: 0.21, height: 0.71,
+      burn: true, root: ROOT, blend: 0.4, tint: SPRITE_TINT, swatch: '#975c37' },
+    { id: 'rapeseed',   name: 'Rapeseed',   atlas: 23, mode: 'cross', w: 1.01, h: 1.34, vary: 0.18,
+      per: 9, sway: 0.24, topFade: 0.25, cover: 0.04, conceal: 0.27, los: 0.47, height: 1.16,
+      burn: true, root: ROOT, blend: 0.35, tint: SPRITE_TINT, swatch: '#a89a0f' },
+    { id: 'lupin',      name: 'Lupins',     atlas: 24, mode: 'cross', w: 0.84, h: 0.89, vary: 0.22,
+      per: 9, sway: 0.18, topFade: 0.10, cover: 0.03, conceal: 0.15, los: 0.17, height: 0.67,
+      burn: true, root: ROOT, blend: 0.4, tint: SPRITE_TINT, swatch: '#5f695c' },
+    { id: 'tobacco',    name: 'Tobacco',    atlas: 25, mode: 'cross', w: 1.44, h: 1.61, vary: 0.18,
+      per: 6.1, sway: 0.16, topFade: 0.45, cover: 0.04, conceal: 0.34, los: 0.62, height: 1.33,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#50891e' },
+    { id: 'beans',      name: 'Field beans', atlas: 26, mode: 'cross', w: 0.83, h: 1.01, vary: 0.18,
+      per: 9, sway: 0.18, topFade: 0.25, cover: 0.03, conceal: 0.22, los: 0.33, height: 0.89,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#548046' },
+    { id: 'vineyard',   name: 'Vineyard',   atlas: 27, mode: 'cross', w: 1.39, h: 1.42, vary: 0.15,
+      per: 7.1, sway: 0.10, topFade: 0.30, cover: 0.06, conceal: 0.30, los: 0.54, height: 1.24,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#4b811b' },
+    { id: 'nettles',    name: 'Nettles',    atlas: 28, mode: 'cross', w: 0.92, h: 1.08, vary: 0.22,
+      per: 9, sway: 0.18, topFade: 0.20, cover: 0.03, conceal: 0.25, los: 0.40, height: 0.93,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#325e1c' },
+    { id: 'thistles',   name: 'Thistles',   atlas: 29, mode: 'cross', w: 0.96, h: 0.93, vary: 0.25,
+      per: 9, sway: 0.16, topFade: 0.10, cover: 0.03, conceal: 0.12, los: 0.14, height: 0.71,
+      burn: true, root: ROOT, blend: 0.5, tint: SPRITE_TINT, swatch: '#6a6c4f' },
+    { id: 'cowparsley', name: 'Cow parsley', atlas: 30, mode: 'cross', w: 1.13, h: 1.17, vary: 0.22,
+      per: 9, sway: 0.24, topFade: 0.15, cover: 0.03, conceal: 0.16, los: 0.21, height: 0.89,
+      burn: true, root: ROOT, blend: 0.45, tint: SPRITE_TINT, swatch: '#5c8533' },
+    { id: 'willowherb', name: 'Willowherb', atlas: 31, mode: 'cross', w: 0.82, h: 1.59, vary: 0.22,
+      per: 9, sway: 0.24, topFade: 0.25, cover: 0.04, conceal: 0.20, los: 0.33, height: 1.16,
+      burn: true, root: ROOT, blend: 0.4, tint: SPRITE_TINT, swatch: '#c5486e' },
+    { id: 'foxglove',   name: 'Foxgloves',  atlas: 32, mode: 'cross', w: 0.87, h: 1.32, vary: 0.22,
+      per: 9, sway: 0.18, topFade: 0.15, cover: 0.03, conceal: 0.13, los: 0.15, height: 0.80,
+      burn: true, root: ROOT, blend: 0.4, tint: SPRITE_TINT, swatch: '#965077' },
+    { id: 'gorse',      name: 'Gorse',      atlas: 33, mode: 'card', w: 1.44, h: 1.34, vary: 0.28,
+      per: 3, sway: 0.08, topFade: 0.18, cover: 0.06, conceal: 0.39, los: 0.72, height: 1.24,
+      burn: true, root: ROOT, blend: 0.45, tint: SPRITE_TINT, swatch: '#565011' },
+    { id: 'broom',      name: 'Broom',      atlas: 34, mode: 'card', w: 1.05, h: 1.56, vary: 0.28,
+      per: 3, sway: 0.14, topFade: 0.25, cover: 0.05, conceal: 0.31, los: 0.56, height: 1.42,
+      burn: true, root: ROOT, blend: 0.45, tint: SPRITE_TINT, swatch: '#858209' },
+    { id: 'bramble',    name: 'Bramble',    atlas: 35, mode: 'card', w: 1.72, h: 0.80, vary: 0.30,
+      per: 3, sway: 0.08, topFade: 0.10, cover: 0.06, conceal: 0.25, los: 0.37, height: 0.76,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#3c5b24' },
+    { id: 'feathergrass', name: 'Feather grass', atlas: 36, mode: 'cross', w: 1.26, h: 0.54, vary: 0.28,
+      per: 9, sway: 0.42, topFade: 0.10, cover: 0.02, conceal: 0.08, los: 0.00, height: 0.36,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#8b9562' },
+    { id: 'wormwood',   name: 'Wormwood',   atlas: 37, mode: 'cross', w: 1.01, h: 0.75, vary: 0.25,
+      per: 9, sway: 0.18, topFade: 0.10, cover: 0.03, conceal: 0.14, los: 0.14, height: 0.62,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#93985a' },
+    { id: 'esparto',    name: 'Esparto grass', atlas: 38, mode: 'cross', w: 1.13, h: 0.88, vary: 0.28,
+      per: 9, sway: 0.26, topFade: 0.15, cover: 0.03, conceal: 0.16, los: 0.17, height: 0.62,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#9e904e' },
+    { id: 'camelthorn', name: 'Camel thorn', atlas: 39, mode: 'card', w: 1.15, h: 0.58, vary: 0.30,
+      per: 3, sway: 0.08, topFade: 0.05, cover: 0.04, conceal: 0.11, los: 0.00, height: 0.49,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#697834' },
+    { id: 'cattail',    name: 'Bulrush',    atlas: 40, mode: 'cross', w: 0.93, h: 1.98, vary: 0.20,
+      per: 7.6, sway: 0.34, topFade: 0.40, cover: 0.04, conceal: 0.36, los: 0.68, height: 1.69,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#637835' },
+    { id: 'rushes',     name: 'Rushes',     atlas: 41, mode: 'cross', w: 0.81, h: 0.94, vary: 0.24,
+      per: 9, sway: 0.24, topFade: 0.20, cover: 0.03, conceal: 0.20, los: 0.28, height: 0.80,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#456525' },
+    { id: 'sunflower',  name: 'Sunflowers', atlas: 42, mode: 'cross', w: 1.27, h: 2.16, vary: 0.15,
+      per: 5.1, sway: 0.16, topFade: 0.45, cover: 0.04, conceal: 0.42, los: 0.81, height: 1.78,
+      burn: true, root: ROOT, blend: 0.35, tint: SPRITE_TINT, swatch: '#767e0f' },
+    { id: 'hemp',       name: 'Hemp',       atlas: 43, mode: 'cross', w: 1.12, h: 2.18, vary: 0.15,
+      per: 5.7, sway: 0.22, topFade: 0.50, cover: 0.05, conceal: 0.45, los: 0.88, height: 2.04,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#37801a' },
+    { id: 'sorghum',    name: 'Sorghum',    atlas: 44, mode: 'cross', w: 1.54, h: 2.30, vary: 0.15,
+      per: 4, sway: 0.22, topFade: 0.50, cover: 0.05, conceal: 0.44, los: 0.85, height: 1.87,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#5c851c' },
+    { id: 'sugarcane',  name: 'Sugar cane', atlas: 45, mode: 'cross', w: 2.15, h: 3.30, vary: 0.18,
+      per: 2, sway: 0.20, topFade: 0.55, cover: 0.05, conceal: 0.55, los: 1.25, height: 2.84,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#579f20' },
+    { id: 'kunai',      name: 'Kunai grass', atlas: 46, mode: 'cross', w: 1.21, h: 1.45, vary: 0.22,
+      per: 8, sway: 0.34, topFade: 0.38, cover: 0.04, conceal: 0.33, los: 0.60, height: 1.24,
+      burn: true, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#729122' },
+    { id: 'bamboo',     name: 'Bamboo',     atlas: 47, mode: 'cross', w: 2.24, h: 5.12, vary: 0.18,
+      per: 1.2, sway: 0.20, topFade: 0.55, cover: 0.08, conceal: 0.55, los: 1.25, height: 4.00,
+      burn: false, root: ROOT, blend: 0.6, tint: SPRITE_TINT, swatch: '#568c1b' },
   ];
   /** Below this standing height a plant throws no shadow worth the pass — see
    *  `Field._casts`. Meadow grass (0.5) and heather (0.5) are under it;
@@ -184,6 +331,123 @@
 
   var BY_ID = {};
   for (var di = 0; di < DEFS.length; di++) { DEFS[di].index = di; BY_ID[DEFS[di].id] = DEFS[di]; }
+  // (round 113) THE SOWN KINDS: a map that sows one gets a field to the edge
+  // of its plough (`sow` in the main file), where a wild plant clumps
+  ['wheat', 'clover', 'beet', 'potato', 'flax', 'lavender', 'stubble', 'rice', 'barley', 'oats', 'rye', 'buckwheat',
+   'rapeseed', 'lupin', 'tobacco', 'beans', 'vineyard', 'sunflower', 'hemp', 'sorghum', 'sugarcane'].forEach(function (id) { BY_ID[id].crop = true; });
+
+  // =========================================================================
+  // (round 113) THE THEATRE'S PLANTS — what `flora` grows where
+  // -------------------------------------------------------------------------
+  // Every map's crop is wheat and its wild ground eight kinds, because that is
+  // all there was. A theatre is a season and a country: Normandy in June is
+  // wheat, barley, oats, clover ley, beet and potatoes in small fields, with
+  // poppies and cow parsley in the grass; Arnhem in September is stubble,
+  // beet and potatoes; the steppe is rye and sunflowers to the horizon with
+  // feather grass and wormwood between; Italy is wheat, vines, maize and
+  // tobacco; the Pacific rice, cane, kunai grass and bamboo; and on every
+  // bombed street, rosebay willowherb.
+  //
+  //  field    Voronoi spacing of the crop fields, in cells (a cell is 6 m)
+  //  crops    what a sown field (wheat) becomes, per field, by weight
+  //  tall     what tall grass becomes outright (the Pacific's kunai)
+  //  meadow   patches in grass where a smooth noise passes `cut`
+  //  wood / marsh / heath / scrub   the same for bracken, reeds, heather, brush
+  //  rubble   sparse colonists on rubble ground that carries nothing
+  //  cut / cuts  the noise level each patch starts at. The noise (`patchy`
+  //           in `flora`) is measured: 12% of cells lie above 0.78, 20% above
+  //           0.71, 40% above 0.57, half above 0.51 — so grass keeps seven
+  //           eighths of itself and a marsh is half reeds, half the rest
+  var FLORA_BASE = {
+    wood:   [['bramble', 3], ['foxglove', 2], ['nettles', 2], ['willowherb', 1]],
+    marsh:  [['cattail', 3], ['rushes', 3], ['sedge', 2]],
+    heath:  [['gorse', 3], ['broom', 2], ['marram', 2]],
+    scrub:  [['bramble', 3], ['gorse', 2], ['broom', 2]],
+    rubble: [['willowherb', 3], ['nettles', 2]],
+  };
+  var FLORA_CUTS = { wood: 0.71, marsh: 0.51, heath: 0.57, scrub: 0.71, rubble: 0.64 };
+  function flora(o) {
+    for (var k in FLORA_BASE) if (!(k in o)) o[k] = FLORA_BASE[k];
+    if (o.cut === undefined) o.cut = 0.78;
+    o.cuts = o.cuts || {};
+    for (var c in FLORA_CUTS) if (o.cuts[c] === undefined) o.cuts[c] = FLORA_CUTS[c];
+    return o;
+  }
+  var FLORA = {
+    normandy: flora({ field: 18,
+      crops:  [['wheat', 30], ['barley', 14], ['oats', 14], ['clover', 10], ['beet', 8], ['potato', 7], ['buckwheat', 6], ['flax', 5], ['beans', 4], ['stubble', 2]],
+      meadow: [['poppies', 3], ['cowparsley', 3], ['thistles', 2], ['nettles', 2], ['clover', 2], ['foxglove', 1]] }),
+    france40: flora({ field: 20,
+      crops:  [['wheat', 30], ['barley', 12], ['oats', 12], ['rapeseed', 10], ['clover', 10], ['beet', 8], ['potato', 8], ['flax', 6], ['lupin', 4]],
+      meadow: [['poppies', 4], ['cowparsley', 3], ['clover', 2], ['thistles', 1]] }),
+    lowlands: flora({ field: 16,
+      crops:  [['stubble', 26], ['beet', 24], ['potato', 18], ['clover', 10], ['buckwheat', 8], ['beans', 7], ['oats', 7]],
+      meadow: [['thistles', 2], ['nettles', 2], ['clover', 2], ['cowparsley', 1]],
+      marsh:  [['rushes', 4], ['cattail', 3], ['sedge', 3]],
+      heath:  [['broom', 3], ['gorse', 2], ['marram', 1]],
+      wood:   [['bramble', 3], ['nettles', 2], ['willowherb', 2], ['foxglove', 1]] }),
+    east: flora({ field: 34, cut: 0.68,
+      crops:  [['wheat', 24], ['rye', 18], ['sunflower', 16], ['buckwheat', 10], ['beet', 8], ['potato', 8], ['hemp', 6], ['flax', 5], ['corn', 5]],
+      meadow: [['feathergrass', 3], ['wormwood', 3], ['thistles', 2], ['nettles', 1]],
+      wood:   [['nettles', 2], ['willowherb', 2], ['bramble', 1]],
+      marsh:  [['cattail', 3], ['sedge', 3], ['rushes', 2]],
+      heath:  [['wormwood', 3], ['feathergrass', 3]],
+      scrub:  [['wormwood', 2], ['broom', 1]],
+      rubble: [['nettles', 3], ['willowherb', 2]] }),
+    italy: flora({ field: 14,
+      crops:  [['wheat', 28], ['vineyard', 18], ['corn', 12], ['tobacco', 10], ['beans', 10], ['hemp', 8], ['sorghum', 6], ['sunflower', 4], ['lavender', 4]],
+      meadow: [['poppies', 3], ['garrigue', 3], ['thistles', 2], ['broom', 1], ['lavender', 1]],
+      wood:   [['bramble', 3], ['broom', 1], ['nettles', 1]],
+      marsh:  [['cattail', 2], ['rushes', 2], ['sedge', 2]],
+      heath:  [['garrigue', 4], ['broom', 2], ['lavender', 1]],
+      scrub:  [['garrigue', 3], ['broom', 3]],
+      rubble: [['nettles', 2], ['willowherb', 1]] }),
+    desert: flora({ field: 16, cut: 0.69,
+      crops:  [['barley', 45], ['stubble', 25], ['sorghum', 15], ['beans', 15]],
+      meadow: [['esparto', 3], ['camelthorn', 2], ['wormwood', 1]],
+      wood:   [['camelthorn', 1], ['esparto', 1]],
+      marsh:  [['rushes', 2], ['sedge', 1], ['cattail', 1]],
+      heath:  [['esparto', 3], ['camelthorn', 3]],
+      scrub:  [['camelthorn', 3], ['garrigue', 1]],
+      rubble: [['camelthorn', 1]] }),
+    pacific: flora({ field: 12, cut: 0.61, tall: 'kunai',
+      crops:  [['rice', 45], ['sugarcane', 35], ['corn', 10], ['sorghum', 10]],
+      meadow: [['kunai', 1]],
+      wood:   [['bamboo', 1]],
+      marsh:  [['sedge', 2], ['rushes', 2], ['cattail', 1]],
+      heath:  [['kunai', 1]],
+      scrub:  [['bamboo', 2], ['kunai', 2]],
+      rubble: [['kunai', 1]] }),
+    ardennes: flora({ field: 16, cut: 0.86,
+      crops:  [['stubble', 50], ['beet', 20], ['clover', 15], ['potato', 15]],
+      meadow: [['thistles', 1], ['nettles', 1]] }),
+    germany45: flora({ field: 22,
+      crops:  [['rye', 25], ['wheat', 20], ['rapeseed', 14], ['beet', 14], ['potato', 12], ['lupin', 10], ['clover', 5]],
+      meadow: [['cowparsley', 3], ['nettles', 2], ['clover', 2], ['thistles', 1]] }),
+  };
+  /** The map's `era` -> its plants. Anything not listed is Normandy — except
+   *  where the map's NAME says otherwise: the generic eras ('WWII', 'Four
+   *  Ways') hold the Kursk steppe and the Sangro too. */
+  var NAME_FLORA = [
+    [/steppe|kursk|kharkov|stalingrad|prokhorovka|ukrain|russia|smolensk|rzhev|kiev|minsk|dnieper/i, 'east'],
+    [/sangro|cassino|anzio|ortona|salerno|rapido|sicil|ital|gothic line/i, 'italy'],
+    [/desert|tobruk|alamein|gazala|tunis|libya|kasserine/i, 'desert'],
+    [/pacific|guadalcanal|iwo|okinawa|saipan|peleliu|tarawa|betio|jungle|island/i, 'pacific'],
+    [/arnhem|nijmegen|eindhoven|holland|dutch|polder|market garden/i, 'lowlands'],
+  ];
+  function floraFor(era, name) {
+    var key = ERA_FLORA[era];
+    if (!key || key === 'normandy') {
+      for (var i = 0; i < NAME_FLORA.length && name; i++) if (NAME_FLORA[i][0].test(name)) return NAME_FLORA[i][1];
+    }
+    return key || 'normandy';
+  }
+  var ERA_FLORA = {
+    'Normandy 1944': 'normandy', 'WWII': 'normandy', 'Four Ways': 'normandy',
+    'France 1940': 'france40', 'Market Garden': 'lowlands', 'The Eastern Front': 'east',
+    'Italy': 'italy', 'The Desert': 'desert', 'The Pacific': 'pacific',
+    'The Ardennes': 'ardennes', 'Germany 1945': 'germany45',
+  };
 
   // Sightline occlusion needed to break line of sight completely. Tuned so a
   // man is invisible ~9 m into standing corn and ~14 m into wheat.
@@ -204,10 +468,11 @@
   // =========================================================================
   // SPRITE ATLAS — drawn on a canvas at boot, so there is nothing to download
   // =========================================================================
-  // 4 columns x 2 rows of 256px cells in a 1024x512 texture. Every sprite is
-  // drawn inside a padded box so mip generation never bleeds one cell into its
-  // neighbour at the levels foliage is actually visible at.
-  var ATLAS_COLS = 4, ATLAS_ROWS = 2, ATLAS_CELL = 256, ATLAS_PAD = 10;
+  // 8 columns x 6 rows of 256px cells in a 2048x1536 texture: the first row
+  // painted here, the five under it the Blender cells (round 113). Every
+  // sprite is drawn inside a padded box so mip generation never bleeds one
+  // cell into its neighbour at the levels foliage is actually visible at.
+  var ATLAS_COLS = 8, ATLAS_ROWS = 6, ATLAS_CELL = 256, ATLAS_PAD = 10, ATLAS_PAINTED = 8;
 
   function rngFrom(seed) {
     return function () {
@@ -389,9 +654,11 @@
     var cv = document.createElement('canvas');
     cv.width = ATLAS_COLS * ATLAS_CELL;
     cv.height = ATLAS_ROWS * ATLAS_CELL;
-    var ctx = cv.getContext('2d');
+    // (round 113) read back once for the mip chain (`buildMips`): a canvas
+    // kept in memory reads back in a few ms, a GPU one pays a readback
+    var ctx = cv.getContext('2d', { willReadFrequently: true });
     ctx.clearRect(0, 0, cv.width, cv.height);
-    for (var k = 0; k < ATLAS_COLS * ATLAS_ROWS; k++) {
+    for (var k = 0; k < ATLAS_PAINTED; k++) {
       var cx = (k % ATLAS_COLS) * ATLAS_CELL, cy = Math.floor(k / ATLAS_COLS) * ATLAS_CELL;
       ctx.save();
       ctx.translate(cx, cy);
@@ -405,7 +672,170 @@
     _atlas.minFilter = THREE.LinearMipmapLinearFilter;
     _atlas.generateMipmaps = true;
     _atlas.anisotropy = 4;
+    pasteSprites(cv, _atlas);
     return _atlas;
+  }
+
+  /** (round 113) THE FORTY BLENDER KINDS. assets/foliage_sprites.js carries
+   *  their cells (tools/blender/plants.py) as a JPEG of colour and a grey PNG
+   *  of coverage — a third of the bytes of one RGBA PNG, whose anti-aliased
+   *  edges do not compress. This puts the two back together and copies each
+   *  kind's cell to its atlas slot, then re-uploads the atlas. Decoding is
+   *  asynchronous: until it lands those kinds cut away to nothing, exactly as
+   *  if their cells were empty, and a page without the file never draws them
+   *  (`Foliage.sprites()` says which). Purely cosmetic either way. */
+  var spritesState = 'none', spritesMs = null;
+
+  /** (round 113) THE ATLAS'S MIP CHAIN, BUILT HERE ONCE THE BLENDER CELLS ARE
+   *  IN — because a plant drawn true does not survive the GPU's own.
+   *
+   *  The painted kinds are blades four to eight pixels wide; a real stalk is
+   *  two. From the tactical camera a crop quad is ~16 px tall, so it is drawn
+   *  from mip level 4, where every 16 x 16 block of the cell is one texel and
+   *  its alpha is the block's coverage: a field of thin stalks falls under the
+   *  0.26 cutout everywhere but in its ears, and a barley field read as bare
+   *  ground with a few streaks across it (round 113, measured on Village). And
+   *  a box filter averages the black of the empty texels into the colour, so
+   *  what does survive is darkened by its own coverage — the reason the painted
+   *  tints carry a gain of 2.35, and why painted wheat burns white up close.
+   *
+   *  So, for the Blender cells only, the alpha is scaled per cell per level so
+   *  that the same share of the cell passes the cut as passes it at level 0
+   *  (the coverage-preserving mipmaps of Castaño, 2010) — the plant keeps its
+   *  body at every distance. Its colour is the ALPHA-WEIGHTED mean of the
+   *  texels under it, darkened by the square root of their coverage: the true
+   *  colour, with no darkening at all, read as pale mint specks on the stubble
+   *  where every painted clump beside it is a dark tuft (the painted tints and
+   *  the field's whole look are tuned to that darkening), and the box filter's
+   *  full darkening is the "moss" the 2.35 gain was put in to undo. A tuft
+   *  seen from a distance is darker than its sunlit leaf; this is half way.
+   *  (A/B'd on Village from the tactical camera, round 113.) Everything else — the eight
+   *  painted cells and the padding — gets the plain 2 x 2 box average the GPU
+   *  would have made, so the old kinds look exactly as they did. One pass at
+   *  load, ~4 M texel visits; `MIP_KEEP = false` hands the chain back to GL. */
+  var MIP_KEEP = true, MIP_CUT = 0.26, MIP_MAX_GAIN = 6, HB = 512, HIST = new Uint32Array(HB);
+  function buildMips(cv, tex) {
+    var W = cv.width, H = cv.height, C = ATLAS_CELL;
+    var base = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H);
+    var mips = [cv], levels = [base.data], dims = [[W, H]];
+    // 1) the GPU's chain: a 2 x 2 box average of the level above — over the
+    //    painted row only while a cell is still a pixel or more, since step 2
+    //    writes every texel of the rows under it; the levels smaller than a
+    //    cell are made again from the finished chain in step 3
+    var w = W, h = H, src = base.data, lvl = 0, paintedH = Math.ceil(ATLAS_PAINTED / ATLAS_COLS) * C;
+    function box(src, w, h, dst, dw, dh, yEnd) {
+      for (var y = 0; y < yEnd; y++) {
+        var y0 = Math.min(h - 1, y * 2), y1 = Math.min(h - 1, y * 2 + 1);
+        for (var x = 0; x < dw; x++) {
+          var x0 = Math.min(w - 1, x * 2), x1 = Math.min(w - 1, x * 2 + 1);
+          var a = (y0 * w + x0) * 4, b = (y0 * w + x1) * 4, c = (y1 * w + x0) * 4, d = (y1 * w + x1) * 4, o = (y * dw + x) * 4;
+          dst[o] = (src[a] + src[b] + src[c] + src[d] + 2) >> 2;
+          dst[o + 1] = (src[a + 1] + src[b + 1] + src[c + 1] + src[d + 1] + 2) >> 2;
+          dst[o + 2] = (src[a + 2] + src[b + 2] + src[c + 2] + src[d + 2] + 2) >> 2;
+          dst[o + 3] = (src[a + 3] + src[b + 3] + src[c + 3] + src[d + 3] + 2) >> 2;
+        }
+      }
+    }
+    while (w > 1 || h > 1) {
+      var dw = Math.max(1, w >> 1), dh = Math.max(1, h >> 1);
+      var dst = new Uint8ClampedArray(dw * dh * 4);
+      lvl++;
+      box(src, w, h, dst, dw, dh, (C >> lvl) >= 1 ? Math.min(dh, paintedH >> lvl) : dh);
+      levels.push(dst); dims.push([dw, dh]);
+      src = dst; w = dw; h = dh;
+    }
+    // 2) the Blender cells, remade level by level from sums carried down the chain
+    var n0 = C * C, A = new Float32Array(n0), R = new Float32Array(n0), G2 = new Float32Array(n0), B = new Float32Array(n0);
+    for (var k = 0; k < DEFS.length; k++) {
+      var def = DEFS[k];
+      if (def.atlas < ATLAS_PAINTED) continue;
+      var cx = (def.atlas % ATLAS_COLS) * C, cy = Math.floor(def.atlas / ATLAS_COLS) * C;
+      var cov0 = 0, i, j;
+      for (j = 0; j < C; j++) for (i = 0; i < C; i++) {
+        var q = ((cy + j) * W + cx + i) * 4, t = j * C + i, al = base.data[q + 3] / 255;
+        A[t] = al; R[t] = base.data[q] * al; G2[t] = base.data[q + 1] * al; B[t] = base.data[q + 2] * al;
+        if (al >= MIP_CUT) cov0++;
+      }
+      cov0 /= n0;
+      var cs = C;
+      for (var L = 1; L < levels.length && cs > 1; L++) {
+        var ns = cs >> 1, lw = dims[L][0], out = levels[L];
+        // sums of 2 x 2 blocks, in place at the top-left of the arrays
+        for (j = 0; j < ns; j++) for (i = 0; i < ns; i++) {
+          var p0 = (j * 2) * cs + i * 2, p1 = p0 + 1, p2 = p0 + cs, p3 = p2 + 1, t2 = j * ns + i;
+          var sa = A[p0] + A[p1] + A[p2] + A[p3], sr = R[p0] + R[p1] + R[p2] + R[p3];
+          var sg = G2[p0] + G2[p1] + G2[p2] + G2[p3], sb = B[p0] + B[p1] + B[p2] + B[p3];
+          A[t2] = sa; R[t2] = sr; G2[t2] = sg; B[t2] = sb;
+        }
+        cs = ns;
+        var area = Math.pow(4, L), cnt = cs * cs;
+        // the gain that lets the level-0 share of the cell through the cut:
+        // the coverage value at that share, read off a histogram (a sort of a
+        // level-1 cell is 16,384 numbers, forty times)
+        var vals = new Float32Array(cnt);
+        HIST.fill(0);
+        for (i = 0; i < cnt; i++) { var v1 = vals[i] = A[i] / area; HIST[Math.min(HB - 1, (v1 * HB) | 0)]++; }
+        // (the bin's lower edge, and aimed a little over the cut: a gain that
+        // lands a texel exactly on 0.26 rounds it to 66/255 and the test drops it)
+        var want = Math.floor(cov0 * cnt), seen = 0, at = 0;
+        for (var hb = HB - 1; hb >= 0; hb--) { seen += HIST[hb]; if (seen > want) { at = Math.max(hb, 0.5) / HB; break; } }
+        var gain = at > 1e-4 ? Math.max(1, Math.min(MIP_MAX_GAIN, MIP_CUT * 1.12 / at)) : 1;
+        var ox = cx >> L, oy = cy >> L;
+        for (j = 0; j < cs; j++) for (i = 0; i < cs; i++) {
+          var t3 = j * cs + i, o2 = ((oy + j) * lw + ox + i) * 4, sa2 = A[t3];
+          if (sa2 > 1e-6) {
+            var dk = Math.sqrt(Math.min(1, vals[t3]));
+            out[o2] = R[t3] / sa2 * dk; out[o2 + 1] = G2[t3] / sa2 * dk; out[o2 + 2] = B[t3] / sa2 * dk;
+          } else { out[o2] = out[o2 + 1] = out[o2 + 2] = 0; }
+          out[o2 + 3] = Math.min(255, Math.round(vals[t3] * gain * 255));
+        }
+      }
+    }
+    // 3) below a pixel a cell, the plain average of the finished level above
+    for (var m3 = 1; m3 < levels.length; m3++) if ((C >> m3) < 1)
+      box(levels[m3 - 1], dims[m3 - 1][0], dims[m3 - 1][1], levels[m3], dims[m3][0], dims[m3][1], dims[m3][1]);
+    for (var m = 1; m < levels.length; m++) mips.push(new ImageData(levels[m], dims[m][0], dims[m][1]));
+    tex.mipmaps = mips;
+    tex.generateMipmaps = false;
+  }
+
+  function pasteSprites(cv, tex) {
+    var S = window.FOLIAGE_SPRITES;
+    if (!S || !S.jpg || !S.alpha || typeof Image === 'undefined') { spritesState = 'absent'; return; }
+    spritesState = 'loading';
+    var rgb = new Image(), cov = new Image(), n = 0;
+    function done() {
+      if (++n < 2) return;
+      var t0 = performance.now();
+      try {
+        var w = rgb.width, h = rgb.height;
+        var c1 = document.createElement('canvas'); c1.width = w; c1.height = h;
+        var x1 = c1.getContext('2d', { willReadFrequently: true });   // read back, not drawn: keep it in memory
+        x1.drawImage(rgb, 0, 0);
+        var px = x1.getImageData(0, 0, w, h), d = px.data;
+        x1.clearRect(0, 0, w, h);
+        x1.drawImage(cov, 0, 0);
+        var al = x1.getImageData(0, 0, w, h).data;
+        for (var i = 3; i < d.length; i += 4) d[i] = al[i - 3];
+        var ctx = cv.getContext('2d'), C = S.cell || ATLAS_CELL, cols = S.cols || 8;
+        for (var k = 0; k < DEFS.length; k++) {
+          var def = DEFS[k], j = S.ids.indexOf(def.id);
+          if (j < 0 || def.atlas < ATLAS_PAINTED) continue;
+          var sx = (j % cols) * C, sy = Math.floor(j / cols) * C;
+          var ax = (def.atlas % ATLAS_COLS) * ATLAS_CELL, ay = Math.floor(def.atlas / ATLAS_COLS) * ATLAS_CELL;
+          ctx.putImageData(px, ax - sx, ay - sy, sx, sy, C, C);
+        }
+        var t1 = performance.now();
+        if (MIP_KEEP) buildMips(cv, tex);
+        tex.needsUpdate = true;
+        spritesState = 'ready';
+        spritesMs = [t1 - t0, performance.now() - t1];
+      } catch (e) { spritesState = 'failed'; if (window.console) console.warn('foliage sprites:', e.message); }
+    }
+    rgb.onload = cov.onload = done;
+    rgb.onerror = cov.onerror = function () { spritesState = 'failed'; };
+    rgb.src = 'data:image/jpeg;base64,' + S.jpg;
+    cov.src = 'data:image/png;base64,' + S.alpha;
   }
 
   // =========================================================================
@@ -1070,6 +1500,85 @@
       return n;
     },
 
+    /** (round 113) GROW THE THEATRE'S PLANTS on what the map planted, sown or
+     *  painted (see FLORA). A sown field (wheat) becomes the crop its FIELD
+     *  draws — one crop to a field, the fields a Voronoi patchwork `field`
+     *  cells across — and the wild kinds come up in patches of the ground they
+     *  belong to: wildflowers in grass, brambles and foxgloves under the
+     *  bracken, bulrush and rushes among the reeds, gorse on the heath, and on
+     *  rubble nobody planted a thin scatter of willowherb. Maize, and anything
+     *  already one of the forty, is left as it is.
+     *
+     *  `name` (the map's) only refines a generic era — see NAME_FLORA.
+     *
+     *  A pure function of (cell, kind, era) like `autoSow`: identical on both
+     *  machines and after a reload, and idempotent (a cell it left as it was
+     *  hashes to the same answer the next time). The densities are the map's;
+     *  only rubble, which had none, is given one. Returns the cells changed. */
+    flora: function (era, name) {
+      var th = FLORA[floraFor(era, name)];
+      var T = this.terrain, GR = G.GRID, TY = G.TYPE, i, x, z, n = 0;
+      var h = G.hash2;
+      function id(name) { return BY_ID[name] ? BY_ID[name].index + 1 : 0; }
+      function pickW(list, u) {
+        var tot = 0, j;
+        for (j = 0; j < list.length; j++) tot += list[j][1];
+        u *= tot;
+        for (j = 0; j < list.length; j++) { u -= list[j][1]; if (u < 0) return list[j][0]; }
+        return list[list.length - 1][0];
+      }
+      // a uniform draw per Voronoi region `size` cells across: one answer for
+      // a whole field or patch, with edges that are not the grid's
+      function region(gx, gz, size, salt) {
+        var fx = gx / size, fz = gz / size, ix = Math.floor(fx), iz = Math.floor(fz);
+        var best = 1e9, bx = 0, bz = 0;
+        for (var dz = -1; dz <= 1; dz++) for (var dx = -1; dx <= 1; dx++) {
+          var cx = ix + dx, cz = iz + dz;
+          var px = cx + h(cx * 1.731 + salt, cz * 2.917 + 0.7), pz = cz + h(cx * 3.113 + 0.9, cz * 1.317 + salt);
+          var d = (px - fx) * (px - fx) + (pz - fz) * (pz - fz);
+          if (d < best) { best = d; bx = cx; bz = cz; }
+        }
+        return h(bx * 0.913 + salt * 3.1, bz * 1.271 + 9.3);
+      }
+      // smooth value noise, ~0.2-0.8: where a patch is
+      function patchy(gx, gz, size, salt) {
+        var fx = gx / size + salt * 7.13, fz = gz / size - salt * 3.71, ix = Math.floor(fx), iz = Math.floor(fz);
+        var tx = fx - ix, tz = fz - iz;
+        tx = tx * tx * (3 - 2 * tx); tz = tz * tz * (3 - 2 * tz);
+        var a = h(ix, iz), b = h(ix + 1, iz), c = h(ix, iz + 1), d = h(ix + 1, iz + 1);
+        return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
+      }
+      var K = { wheat: id('wheat'), grass: id('grass'), tall: id('tallgrass'), fern: id('fern'),
+                reeds: id('reeds'), heath: id('heather'), brush: id('brush') };
+      var rubbleT = TY && TY.rubble;
+      for (z = 0; z < GR; z++) for (x = 0; x < GR; x++) {
+        i = z * GR + x;
+        var k = this.kind[i], to = 0;
+        if (!k) {
+          if (rubbleT !== undefined && th.rubble && T.type[i] === rubbleT && this._plantable(x, z)) {
+            var r = patchy(x, z, 4, 6.6);
+            if (r > th.cuts.rubble) { to = id(pickW(th.rubble, region(x, z, 8, 4.2))); if (to) this.dens[i] = Math.round(Math.min(0.4, 0.16 + (r - th.cuts.rubble) * 0.8) * 255); }
+          }
+        } else if (k === K.wheat) {
+          to = id(pickW(th.crops, region(x, z, th.field, 11.3)));
+        } else if (k === K.grass || k === K.tall) {
+          if (th.tall && k === K.tall) to = id(th.tall);
+          else if (patchy(x, z, 7, 3.7) > th.cut) to = id(pickW(th.meadow, region(x, z, 16, 5.9)));
+        } else if (k === K.fern) {
+          if (patchy(x, z, 6, 8.1) > th.cuts.wood) to = id(pickW(th.wood, region(x, z, 12, 2.3)));
+        } else if (k === K.reeds) {
+          if (patchy(x, z, 5, 1.9) > th.cuts.marsh) to = id(pickW(th.marsh, region(x, z, 9, 7.7)));
+        } else if (k === K.heath) {
+          if (patchy(x, z, 6, 4.4) > th.cuts.heath) to = id(pickW(th.heath, region(x, z, 12, 6.1)));
+        } else if (k === K.brush) {
+          if (patchy(x, z, 6, 9.2) > th.cuts.scrub) to = id(pickW(th.scrub, region(x, z, 12, 3.3)));
+        }
+        if (to && to !== k) { this.kind[i] = to; n++; }
+      }
+      if (n) for (i = 0; i < this.chunks.length; i++) { var c = this.chunks[i]; c.empty = false; if (!c.dirty) { c.dirty = true; this.dirtyList.push(c); } }
+      return n;
+    },
+
     // ---- gameplay queries (hot: called from combat, keep them arithmetic) --
 
     defAt: function (gx, gz) {
@@ -1495,7 +2004,9 @@
           var sh = def.h * grow * (1 + (R() - 0.5) * 2 * def.vary) * Math.min(1.3, this.sizeBoost);
           if (py + sh > maxY) maxY = py + sh;
 
-          pv.set(px, py - 0.04, pz);          // rooted just under the surface
+          // rooted just under the surface; a Blender kind's foot is ROOT of the
+          // way up its quad, so it goes down by that much as well
+          pv.set(px, py - (def.root !== undefined ? def.root * sh + ROOT_SINK : 0.04), pz);
           sv.set(sw, sh, sw);
           // A 'card' instance carries NO yaw: its quad is swung to face the
           // camera in the vertex shader, which needs instance-local axes to be
@@ -1523,7 +2034,10 @@
             // the crop to read as its own thing; from the strategic view an
             // individual tuft is a few pixels, and anything that contrasts
             // with the ground at that size reads as stipple rather than grass.
-            col.lerp(grd, this.groundBlend);
+            // (round 113) …by `blend` of it for the Blender kinds: their colour
+            // is in the sprite, and a poppy pulled three quarters of the way to
+            // the mud under it is not red
+            col.lerp(grd, this.groundBlend * (def.blend !== undefined ? def.blend : 1));
           }
           // Multiplied over an already-coloured sprite, and lit afterwards, so
           // it has to sit above 1 or a meadow comes out closer to moss.
@@ -1750,5 +2264,20 @@
     create: create,
     /** Exposed for the editor's swatches and for tooling. */
     atlas: function () { return atlasTexture(); },
+    /** (round 113) the theatre tables `flora` grows from, and where the Blender
+     *  cells are: 'none' (atlas not built), 'loading', 'ready', 'absent', 'failed' */
+    FLORA: FLORA,
+    ERA_FLORA: ERA_FLORA,
+    floraFor: floraFor,
+    sprites: function () { return spritesState; },
+    /** [ms to put the cells together, ms to build the mip chain] — once, at load */
+    spritesMs: function () { return spritesMs; },
+    /** (round 113) for tools/test_round113.js: the field's methods (`flora`)
+     *  and the mip chain, callable on stand-ins without a scene or a canvas */
+    Field: Field,
+    _buildMips: function (cv, tex) { return buildMips(cv, tex); },
+    /** (round 113) set before the atlas is built; false leaves the mip chain to GL */
+    set mipKeep(v) { MIP_KEEP = !!v; },
+    get mipKeep() { return MIP_KEEP; },
   };
 })();

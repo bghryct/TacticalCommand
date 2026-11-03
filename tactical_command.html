@@ -1425,6 +1425,8 @@ body.fpv #tacMap { display: none !important; }
      terrain brush and drawn as one batch per streamed chunk. Exposes
      window.Foliage; the game installs it from the Game constructor. Absent =
      no foliage layer, everything else unaffected. -->
+<!-- (round 113) the forty Blender-modelled ground-cover kinds: their atlas cells, read by foliage.js -->
+<script src="assets/foliage_sprites.js"></script>
 <script src="assets/foliage.js"></script>
 
 <!-- STRUCTURES: modular, destructible, walk-in buildings — walls on cell
@@ -1449,6 +1451,9 @@ body.fpv #tacMap { display: none !important; }
      prop geometry (tools/blender/props_ao.py). Optional: without it the props
      draw as they did. Read by `Obstacles._propAO`. -->
 <script src="assets/props_ao.pack.js"></script>
+<!-- (round 113) props modelled in Blender (tools/blender/props.py): the sandbag
+     walls. Optional: without it the page builds its own. -->
+<script src="assets/props.pack.js"></script>
 <!-- (round 113) the buildings' surfaces, baked in Blender (tools/blender/
      fabric_bake.py). Optional: without it assets/fabric.js draws its courses. -->
 <script src="assets/fabric_tex.js"></script>
@@ -8994,6 +8999,8 @@ const DIRECT_CONTACT_S = 4, DIRECT_REACH = 1.15;
  *  position) or direct fire has come at one of the team in the last
  *  SUPPORT_RETURN_S. See `Unit._supportHolds`. */
 const SUPPORT_CLOSE = 12, SUPPORT_RETURN_S = 8;
+/** …and a tube with fewer bombs than this is out of the fight as a mortar. */
+const SUPPORT_DRY = 3;
 const SQUAD_TETHER = {
   hold: 20, fire: 22, move: 22, reserve: 20, counter: 30, bound: 34, withdraw: 46, assault: 1e9,
 };
@@ -15989,8 +15996,11 @@ function packedGeometry(e) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(f32(e.pos), 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(f32(e.nor), 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(f32(e.col), 3));
-  g.setAttribute('hedge', new THREE.Float32BufferAttribute(f32(e.hk), 3));
-  g.setAttribute('hedgeRim', new THREE.Float32BufferAttribute(f32(e.rim), 3));
+  // (round 113) a pack may leave out the kind (all earth, no sway) and the rim
+  // (the normal itself): assets/props.pack.js does
+  const nor = g.attributes.normal.array;
+  g.setAttribute('hedge', new THREE.Float32BufferAttribute(e.hk ? f32(e.hk) : new Float32Array(nor.length), 3));
+  g.setAttribute('hedgeRim', new THREE.Float32BufferAttribute(e.rim ? f32(e.rim) : nor.slice(), 3));
   g.computeBoundingSphere();
   return g;
 }
@@ -21297,6 +21307,16 @@ class Obstacles {
     this._bagGeos = this._bagGeos || [];
     const slot = (tall ? 4 : 0) + i;
     if (this._bagGeos[slot]) return this._bagGeos[slot];
+    // (round 113) MODELLED IN BLENDER (tools/blender/props.py -> assets/
+    // props.pack.js): the same courses, footprint and hessian, bag for bag,
+    // each bag a subdivided pillow pinched at its tied neck and pressed flat,
+    // with Cycles' occlusion between the courses. The page's own bags below
+    // are the fallback. `game.propPack113 = false` before a map loads.
+    const pk = window.PROP_PACK && window.PROP_PACK[tall ? 'sandbagT' : 'sandbag'];
+    if (pk && pk[i] && !(window.game && window.game.propPack113 === false)) {
+      const g = packedGeometry(pk[i]); g.userData.packed = true;
+      return (this._bagGeos[slot] = g);
+    }
     const r = mulberry32(1700 + i * 31);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(0, 0, 0); rim.push(n[0], n[1], n[2]); };
@@ -24217,7 +24237,7 @@ const PROP_AO_FLOOR = 0.55;
   const decode = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
   P._propAO = function (g, key) {
     const pk = window.PROP_AO && window.PROP_AO[key];
-    if (!pk || !g || !g.attributes || !g.attributes.color || seen.has(g)) return g;
+    if (!pk || !g || !g.attributes || !g.attributes.color || seen.has(g) || (g.userData && g.userData.packed)) return g;
     seen.add(g);
     const col = g.attributes.color;
     if (col.count !== pk.n) { P._propAOStale = (P._propAOStale || 0) + 1; return g; }
@@ -25910,7 +25930,10 @@ class Pathfinder {
     return Math.abs(this.terrain.height(x2, z2) - this.terrain.height(x1, z1)) <= this.climbMax;
   }
 
-  nearestPassable(x, z, maxR, L) {
+  nearestPassable(x, z, maxR, L, foot) {
+    // (round 113) `foot`: by a man on foot's rules (`FOOT_THROUGH`), for a
+    // caller outside `find` — a formation slot in a wood stays in the wood
+    if (foot && !this.foot) { this.foot = true; try { return this.nearestPassable(x, z, maxR, L); } finally { this.foot = false; } }
     L = L || 0;
     x = clamp(x, 0, GRID - 1); z = clamp(z, 0, GRID - 1);
     if (this.passableL(x, z, L)) return { x, z, L };
@@ -35308,7 +35331,8 @@ class Unit {
       const gx = gx0 + dx, gz = gz0 + dz;
       const cover = g._coverAtCell(gx, gz);
       if (cover < AICFG.coverMin) continue;                 // cheap gate — skip open ground
-      if (!g.pathfinder.passable(gx, gz)) continue;
+      // (round 113) a man takes cover IN a wood or the scrub, not only beside it
+      if (!g.pathfinder.passable(gx, gz) && !(!this.def.vehicle && g.obstacles.footThrough(gx, gz) && g.terrain.typePassable(gx, gz))) continue;
       const wx = cellCenter(gx), wz = cellCenter(gz);
       const dd = hyp(wx - this.pos.x, wz - this.pos.z);
       if (dd < 1.4 || dd > radius) continue;
@@ -41869,7 +41893,11 @@ class Unit {
     if (g.mortarTeam113 === false) return false;
     const m = this._teamTube();
     if (!m || !m.alive || m.downed || m.surrendered || m.embarkedIn) return false;   // no tube: riflemen again
-    if (!(m.ammo > 0)) return false;                                              // the tube is dry: so are the rules
+    // the tube is dry: so are the rules. Dry is under SUPPORT_DRY, not zero —
+    // the ammunition train hands a deployed tube one bomb every AMMO_TRAIN_S
+    // (`_ammoTrain`), so a tube at nought was back at one twelve seconds later
+    // and its riflemen flipped back to holding their fire for a single round
+    if (!(m.ammo >= SUPPORT_DRY)) return false;
     if (target && this.explicit && this.target === target) return false;          // the player's own order to him
     if (target && d <= SUPPORT_CLOSE) return false;                               // near enough to rush the position
     const sq = this.squad, now = g.time;
@@ -43640,7 +43668,10 @@ class Editor {
     g.obstacles.refreshHeights();
     // Dress the generated ground with cover that matches the surfaces it just
     // painted — a generated map arrives planted, not bald.
-    if (g.foliage) { g.foliage.clear(); g.foliage.autoSow(true); }
+    if (g.foliage) {
+      g.foliage.clear(); g.foliage.autoSow(true);
+      if (g.foliage.flora && g.flora113 !== false) g.foliage.flora(g.mapDef && g.mapDef.era, g.mapDef && g.mapDef.name);   // (round 113)
+    }
     g.ui.toast('Generated a new field');
   }
   clearMap() {
@@ -46706,8 +46737,12 @@ class Game {
     // one mode ("crawl, crawl, crawl") without re-arming between each click.
     if (!append) this.pendingMove = null;
   }
-  _formationSlots(n, wx, wz, ang, form) {
+  _formationSlots(n, wx, wz, ang, form, foot) {
     form = form || this.formation;
+    // (round 113) ON FOOT unless a vehicle or a gun is among them. Every slot
+    // was snapped out of any prop's cell, so a section ordered into a wood
+    // stood at its edge and in its clearings, whatever the route allowed.
+    if (foot == null) foot = !this._liveSel().some(u => u.def.vehicle || u.def.towed);
     const S = 1.7 * (this.formationSpacing || 1);   // ↔ spacing control scales every pattern
     const fx = Math.sin(ang), fz = Math.cos(ang);   // forward
     const rx = Math.cos(ang), rz = -Math.sin(ang);  // right
@@ -46755,7 +46790,7 @@ class Game {
     }
     // Clamp slots into passable cells
     return slots.map(s => {
-      const c = this.pathfinder.nearestPassable(worldToCell(s.x), worldToCell(s.z), 4);
+      const c = this.pathfinder.nearestPassable(worldToCell(s.x), worldToCell(s.z), 4, 0, foot);
       return c ? { x: cellCenter(c.x), z: cellCenter(c.z) } : { x: wx, z: wz };
     });
   }
@@ -50085,7 +50120,7 @@ class Game {
     let slots = t && t.slots;
     if (!slots || !t.slotAt || hyp(t.slotAt.x - x, t.slotAt.z - z) > 6 || slots.length !== men.length) {
       const ang = Math.atan2(x - rec.cx, z - rec.cz);
-      slots = this._formationSlots(men.length, x, z, ang, opts.form || 'loose');
+      slots = this._formationSlots(men.length, x, z, ang, opts.form || 'loose', !men.some(u => u.def.vehicle || u.def.towed));
       if (t) { t.slots = slots; t.slotAt = { x, z }; }
     }
     men.forEach((u, i) => {
@@ -60565,7 +60600,7 @@ class Game {
   _bearerHolds(u, tubes) {
     if (this.mortarTeam113 === false || !u._teamTube) return false;
     const m = u._teamTube();
-    return !!m && m.alive && tubes.indexOf(m) >= 0 && m.ammo > 0;
+    return !!m && m.alive && tubes.indexOf(m) >= 0 && m.ammo >= SUPPORT_DRY;
   }
 
   // ---- Who fights whom ---------------------------------------------------
@@ -63899,7 +63934,7 @@ class Game {
       // `natural` so a sown field clumps with the ground instead of filling the
       // disc — see `Foliage.paint`. A crop field is the exception: a farmer
       // sows to the edge of what he ploughed, so wheat keeps its hard disc.
-      const crop = id === 'wheat' || id === 'barley' || id === 'rye';
+      const crop = id === 'wheat' || id === 'barley' || id === 'rye' || def.crop === true;   // (round 113) every sown kind
       this.foliage.paint(cx, cz, def.index, Math.max(1, r0 * MAPSCALE), dens === undefined ? 0.8 : dens,
         { hard: true, replace: true, natural: !crop, floor: 0.36 });
     };
@@ -64141,6 +64176,11 @@ class Game {
     // queue is gone, or their rebuild would go with it — and nothing is sown
     // round them (`autoSow` plants every bare cell it may)
     if (this.foliage) { if (dataMap && dataMap.foliage) this._applyMapFoliage(dataMap); else this.foliage.autoSow(false); }
+    // (round 113) …and then the theatre's own plants on what was sown or
+    // painted: its crops field by field, wildflowers in the grass, bulrush in
+    // the reeds, willowherb on the rubble (assets/foliage.js `flora`).
+    // `game.flora113 = false` before a load keeps the eight kinds alone.
+    if (this.foliage && this.foliage.flora && this.flora113 !== false) this.foliage.flora(this.mapDef && this.mapDef.era, this.mapDef && this.mapDef.name);
 
     // Clear the field and deploy the map's WW2 order of battle
     this.select([], false); this.projectiles.clear(); if (this.mines) { for (const m of this.mines) this.scene.remove(m.mesh); this.mines = []; } this.groundFires = []; this.effects.clear();
