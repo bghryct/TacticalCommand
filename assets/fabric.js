@@ -167,6 +167,41 @@
       // as before, so a far village is the flat colour it always was.
       '  float fbFade = 1.0 - smoothstep(fbBrick ? ' + (+o.brickNear).toFixed(2) + ' : ' + (+o.fadeNear).toFixed(2) + ', fbBrick ? ' + (+o.brickFar).toFixed(2) + ' : ' + (+o.fadeFar).toFixed(2) + ', length(vFabV));',
       '  fbFade *= 1.0 - smoothstep(0.18, 0.38, fbPx);',
+      // (round 113) THE SURFACE ITSELF, baked in Blender (tools/blender/
+      // fabric_bake.py -> assets/fabric_tex.js): what a wall or a roof is made
+      // of is read off its own colour as before — brick red, render pale,
+      // stone grey; roof slate blue-grey, straw yellow, clay the rest — and
+      // its tile then says only what it is made OF: the house's own colour
+      // times the tile's light and dark (0.5 is the house), the joint's colour
+      // mixed in, the cavity darkened. Mipmapped, so it does not boil at range
+      // and needs none of the fade the arithmetic does. Wood keeps its boards.
+      '#ifdef FAB_TEX',
+      // the layer and the coordinates first, and ONE sample outside any
+      // branch: a mipmapped lookup needs its neighbours in the same flow
+      '  float fbLum = (diffuseColor.r + diffuseColor.g + diffuseColor.b) / 3.0;',
+      '  float fbL; vec2 fbUv;',
+      '  {',
+      '    if (fbRoof) {',
+      '      bool fbStraw = diffuseColor.r > diffuseColor.b * 1.45 && diffuseColor.g > diffuseColor.b * 1.25 && fbRed < 0.35;',
+      '      fbL = fbStraw ? 5.0 : (diffuseColor.b >= diffuseColor.r * 0.92 ? 3.0 : 4.0);',
+      '      fbUv = fbL == 3.0 ? vec2(fbAlong / ' + f(6 * o.tileRun) + ', vFabP.y / ' + f(6 * o.tileCourse) + ')',
+      '           : fbL == 4.0 ? vec2(fbAlong / ' + f(6 * o.tileRun) + ', vFabP.y / ' + f(8 * o.tileCourse) + ')',
+      '           : vec2(fbAlong, vFabP.y) / ' + f(3 * o.wallCourse) + ';',
+      '    } else if (fbBrick) {',
+      '      fbL = 0.0; fbUv = vec2(fbAlong / ' + f(4 * o.brickRun) + ', vFabP.y / ' + f(12 * o.brickCourse) + ');',
+      '    } else if (fbLum > 0.5) {',
+      '      fbL = 2.0; fbUv = vec2(fbAlong, vFabP.y) / ' + f(3 * o.wallCourse) + ';',
+      '    } else {',
+      '      fbL = 1.0; fbUv = vec2(fbAlong / ' + f(2 * o.wallRun) + ', vFabP.y / ' + f(3 * o.wallCourse) + ');',
+      '    }',
+      '  }',
+      '  vec3 fbT = texture(uFabTex, vec3(fbUv, fbL)).rgb;',
+      '  if (uFabTexOn > 0.5 && !fbWood) {',
+      '    vec3 fbJ = fbL < 1.5 ? vec3(0.30, 0.285, 0.26) : diffuseColor.rgb * 0.5;',
+      '    diffuseColor.rgb *= (0.62 + fbT.r * 0.76) * (1.0 - fbT.b * 0.4);',
+      '    diffuseColor.rgb = mix(diffuseColor.rgb, fbJ, fbT.g * 0.8);',
+      '  } else',
+      '#endif',
       '  diffuseColor.rgb *= mix(1.0, fbTone, fbFade);',
       // …and a front is not one even colour: rain streaks, soot, a repair, a
       // patch the sun has bleached — a slow continuous variation over a few
@@ -195,8 +230,12 @@
         '#include <begin_vertex>\nvFabP = position;\nvFabN = normal;');
       sh.vertexShader = rep(sh.vertexShader, '#include <project_vertex>',
         '#include <project_vertex>\nvFabV = -mvPosition.xyz;');
+      // (round 113) the Blender tiles, where WebGL2 can sample an array
+      var tex = !!(renderer && renderer.capabilities && renderer.capabilities.isWebGL2 && F.texture());
+      if (tex) { sh.uniforms.uFabTex = F.texU; sh.uniforms.uFabTexOn = F.texOn; }
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
-        '#include <common>\nvarying vec3 vFabP;\nvarying vec3 vFabN;\nvarying vec3 vFabV;\n' + glsl(o));
+        '#include <common>\nvarying vec3 vFabP;\nvarying vec3 vFabN;\nvarying vec3 vFabV;\n'
+        + (tex ? '#define FAB_TEX\nuniform highp sampler2DArray uFabTex;\nuniform float uFabTexOn;\n' : '') + glsl(o));
       sh.fragmentShader = rep(sh.fragmentShader, '#include <color_fragment>',
         '#include <color_fragment>\n' + chunk(o));
       // the sky's share of a wall in shade (see `sky` above); Lambert only —
@@ -208,7 +247,7 @@
       }
       if (!ok) F.failed = (F.failed || 0) + 1;
     };
-    var key = '|fab5:' + [o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',');
+    var key = '|fab6:' + [o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '');
     m.customProgramCacheKey = function () {
       return (prevKey ? prevKey.call(this) : '') + key;
     };
@@ -218,6 +257,40 @@
     m._fabric = true;
     m.needsUpdate = true;
     return true;
+  };
+
+  /** (round 113) The Blender tiles as one texture array: a grey placeholder at
+   *  once (so the sampler is never unbound), the real six once the PNGs have
+   *  decoded. `Fabric.texOn.value = 0` draws the arithmetic again, live. */
+  F.texU = { value: null };
+  F.texOn = { value: 0 };
+  F.texture = function () {
+    var T = root.FABRIC_TEX;
+    if (!T || !T.png || !T.png.length || typeof THREE === 'undefined' || !THREE.DataTexture2DArray) return null;
+    if (F.texU.value) return F.texU.value;
+    var n = T.png.length, ph = new Uint8Array(4 * n);
+    for (var i = 0; i < n; i++) { ph[i * 4] = 128; ph[i * 4 + 1] = 0; ph[i * 4 + 2] = 0; ph[i * 4 + 3] = 255; }
+    var t0 = new THREE.DataTexture2DArray(ph, 1, 1, n);
+    t0.needsUpdate = true;
+    F.texU.value = t0;
+    var size = T.size, data = new Uint8Array(size * size * 4 * n), left = n;
+    T.png.forEach(function (b64, k) {
+      var img = new Image();
+      img.onload = function () {
+        var c = document.createElement('canvas'); c.width = size; c.height = size;
+        var cx = c.getContext('2d'); cx.drawImage(img, 0, 0, size, size);
+        data.set(cx.getImageData(0, 0, size, size).data, k * size * size * 4);
+        if (--left) return;
+        var t = new THREE.DataTexture2DArray(data, size, size, n);
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+        t.generateMipmaps = true; t.anisotropy = 4;
+        t.needsUpdate = true;
+        F.texU.value = t; F.texOn.value = F.texWanted === false ? 0 : 1;
+      };
+      img.src = 'data:image/png;base64,' + b64;
+    });
+    return t0;
   };
 
   root.Fabric = F;

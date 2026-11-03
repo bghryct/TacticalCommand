@@ -149,10 +149,15 @@
     { id: 'wood',     name: 'Wood',      color: 0x6b5133, hp: 110, fire: 1.00, cover: 0.45, pen: 0.35, sound: 'wood',  ruin: false, crush: 40,  track: 0.05 },
     { id: 'plank',    name: 'Planking',  color: 0x574227, hp: 85,  fire: 1.00, cover: 0.40, pen: 0.45, sound: 'wood',  ruin: false, crush: 28,  track: 0.04 },
     { id: 'thatch',   name: 'Thatch',    color: 0x9a8146, hp: 45,  fire: 1.00, cover: 0.28, pen: 0.70, sound: 'foliage', ruin: false, rise: 1.25, crush: 14, track: 0.02 },
-    { id: 'brick',    name: 'Brick',     color: 0x743f2e, hp: 300, fire: 0.00, cover: 0.72, pen: 0.05, sound: 'stone', ruin: true,  crush: 150, track: 0.20 },
+    // (round 113) MEASURED ON SCREEN, sunlit, at the playing camera: 0x743f2e
+    // drew a brick front as (202, 151, 125) — peach — and 0x3d1f18 a tiled
+    // roof as (118, 86, 78), a grey-pink. These draw (177, 105, 89) and
+    // (154, 96, 81): Norman brick, and flat clay tile weathered brown (the
+    // tile then browner again, 0x3f1a10: in a low sun 0x582010 was orange).
+    { id: 'brick',    name: 'Brick',     color: 0x601c0c, hp: 300, fire: 0.00, cover: 0.72, pen: 0.05, sound: 'stone', ruin: true,  crush: 150, track: 0.20 },
     { id: 'stone',    name: 'Stone',     color: 0x77736a, hp: 420, fire: 0.00, cover: 0.78, pen: 0.02, sound: 'stone', ruin: true,  crush: 0,   track: 0.32 },
     { id: 'concrete', name: 'Concrete',  color: 0x8e8b83, hp: 800, fire: 0.00, cover: 0.86, pen: 0.00, sound: 'stone', ruin: true,  crush: 0,   track: 0.46 },
-    { id: 'tile',     name: 'Roof tile', color: 0x3d1f18, hp: 80,  fire: 0.15, cover: 0.30, pen: 0.30, sound: 'stone', ruin: false, rise: 0.78, crush: 30, track: 0.05 },
+    { id: 'tile',     name: 'Roof tile', color: 0x3f1a10, hp: 80,  fire: 0.15, cover: 0.30, pen: 0.30, sound: 'stone', ruin: false, rise: 0.78, crush: 30, track: 0.05 },
     { id: 'metal',    name: 'Corrugate', color: 0x5c6663, hp: 110, fire: 0.05, cover: 0.35, pen: 0.25, sound: 'metal', ruin: false, rise: 0.42, crush: 45, track: 0.10 },
     { id: 'glass',    name: 'Glass',     color: 0x9fc4d8, hp: 8,   fire: 0.00, cover: 0.05, pen: 0.95, sound: 'metal', ruin: false, crush: 2,   track: 0.00 },
   ];
@@ -564,7 +569,9 @@
    *  country, some new and orange, some weathered to brown or lichen-grey.
    *  Only the tile roofs vary — thatch, corrugated iron and concrete are what
    *  they are. Returns a look-alike of the material with its own colour. */
-  var ROOF_LOOK = [null, 0x33383f, 0x4a3228, 0x5c2a1e, 0x2c323a, 0x564a3e];
+  // (round 113) the clay tiles re-measured with the base tile (see MATS): a
+  // brown and a redder firing; the slates and the lichen-grey as they were
+  var ROOF_LOOK = [null, 0x33383f, 0x42200f, 0x562412, 0x2c323a, 0x564a3e];
   var _roofMats = {};
   // A HOUSE'S OWN FRONT (round 106). The houses of a block (`_buildBlock`) are
   // told apart by their walls as a street's are — brick of several firings,
@@ -572,12 +579,24 @@
   // shutters. Drawing only: the material, and so the wall's strength, is the
   // house's. 0 is the material's own colour; nothing but a block sets a look.
   var WALL_LOOK = {
-    brick: [0, 0x7d4532, 0x8c523a, 0x6c3a2a, 0xd9cdb2, 0xcfb58a, 0xe3ddd0, 0xbdb3a0, 0xd2a593],
+    // (round 113) the three firings re-measured with the base brick (MATS)
+    brick: [0, 0x6a2412, 0x521a0e, 0x5e2a16, 0xd9cdb2, 0xcfb58a, 0xd6cfc0, 0xbdb3a0, 0xd2a593],
     stone: [0, 0xc9bd9c, 0xa9a394, 0xb9ad93, 0xd7cfb9, 0x8f8a7e],
     wood:  [0, 0x75583a, 0x5f4a33, 0xcdbf9f],
     plank: [0, 0x5f4a2e, 0x4e3c25, 0x6a5537],
   };
   var _wallMats = {};
+  /** (round 113) A FRONT FOR A HOUSE NOBODY GAVE ONE. Only a block's houses
+   *  (`_buildBlock`) carried a look; a house laid in the editor — every house
+   *  in Village, which is brick — was the material's one colour, so a whole
+   *  village was one brick. By the house's id: seven in ten a brick of its own
+   *  firing, three limewashed or rendered over it, as a Norman street is.
+   *  `Structures.HOUSE_LOOK.on = false` (then rebuild) is one colour again. */
+  var HOUSE_LOOK = { on: true };
+  function houseLook(bid) {
+    var h = (bid * 2246822519) >>> 0, r = h % 100;
+    return r < 70 ? ((h >>> 8) % 4) : 4 + ((h >>> 8) % 5);
+  }
   function wallLook(mat, look) {
     var L = look && mat && WALL_LOOK[mat.id];
     if (!L) return mat;
@@ -930,6 +949,35 @@
       if (this.roofM[this.li(gx, gz, L2)]) return true;
     }
     return false;
+  };
+  /** (round 113) WHICH HOUSE, FOR ITS COLOURS ONLY. A block's houses carry
+   *  `bid`; a house laid in the editor has none, so the whole of Village was
+   *  one brick and one roof. The connected run of roofed columns a column
+   *  stands in, numbered by a flood the first time anything asks after a map
+   *  is laid (`clear` forgets it). Drawing only — nothing in the battle reads it. */
+  Structures.prototype._houseOf = function (gx, gz) {
+    if (!this._hid) this._floodHouses();
+    return this._hid[gz * G.GRID + gx];
+  };
+  Structures.prototype._floodHouses = function () {
+    var N = G.GRID, hid = this._hid = new Uint8Array(N * N), q = new Int32Array(N * N), n = 0;
+    if (!this.wallM) return;
+    for (var z0 = 0; z0 < N; z0++) for (var x0 = 0; x0 < N; x0++) {
+      var i0 = z0 * N + x0;
+      if (hid[i0] || !this.mask[i0] || !this._roomAt(x0, z0, 0)) continue;
+      var id = 1 + (n++ % 255), h = 0, t = 0;
+      hid[i0] = id; q[t++] = i0;
+      while (h < t) {
+        var i = q[h++], x = i % N, z = (i - x) / N;
+        for (var k = 0; k < 4; k++) {
+          var nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0), nz = z + (k === 2 ? 1 : k === 3 ? -1 : 0);
+          if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
+          var j = nz * N + nx;
+          if (hid[j] || !this.mask[j] || !this._roomAt(nx, nz, 0)) continue;
+          hid[j] = id; q[t++] = j;
+        }
+      }
+    }
   };
   /** Highest level with a floor slab in this column (0 if none). */
   Structures.prototype.topLevel = function (gx, gz) {
@@ -1966,6 +2014,11 @@
           var dmg = 1 - this.wallH[i * 4 + e] / 255;
           var yw = this.wallBase(gx, gz, e) + L * FLOOR_H;     // the wall's house's storey
           var lk = this.look[gz * G.GRID + gx];
+          if (!lk && HOUSE_LOOK.on) {
+            var hb = this.bid[gz * G.GRID + gx] || this._houseOf(gx, gz);
+            if (!hb) { var dh = EDGE_D[e], hx = gx + dh[0], hz = gz + dh[1]; if (hx >= 0 && hz >= 0 && hx < G.GRID && hz < G.GRID) hb = this._houseOf(hx, hz); }
+            if (hb) lk = houseLook(hb);
+          }
           if (!lk && !this.bid[gz * G.GRID + gx]) {
             var de0 = EDGE_D[e], lx0 = gx + de0[0], lz0 = gz + de0[1];
             if (lx0 >= 0 && lz0 >= 0 && lx0 < G.GRID && lz0 < G.GRID) lk = this.look[lz0 * G.GRID + lx0];
@@ -1993,7 +2046,7 @@
         if (this.floorM[i]) { emitFloor(B, cx, y, cz, MATS[this.floorM[i]], 1 - this.floorH[i] / 255, seed0 + L * 3); pieces++; }
         if (this.roofM[i]) {
           var rsh = this.roofK[i] & 7, rrk = this.roofK[i] >> 3, rdm = 1 - this.roofH[i] / 255;
-          emitRoof(B, cx, y + FLOOR_H, cz, roofLook(MATS[this.roofM[i]], this.bid[gz * G.GRID + gx]), rsh, rrk, rdm, seed0 + L * 11); pieces++;
+          emitRoof(B, cx, y + FLOOR_H, cz, roofLook(MATS[this.roofM[i]], this.bid[gz * G.GRID + gx] || (HOUSE_LOOK.on ? this._houseOf(gx, gz) : 0)), rsh, rrk, rdm, seed0 + L * 11); pieces++;
           if (rsh !== R_FLAT) {
             // Close the ends of the ridge. The gable edges are the ones facing
             // ALONG the ridge; where the roof carries on into the next cell
@@ -2106,6 +2159,7 @@
     // event that replaces the whole set, and a single flight shelled out of a
     // building is caught by `portalUp` being re-checked at the point of use.
     this._stairStamp = (this._stairStamp || 0) + 1;
+    this._hid = null;                      // (round 113) the houses, flooded again on demand
     for (var i = 0; i < this.chunks.length; i++) {
       var c = this.chunks[i];
       if (!c) continue;
@@ -2872,7 +2926,7 @@
     /** The field changed size (Normandy's mutable GRID). Instances then need
      *  `resize(n)` of their own; this keeps the module's own view in step. */
     setGrid: function (n) { if (G) G.GRID = n; },
-    MATS: MATS, PRESETS: PRESETS, EDGE_D: EDGE_D,
+    MATS: MATS, PRESETS: PRESETS, EDGE_D: EDGE_D, HOUSE_LOOK: HOUSE_LOOK,
     DRESS: DRESS,
     /** A map's big plots built as blocks of houses (`_buildBlock`): false, and
      *  a reload, gives the one building per plot back. */

@@ -1445,6 +1445,13 @@ body.fpv #tacMap { display: none !important; }
      canopy shader's own attribute layout (tools/blender/trees.py). Optional:
      without it `Obstacles._treeVariant` builds its procedural trees. -->
 <script src="assets/trees.pack.js"></script>
+<!-- (round 113) the props' occlusion, baked in Cycles from the page's own
+     prop geometry (tools/blender/props_ao.py). Optional: without it the props
+     draw as they did. Read by `Obstacles._propAO`. -->
+<script src="assets/props_ao.pack.js"></script>
+<!-- (round 113) the buildings' surfaces, baked in Blender (tools/blender/
+     fabric_bake.py). Optional: without it assets/fabric.js draws its courses. -->
+<script src="assets/fabric_tex.js"></script>
 <script src="assets/fabric.js"></script>
 <script src="assets/grade.js"></script>
 <script src="assets/wasmpath.js"></script>
@@ -6840,6 +6847,18 @@ const RTT_KIT = {
   jptype92:  { arm: 'jptype92', load: 2100, side: 'nambu14', sideLoad: 16 },
   jpofficer: { arm: 'nambu14', load: 16, nades: 2, melee: 'sword' },
   jpeisei:   { arm: 'nambu14', load: 16, nades: 1 },
+  // ---- (round 113) the crew of a mortar ---------------------------------------
+  // The tube is the weapon, and this game's one mortar unit is its crew. The
+  // men who served one carried a pistol, or a carbine slung while they worked;
+  // the bombs come up with the riflemen of the team. With the tube dry, or the
+  // enemy inside pistol range of the baseplate, the crew draw — see
+  // `Unit._primaryDry` and `_tubeMasked`. (The Type 89 is a section weapon
+  // fired by a rifleman and is left as it was.)
+  usmortar:  { side: 'm1911', sideLoad: 21 },
+  us60mm:    { side: 'm1911', sideLoad: 21 },
+  germortar: { side: 'p38', sideLoad: 16 },
+  ukmortar3: { side: 'enfield2', sideLoad: 12 },
+  sovmortar: { side: 'tt33', sideLoad: 16 },
 };
 
 /** FIRE AS THE MANUALS TAUGHT IT, for every automatic. `burst` the rounds
@@ -8970,6 +8989,11 @@ const WIN_MATE_K = 0.6;
  *  after it last came at him, and how far past his weapon's range a target of
  *  his still counts as one he is fighting. */
 const DIRECT_CONTACT_S = 4, DIRECT_REACH = 1.15;
+/** (round 113) A mortar team's riflemen hold their fire for the tube until an
+ *  enemy is this close to them (12 u, 48 m: inside it he can rush the
+ *  position) or direct fire has come at one of the team in the last
+ *  SUPPORT_RETURN_S. See `Unit._supportHolds`. */
+const SUPPORT_CLOSE = 12, SUPPORT_RETURN_S = 8;
 const SQUAD_TETHER = {
   hold: 20, fire: 22, move: 22, reserve: 20, counter: 30, bound: 34, withdraw: 46, assault: 1e9,
 };
@@ -19190,8 +19214,10 @@ const PROP_VARIANT_H = {
   cart: [1.53, 1.98],
   // living crowns, drawn tops at their own size 1 (a wood's tree at h = 1, its
   // spruce with the 1.12 it stands taller): `_simV` takes 85% of them
-  tree: { broad: [8.91, 10.27, 9.48, 9.16, 9.83, 9.58, 9.73, 9.98], conifer: [10.65, 10.02, 10.02, 10.45, 10.03, 10.39] },
-  oak: [15.31, 13.85, 14.68, 14.83], pine: [19.0, 19.4, 19.26, 19.12, 19.3, 19.9],
+  // (round 113) regrown in Blender (tools/blender/trees.py): the tops off the
+  // pack at its own 2.53 m a unit (the oak's 4.93), poplars 8-9, apples 10-11
+  tree: { broad: [8.90, 10.10, 9.47, 9.18, 9.83, 9.56, 9.71, 10.20, 14.36, 14.61, 5.02, 4.45], conifer: [10.65, 10.02, 10.02, 10.45, 10.03, 10.39] },
+  oak: [15.31, 13.85, 14.66, 14.85], pine: [19.0, 19.4, 19.26, 19.12, 19.3, 19.9],
   bush: [1.62, 1.60, 1.73, 1.65, 1.62, 1.60], scrub: [0.99, 0.93, 0.94, 0.97, 1.02, 0.99],
   // the ruined wall by its stone too (`_wallVariant` seeds with the palette)
   // (re-measured with the stones and bricks at their own length, round 106)
@@ -19323,6 +19349,32 @@ const OBS_DEF = {
   lowwall:    { hp: 90,  height: 1.0, color: 0x7a756a },                 // knee-high wall (partial cover)
   // ---- Multi-floor building (garrisonable, elevated sightlines) ----------
   building:   { hp: 520, height: 6.6, color: 0x968a70, garrison: 6, floors: 3, big: true },
+};
+
+/** (round 113) WHAT A MAN ON FOOT WALKS THROUGH — and how far he keeps from
+ *  the middle of its cell, in world units.
+ *
+ *  A prop fills its cell, and a cell is six metres. So a wood was a wall to a
+ *  rifleman, a bush was a pillar six metres across, and a crate in a farmyard
+ *  shut the gate. "Trees are blocking infantry pathing. So are bushes etc." —
+ *  the user. Everything here is something a man steps round, pushes through
+ *  or climbs over inside six metres: trees and scrub, the farmyard's crates,
+ *  barrels and carts, stones and graves, rubble, and the anti-TANK obstacles,
+ *  which a man walks between. What still stops him is what stopped him in
+ *  1944: walls, hedgerow banks, fences, wire, buildings and fortifications.
+ *  Vehicles see every prop as before (`Pathfinder.foot` is raised only for a
+ *  search on foot). The number is the trunk, crate or cart itself, plus a
+ *  shoulder: a man is kept that far from the cell's centre (`Unit._separate`)
+ *  and arrives that far off it (`_updateMove`). `game.footThrough113 = false`
+ *  before a map loads is the old wall of trees. */
+/** …and how hard a man pushed off a trunk leans round it (tangent per unit
+ *  of radial push). */
+const TRUNK_LEAN = 0.55;
+const FOOT_THROUGH = {
+  tree: 0.22, oak: 0.25, pine: 0.18, deadtree: 0.16, bush: 0, scrub: 0,
+  hay: 0.12, haystack: 0.5, grave: 0.18, rock: 0.16, menhir: 0.22, well: 0.32, statue: 0.42,
+  crate: 0.24, barrel: 0.16, oildrum: 0.16, supplies: 0.28, ammocrates: 0.28, logstack: 0.42,
+  cart: 0.5, wreckedcar: 0.5, campfire: 0.12, rubble: 0, hedgehog: 0.22, dragonteeth: 0.2,
 };
 
 /**
@@ -20571,7 +20623,7 @@ class Obstacles {
    *  the same local size the old tree had, so its scale rules still hold. */
   _treeVariant(i, oak) {
     this._treeGeos = this._treeGeos || [];
-    const slot = oak ? 8 + i : i;
+    const slot = oak ? 100 + i : i;          // (round 113) the broadleaf now runs past 8
     if (this._treeGeos[slot]) return this._treeGeos[slot];
     // GROWN IN BLENDER (tools/blender/trees.py -> assets/trees.pack.js): a
     // forking skeleton down to twigs, the crown hung on the branch ends, real
@@ -20745,13 +20797,16 @@ class Obstacles {
     const yBase = pine ? 1.35 + r() * 0.3 : 1.2 + r() * 0.2, yTop = pine ? 5.2 + r() * 0.3 : 3.6 + r() * 0.2;
     const R0 = (pine ? 1.05 : 0.95) * (0.9 + r() * 0.2);
     const lean = [(r() - 0.5) * 0.06, (r() - 0.5) * 0.06];
-    const PAL = [0x274a2b, 0x2c522f, 0x213f25, 0x2a4d2c];
+    // (round 113) a fifth lighter: a spruce wood read black at eye level
+    const PAL = [0x2e5733, 0x355f37, 0x284c2c, 0x31592f];
     const green = hex(PAL[i % PAL.length]);
 
     // ---- trunk (bark, kind 3) ---------------------------------------------
     {
       const bark = hex(pine ? 0x5a3f2c : 0x4a3a2a), sides = 6;
-      const ys = [0, 0.3, yTop * 0.5, yTop * 0.9], rads = [0.17, 0.12, 0.08, 0.03];
+      // (round 113) slimmer, and the root flare in the bottom third of a metre:
+      // a flare to 0.3 up a 0.17 bole was an elephant's foot under every spruce
+      const ys = [0, 0.12, yTop * 0.5, yTop * 0.9], rads = [0.14, 0.1, 0.07, 0.03];
       for (let k = 0; k < ys.length - 1; k++) for (let j = 0; j < sides; j++) {
         const q0 = j / sides * Math.PI * 2, q1 = (j + 1) / sides * Math.PI * 2;
         const P = (kk, q) => [lean[0] * ys[kk] + Math.cos(q) * rads[kk], ys[kk], lean[1] * ys[kk] + Math.sin(q) * rads[kk]];
@@ -23209,7 +23264,9 @@ class Obstacles {
    *  hides and stops: a line piece laid along the slope (`floorLocal`) on the
    *  ground under the point, anything else on its cell (round 106). */
   floorAt(o, gx, gz, x, z) { return o.floorLocal ? this.terrain.heightAt(x, z) : this.terrain.height(gx, gz) * HSCALE; }
-  blocked(x, z) { return inGrid(x, z) && this.occupied[z * GRID + x] === 1; }
+  blocked(x, z) { return inGrid(x, z) && this.occupied[z * GRID + x] !== 0; }
+  /** (round 113) A prop a man on foot walks through (`FOOT_THROUGH`). */
+  footThrough(x, z) { return inGrid(x, z) && this.occupied[z * GRID + x] === 2; }
 
   /** Re-seat every prop on the current terrain height (call after sculpting so
    *  doodads ride up/down with the ground instead of floating or being buried). */
@@ -23383,7 +23440,9 @@ class Obstacles {
         const c = new THREE.Mesh(this._coniferVariant(tv), this.mat.conifer);
         c.castShadow = true; c.receiveShadow = true; group.add(c);
       } else {                      // broadleaf: trunk, limbs and crown in one (round 98, `_treeVariant`)
-        tv = Math.floor(rng() * 8);
+        // (round 113) every variant the Blender pack grew: the eight broadleaf,
+        // two Lombardy poplars (8-9) and two orchard apples (10-11)
+        tv = Math.floor(rng() * ((window.TREE_PACK && TREE_PACK.tree && TREE_PACK.tree.length) || 8));
         const t = new THREE.Mesh(this._treeVariant(tv), this.mat.tree);
         t.castShadow = true; t.receiveShadow = true; group.add(t);
       }
@@ -23935,7 +23994,12 @@ class Obstacles {
     this._byCell.set(gz * GRID + gx, obs);
     if (PROP_LINE_KIND[type] && this._lineSimReady) this._lineSimHeights(gx, gz);   // laid in play
     if (def.fire) this.fires.push(obs);
-    this.occupied[gz * GRID + gx] = 1;
+    // (round 113) 2: a prop a man on foot walks through (`FOOT_THROUGH`). The
+    // WebAssembly search blocks on 1 alone, so it passes these for free; every
+    // other reader asks `blocked`, which still means "a prop is here".
+    const foot = FOOT_THROUGH[type] != null && !(window.game && window.game.footThrough113 === false);
+    this.occupied[gz * GRID + gx] = foot ? 2 : 1;
+    if (foot) obs.footR = FOOT_THROUGH[type];
     const hr = HAZ_RANK[type] || 0;
     if (hr) { this.hazSelf[gz * GRID + gx] = hr; this._hazTouch(gx, gz); }
     this.terrain._touchMini(gx, gz, 2);          // its dot on the minimap
@@ -24133,6 +24197,49 @@ class Obstacles {
 // on a bocage map. Nothing in `add` rolls for anything that matters, and
 // `_orientHedges` builds the end-of-line variants while the scenery is baked.
 cosmeticClass(Obstacles, ['add', '_orientHedges', 'wreckModelReady']);
+
+// (round 113) THE PROPS, OCCLUDED IN BLENDER. "using blender improve the
+// graphics of all of the trees, and doodads, and buildings" — the user. The
+// props are modelled here, part by part, and shaded by `_kit`'s one guess at
+// occlusion: darker near the ground and underneath. Nothing between the parts:
+// no shadow under a batten, between two stacked cases, in a cart's wheel,
+// between the courses of a sandbag wall. tools/blender/props_ao.py takes each
+// variant's own triangles, stands them on a ground plane and bakes Cycles AO
+// into their corners (assets/props_ao.pack.js); this darkens the colours each
+// builder already gives by it, the first time that geometry is built (the
+// builders cache theirs). A variant whose corner count no longer matches the
+// bake — its builder has changed since — is left exactly as it was, so a stale
+// bake can never smear one prop's shading onto another. Drawing only.
+// `game.propAO113 = false` before a map loads draws them unbaked.
+const PROP_AO_FLOOR = 0.55;
+(function () {
+  const P = Obstacles.prototype, seen = new WeakSet();
+  const decode = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+  P._propAO = function (g, key) {
+    const pk = window.PROP_AO && window.PROP_AO[key];
+    if (!pk || !g || !g.attributes || !g.attributes.color || seen.has(g)) return g;
+    seen.add(g);
+    const col = g.attributes.color;
+    if (col.count !== pk.n) { P._propAOStale = (P._propAOStale || 0) + 1; return g; }
+    const ao = pk._u || (pk._u = decode(pk.ao)), a = col.array;
+    for (let i = 0; i < pk.n; i++) {
+      const k = PROP_AO_FLOOR + (1 - PROP_AO_FLOOR) * Math.pow(ao[i] / 255, 0.8);
+      a[i * 3] *= k; a[i * 3 + 1] *= k; a[i * 3 + 2] *= k;
+    }
+    col.needsUpdate = true;
+    P._propAODone = (P._propAODone || 0) + 1;
+    return g;
+  };
+  for (const m of ['_caseVariant', '_hayVariant', '_graveVariant', '_fenceVariant', '_sandbagVariant', '_teethVariant', '_drumVariant',
+                   '_logVariant', '_barricadeVariant', '_rubbleVariant', '_concreteVariant', '_cartVariant', '_statueVariant']) {
+    const f = P[m];
+    if (typeof f !== 'function') continue;
+    P[m] = function () {
+      const g = f.apply(this, arguments);
+      return window.game && window.game.propAO113 === false ? g : this._propAO(g, m + ':' + Array.prototype.join.call(arguments, ','));
+    };
+  }
+})();
 // …and the batcher's bake (round 106): every InstancedMesh it builds draws a
 // three.js UUID from `Math.random`, four numbers a batch, 220 on Villers-
 // Bocage — so a battle seeded before the scenery was batched (the first
@@ -25623,6 +25730,7 @@ class Pathfinder {
     this.floating = false;   // set during find() for hovering units
     this.climbMax = CLIMB;   // set during find() from the unit's climbOf()
     this.crushing = 0;       // set during find() for vehicles: what they can shove aside
+    this.foot = false;       // (round 113) set during find() for a man on foot: `FOOT_THROUGH`
     this.resize();
   }
 
@@ -25671,7 +25779,7 @@ class Pathfinder {
 
   passable(x, z) {
     if (!inGrid(x, z)) return false;
-    if (this.obstacles.blocked(x, z) && !this._crushable(x, z)) return false;
+    if (this.obstacles.blocked(x, z) && !this._crushable(x, z) && !(this.foot && this.obstacles.footThrough && this.obstacles.footThrough(x, z))) return false;
     if (this.floating) return this.terrain.typeAt(x, z) !== TYPE.stone; // ghosts drift over water
     // A TANK CAN GO INTO THE RIVER. It is allowed and it is ruinous — see
     // `WATER_DETOUR` — so a route only ever uses it where there is genuinely
@@ -25996,7 +26104,11 @@ class Pathfinder {
     // the order to the bank. `amphibious` crosses it for real.
     this.wading = this.crushing > 0;
     this.amphibious = !!amphib;
+    // (round 113) a search on foot crosses trees, scrub and small props —
+    // exactly the searches `_wasmSearch` runs, whose grid blocks on 1 alone
+    this.foot = !this.floating && !this.crushing && !this.amphibious;
     const out = this._find(sx, sz, ex, ez, sL | 0, eL | 0);
+    this.foot = false;
     this.floating = false;
     this.climbMax = CLIMB;
     this.crushing = 0;
@@ -38028,6 +38140,8 @@ class Unit {
       if (d < 2 && !(this.fuseT >= 0)) { this.fuseT = this.def.fuse != null ? this.def.fuse : 1.0; this.game.sfx.fuse(); this.path = []; }
       return;
     }
+    // (round 113) a mortar team's rifleman given area fire by the AI holds it
+    if (!this.explicit && this._supportHolds(null, d)) { this.groundAtk = null; if (this.state === 'attack' && !this.target) this.state = 'idle'; return; }
     const rng = this.def.rng;
     const minR = this.def.minRng || 0;
     if (d > rng) return;                        // still walking into range
@@ -38187,7 +38301,13 @@ class Unit {
     const wp = this.path[this.pathIdx];
     const dx = wp.x - this.pos.x, dz = wp.z - this.pos.z;
     const d = hyp(dx, dz);
-    const arrive = wp.tight ? 0.15 : this.pathIdx === this.path.length - 1 ? 0.3 : 0.6;
+    let arrive = wp.tight ? 0.15 : this.pathIdx === this.path.length - 1 ? 0.3 : 0.6;
+    // (round 113) a waypoint on a tree's cell is reached beside the tree:
+    // `_separate` keeps him `footR` off the trunk
+    if (!this.def.vehicle && arrive < 0.6) {
+      const wgx = worldToCell(wp.x), wgz = worldToCell(wp.z), O = this.game.obstacles;
+      if (inGrid(wgx, wgz) && O.occupied[wgz * GRID + wgx] === 2) { const o = O.at(wgx, wgz); if (o && o.footR) arrive = Math.max(arrive, o.footR + 0.08); }
+    }
     if (d < arrive) {
       // Reaching a waypoint on another storey is what commits the climb — the
       // geometry check in `update` then keeps him there.
@@ -38459,7 +38579,7 @@ class Unit {
     // normal is (cos b, -sin b).
     const step = LANE_STEP * dt * side;
     const nx = this.pos.x + Math.cos(b) * step, nz = this.pos.z - Math.sin(b) * step;
-    if (this.game.pathfinder.passableAt(nx, nz, this.lvl)
+    if (this._footPassAt(nx, nz)
       && this.game._crossOk(this.pos.x, this.pos.z, nx, nz, this.lvl)) {
       this.pos.x = nx; this.pos.z = nz;
       this._laneDrift = (this._laneDrift || 0) + Math.abs(step);
@@ -38524,16 +38644,54 @@ class Unit {
         if (!this._nudge(ux * push, 0)) this._nudge(0, uz * push);
       }
     }
+    // (round 113) …AND ROUND THE TREE IN HIS CELL. He may cross a cell with a
+    // tree, a crate or a cart in it now (`FOOT_THROUGH`); the trunk is still
+    // standing in the middle of it, and he goes round, not through.
+    if (!this.def.vehicle && !this.lvl) {
+      const O = game.obstacles, gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z);
+      if (inGrid(gx, gz) && O.occupied[gz * GRID + gx] === 2) {
+        const o = O.at(gx, gz), r = o ? o.footR || 0 : 0;
+        if (r > 0) {
+          const cx = cellCenter(gx), cz = cellCenter(gz), dx = this.pos.x - cx, dz = this.pos.z - cz, d = hyp(dx, dz);
+          if (d < r) {
+            // out from it — and ROUND it: routes run cell centre to cell
+            // centre, so a man often walks dead at the trunk, and a straight
+            // push sent him back down his own line every tick for ever (three
+            // of twelve stood in a pine wood for three minutes). The push
+            // leans toward the side he is heading for; dead on, his own side.
+            const ux = d > 1e-3 ? dx / d : Math.cos(this.face), uz = d > 1e-3 ? dz / d : -Math.sin(this.face);
+            let side = (this.id & 1) ? 1 : -1;
+            const wp = this.path.length && this.pathIdx < this.path.length ? this.path[this.pathIdx] : null;
+            if (wp) {
+              const hx = wp.x - this.pos.x, hz = wp.z - this.pos.z, t = -uz * hx + ux * hz;
+              if (Math.abs(t) > 0.1 * hyp(hx, hz)) side = t > 0 ? 1 : -1;
+            }
+            let px = ux - uz * side * TRUNK_LEAN, pz = uz + ux * side * TRUNK_LEAN;
+            const pl = hyp(px, pz); px /= pl; pz /= pl;
+            this.pos.x = cx + px * r; this.pos.z = cz + pz * r;
+          }
+        }
+      }
+    }
   }
 
   /** Move by (dx, dz) if the ground allows it. Returns whether it happened. */
   _nudge(dx, dz) {
     if (!dx && !dz) return false;
     const nx = this.pos.x + dx, nz = this.pos.z + dz;
-    if (!this.game.pathfinder.passableAt(nx, nz, this.lvl)) return false;
+    if (!this._footPassAt(nx, nz)) return false;
     if (!this.game._crossOk(this.pos.x, this.pos.z, nx, nz, this.lvl)) return false;
     this.pos.x = nx; this.pos.z = nz;
     return true;
+  }
+  /** (round 113) Can he stand at (wx, wz)? A man on foot by the rules his
+   *  route was found by (`FOOT_THROUGH`); anything else as before. */
+  _footPassAt(wx, wz) {
+    const pf = this.game.pathfinder, was = pf.foot;
+    pf.foot = !this.def.vehicle && !this.def.floats;
+    const ok = pf.passableAt(wx, wz, this.lvl);
+    pf.foot = was;
+    return ok;
   }
 
   // ---- Damage & death ---------------------------------------------------
@@ -40351,7 +40509,8 @@ class Unit {
     if (def.vehicle || !(def.arms || def.side || def.melee) || this.surrendered) return false;
     if (this._switchT > 0 || this._bayoT > 0) return true;
     const A = def.arms ? RTT_ARMS[def.arms] : null;
-    const primaryDry = !A || this.ammo <= 0;
+    // (round 113) his own weapon, which is not always a small arm
+    const primaryDry = this._primaryDry() || this._tubeMasked(t, d);
     if (def.side) {
       if (!this.onSide && primaryDry && this.sideAmmo > 0 && this.reloadT <= 0) { this._swapArms(true); return true; }
       if (this.onSide && !primaryDry && this.reloadT <= 0) { this._swapArms(false); return true; }
@@ -40406,7 +40565,7 @@ class Unit {
     if (d > CHARGE_RNG || d <= this._meleeReach() * 0.85) return false;
     if (this.suppState === 'Pinned' || this.ccState === 'broken' || this.ccState === 'panicked' || this.ccState === 'cowering') return false;
     const A = this.def.arms ? RTT_ARMS[this.def.arms] : null;
-    const dry = (!A || this.ammo <= 0) && (!this.def.side || this.sideAmmo <= 0);
+    const dry = this._primaryDry() && (!this.def.side || this.sideAmmo <= 0);
     const blade = this.bayoFixed || this.def.melee === 'sword';
     // in an assault — his own, or his section's — or at a man close in who has
     // gone to ground and stopped fighting back: the moment a bayonet charge was for
@@ -40462,6 +40621,10 @@ class Unit {
     if (!P || this.cd > 0 || d > PISTOL_RNG) return;
     this.targetFace = Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z);
     if (!this.game.hasLOS(this, t) || !this._layGun(t)) return;
+    // (round 113) NOT THROUGH HIS OWN MEN. Every other small arm keeps its lane
+    // clear (`_updateCombat`); the pistol never asked, and a mortar crew that
+    // drew on a man at nine units put three rounds into its own bearers.
+    if (this._friendlyInLine(t.pos.x, t.pos.z, FIRE_OVERSHOOT)) { this.cd = 0.15; return; }
     if (!this._spendRound()) return;
     this.attackPlayT = 0.2; this.recoilT = 0.12;
     this.game.projectiles.fireBullet(this, t, { dmg: (PISTOL_DMG[P.cal] || 20) * this.dmgMult(), spread: 0.022, mv: P.mv });
@@ -40902,10 +41065,30 @@ class Unit {
     F.kv.copy(F.k).multiplyScalar(this._pitScale());
     F.m.makeRotationY(this.face || 0).scale(F.kv);
     F.m.setPosition(this.pos.x, this.game.terrain.heightAt(this.pos.x, this.pos.z), this.pos.z);
+    this._foxFace = this.face || 0; this._foxX = this.pos.x; this._foxZ = this.pos.z; this._foxShown = true;
     F.rim.setMatrixAt(i, F.m);
     F.rim.count = Math.max(F.rim.count, i + 1);
     F.rim.instanceMatrix.needsUpdate = true;
     return i;
+  }
+  /** (round 113) A FOXHOLE GIVES ITS MAN AWAY. Holes are one instanced mesh
+   *  at scene level, so the fog's cull did not reach them: a defence dug in
+   *  since dawn drew its whole line of holes through the fog. Drawn once its
+   *  owner has been seen in it (`seen` is this frame's answer for him) —
+   *  after that the ground is known, and a hole does not move. */
+  _foxFog(seen) {
+    if (seen) this._foxKnown = true;
+    const want = !!this._foxKnown;
+    if (this._foxShown === want) return;
+    const F = this.game._foxPool;
+    if (!F || !(this._foxSlot >= 0)) return;
+    this._foxShown = want;
+    if (!want) { F.rim.setMatrixAt(this._foxSlot, F.zero); F.rim.instanceMatrix.needsUpdate = true; return; }
+    F.kv.copy(F.k).multiplyScalar(this._pitScale());
+    F.m.makeRotationY(this._foxFace != null ? this._foxFace : (this.face || 0)).scale(F.kv);
+    F.m.setPosition(this._foxX != null ? this._foxX : this.pos.x, this.game.terrain.heightAt(this._foxX != null ? this._foxX : this.pos.x, this._foxZ != null ? this._foxZ : this.pos.z), this._foxZ != null ? this._foxZ : this.pos.z);
+    F.rim.setMatrixAt(this._foxSlot, F.m);
+    F.rim.instanceMatrix.needsUpdate = true;
   }
   _foxRelease() {
     const F = this.game._foxPool;
@@ -41656,6 +41839,69 @@ class Unit {
     return m;
   }
 
+  // ---- (round 113) THE MORTAR TEAM -------------------------------------------
+  // A mortar team is the tube and the men who carry its bombs. They are there
+  // to feed it and guard it, not to fight a war of their own: a rifle fired
+  // from a mortar position shows the enemy where the mortar is, and a bearer
+  // shooting at a section two hundred metres off is a bearer not carrying
+  // bombs. So they hold their fire, and three things free it — the tube has
+  // nothing left to fire, the team is under direct fire (a bullet past one of
+  // them, a gun laid on them: `_directT`, which shelling does not set — there
+  // is nothing to shoot back at), or the enemy is close enough to rush the
+  // position. The player's own order to a bearer is obeyed; an order to the
+  // whole team is the tube's (`Game._bearerHolds`).
+
+  /** The mortar this man carries for, or null. */
+  _teamTube() {
+    const sq = this.squad, k = this.def.kind;
+    if (!sq || this.def.vehicle || !this.def.arms || k === 'mortar' || k === 'artillery' || k === 'hmg'
+        || k === 'atgun' || k === 'rocket' || k === 'sniper') return null;
+    if (sq._tubeN !== sq.members.length || (sq._tube && sq._tube.squad !== sq)) {
+      sq._tubeN = sq.members.length;
+      sq._tube = sq.members.find(v => v.def.kind === 'mortar' && !v.def.vehicle) || null;
+    }
+    return sq._tube;
+  }
+  /** Does he hold his fire at `target` (null: area fire) because his job is
+   *  the mortar's? */
+  _supportHolds(target, d) {
+    const g = this.game;
+    if (g.mortarTeam113 === false) return false;
+    const m = this._teamTube();
+    if (!m || !m.alive || m.downed || m.surrendered || m.embarkedIn) return false;   // no tube: riflemen again
+    if (!(m.ammo > 0)) return false;                                              // the tube is dry: so are the rules
+    if (target && this.explicit && this.target === target) return false;          // the player's own order to him
+    if (target && d <= SUPPORT_CLOSE) return false;                               // near enough to rush the position
+    const sq = this.squad, now = g.time;
+    if (sq._hotT !== now) {
+      sq._hotT = now; sq._hot = false;
+      for (const v of sq.members) if (v.alive && now - (v._directT || -99) < SUPPORT_RETURN_S) { sq._hot = true; break; }
+    }
+    return !sq._hot;                                                             // shot at: they shoot back
+  }
+  /** Is his OWN weapon — the one he is in the battle to fire — out?
+   *
+   *  For most men that is the small arm in `def.arms`. A flamethrower man's is
+   *  the projector and a mortar crew's the tube, and neither is in RTT_ARMS:
+   *  `_armsCombat` read "no small arm" as "nothing to fire", so a man who also
+   *  carried a pistol drew it at once and never put it away. Measured: a US
+   *  flamethrower ordered onto a rifleman 24 m off fired five pistol rounds
+   *  and not one burst in fifteen seconds, with all 300 units of fuel aboard —
+   *  every flamethrower in the game since round 101. */
+  _primaryDry() {
+    const def = this.def, A = def.arms ? RTT_ARMS[def.arms] : null;
+    if (A) return this.ammo <= 0;
+    if (def.kind === 'flame' || def.kind === 'mortar') return !(this.ammo > 0);
+    return true;
+  }
+  /** A mortar crew with the man it is laid on inside pistol range of the
+   *  baseplate. Nobody drops a bomb fifty metres from his own tube; the crew
+   *  draw instead, and holster again when he is gone. */
+  _tubeMasked(t, d) {
+    if (this.def.kind !== 'mortar' || this.def.arms || !this.def.side || !t || !t.alive || t.downed || t.def.vehicle) return false;
+    return d <= PISTOL_RNG * (this.onSide ? 1.2 : 1);
+  }
+
   _holdsFire(target, d) {
     if (!this.def.vehicle && this.path.length && (this.moveMode === 'fast' || this.moveMode === 'sneak')) return true;
     // A BOUND IS CROSSED, NOT FOUGHT. A man on a tranche of an advance — or
@@ -41665,6 +41911,8 @@ class Unit {
     // stop-to-fight rule below never runs while he is holding fire, so he
     // arrives already laid on rather than blank.
     if (!this.def.vehicle && this.path.length && (this._aiLeg || this._assault)) return !this._marchingFire(target, d);
+    // (round 113) a mortar team's riflemen: see `_supportHolds`
+    if (this._supportHolds(target, d)) return true;
     if (this.posture === 'hide') return !(this.game.time - this._attackedT < 3);
     if (this.posture === 'ambush') {
       // CLOSE COMBAT'S AMBUSH WAITS FOR THIRTY METRES — "ambushing units only
@@ -42300,6 +42548,7 @@ class Unit {
               { startRadius: 2, maxRadius: 12, buildTime: 3, life: 210,
                 spread: 0.16, hold: 0.7, drift: this.game.wind });
             wc.tint = [0.26, 0.24, 0.22]; wc.oily = true;                   // burning-wreck plume: dark & greasy
+            wc.kind = 'wreck'; wc.src = { x: this.pos.x, y: this.pos.y, z: this.pos.z };   // (round 113) it rises from the hull
           }
         } else {
           // The racked ammunition doesn't always go up at once. A knocked-out
@@ -42416,6 +42665,7 @@ class Unit {
               { startRadius: 2, maxRadius: this._cookBig ? 14 : 10, buildTime: 3, life: 190,
                 spread: 0.18, hold: 0.7, drift: g.wind });
             wc.tint = [0.26, 0.24, 0.22]; wc.oily = true;
+            wc.kind = 'wreck'; wc.src = { x: p.x, y: p.y, z: p.z };
           }
           this.corpseT = Math.max(this.corpseT, 25);
         }
@@ -44724,19 +44974,16 @@ class UI {
     const omniscient = g.mode === 'edit';
     for (const u of g.units) {
       if (!u.alive) continue;
-      let known = true;
-      if (!omniscient && g.fowEnabled && u.team !== pt && u.team !== 0) {
-        known = (g.time - (u._seenT || -99)) < 4;      // last contact, plus a short memory
-        if (!known) continue;
-      }
+      // (round 113) …AND ONLY WHILE HE IS SEEN, as on the field: the faded
+      // last-known dot that lingered four seconds after contact is gone, by
+      // the same order of the user's that hides the model ("not … in game or
+      // on the minimap unless they are visible to you or your units"). The
+      // rule is the LOD's: `_fowSeen`, hostile teams only.
+      if (!omniscient && g.fowEnabled && g.fog113 !== false && u.team !== pt && u.team !== 0
+          && areHostile(pt, u.team) && u._fowSeen !== true) continue;
       const x = (u.pos.x + HALF) / WORLD * 168, z = (u.pos.z + HALF) / WORLD * 168;
-      // Same move: a dot is stale when the SIDE has lost contact, which is
-      // `_fowSeen`, not whether the model happens to be drawn — it always is.
-      const stale = !omniscient && u.team !== pt && u.team !== 0 && u._fowSeen === false;
-      ctx.globalAlpha = stale ? 0.45 : 1;              // a fading last-known position
       ctx.fillStyle = u.team === 0 ? '#9a9a92' : teamCss[u.team];
       ctx.fillRect(x - 1.5, z - 1.5, 3, 3);
-      ctx.globalAlpha = 1;
       if (u.selected) { ctx.strokeStyle = '#ffd060'; ctx.strokeRect(x - 3, z - 3, 6, 6); }
     }
     // Victory points: a lettered disc in the owner's colour (objectives are
@@ -46529,7 +46776,10 @@ class Game {
     // flag if they can't reach — they will NOT auto-walk into the open. Melee
     // and suicide units must close, so they still advance.
     let outOfRange = 0;
+    const tubes = sel.filter(u => u.def.kind === 'mortar');
     for (const u of sel) {
+      // (round 113) a mortar team told to fire: the tube fires
+      if (tubes.length && this._bearerHolds(u, tubes)) continue;
       const melee = u.def.kind === 'melee' || u.def.kind === 'suicide';
       if (melee) { u.orderAttack(enemy, false); continue; }
       const indirect = u.def.kind === 'mortar' || u.def.kind === 'artillery';
@@ -48035,8 +48285,11 @@ class Game {
       if (!this._crossOk(u.pos.x, u.pos.z, nx, nz, u.lvl)) return false;   // a wall in the way
       const want = S ? S.resolveLevel(nx, nz, u.lvl, u.pos.y) : 0;
       if (want > 0) return this.pathfinder.passableL(gx, gz, want);
-      if (!this.pathfinder.passable(gx, gz)) return false;
-      if (this.obstacles.blocked(gx, gz)) return false;
+      // (round 113) on foot, through the trees and the scrub (`FOOT_THROUGH`)
+      const foot = !u.def.vehicle && this.obstacles.footThrough(gx, gz);
+      if (!foot && !this.pathfinder.passable(gx, gz)) return false;
+      if (!foot && this.obstacles.blocked(gx, gz)) return false;
+      if (foot && !this.terrain.typePassable(gx, gz)) return false;
       // don't walk off a cliff face
       const h = this.terrain.heightAt(nx, nz) - u.pos.y;
       if (Math.abs(h) > climbOf(u.def) * HSCALE * 1.6 && !(S && S.has(gx, gz))) return false;
@@ -49038,6 +49291,16 @@ class Game {
     const rifles = n - veh - heavy - at - indirect - scout;
     let arm = 'rifle';
     if (veh >= n * 0.6) arm = 'armour';
+    // (round 113) …EXCEPT THE MEN OF A MORTAR TEAM, WHO ARE ITS BEARERS. Every
+    // army's mortar team is one tube and four or five riflemen carrying its
+    // bombs, so the tie rule made every mortar team the player or the enemy
+    // bought a RIFLE section: the company sent it forward to bound and assault
+    // with the tube in the middle of it (measured: 'Advancing', 'Bounding',
+    // the mortar dead inside a minute). A section with a tube and no other
+    // heavy weapon is the tube's — the base of fire, and its riflemen hold
+    // their fire for it (`Unit._supportHolds`). `game.mortarTeam113 = false`
+    // is the old reading.
+    else if (indirect && !heavy && !at && this.mortarTeam113 !== false) arm = 'indirect';
     else if (indirect >= n * 0.6 && indirect > rifles) arm = 'indirect';
     else if (at >= n * 0.6 && at > rifles) arm = 'at';
     else if (heavy >= n * 0.6 && heavy > rifles) arm = 'support';
@@ -50301,6 +50564,14 @@ class Game {
         }
       }
       if (u.path.length) continue;
+      // (round 113) …and a mortar team's riflemen leave the fire to the tube
+      // (`Unit._supportHolds`): they watch the ground, and their own
+      // acquisition answers anyone who shoots at them.
+      if (u._supportHolds(null, Infinity)) {
+        if (u.groundAtk && !u.explicit) { u.groundAtk = null; if (u.state === 'attack' && !u.target) u.state = 'idle'; }
+        if (!u.target) u.orderFace(x, z);
+        continue;
+      }
       const d = dist2(u.pos, { x, z });
       // …and a shaken section holds its fire until the enemy is closer, which
       // is `MOODS[*].fire`, the second of the three columns nothing read.
@@ -53774,6 +54045,12 @@ class Game {
     this._amalT = AMALG_EVERY;
     if (this._amalg === false) return;
     const crewish = u => AMALG_CREW.has(u.def.kind) || u.def.heavyMg || u.def.towed;
+    // (round 113) A MORTAR TEAM IS ITS ESTABLISHMENT TOO. It is not all crew —
+    // its riflemen carry the bombs — so it took in rifle remnants (up to
+    // AMALG_CAP, a fifteen-man 'mortar team'), and when it was cut to the tube
+    // and a bearer the pair joined a rifle section, tube and all. A section
+    // with a live tube neither gives nor takes men.
+    const tubed = sq => this.mortarTeam113 !== false && sq.members.some(u => u.alive && !u.downed && (u.def.kind === 'mortar' || u.def.kind === 'artillery'));
     const live = sq => sq.livingMembers().filter(u => u.alive && !u.downed && !u.def.vehicle);
     // Who has room. Built once: a remnant joining a section changes its count,
     // and the running total is what stops three remnants all piling into the
@@ -53782,7 +54059,7 @@ class Game {
     for (const sq of this.squads) {
       const m = live(sq);
       if (m.length < AMALG_MIN || m.length >= AMALG_CAP) continue;
-      if (m.every(crewish)) continue;
+      if (m.every(crewish) || tubed(sq)) continue;
       let cx = 0, cz = 0;
       for (const u of m) { cx += u.pos.x; cz += u.pos.z; }
       recv.push({ sq, n: m.length, x: cx / m.length, z: cz / m.length, team: m[0].team });
@@ -53791,7 +54068,7 @@ class Game {
     for (const sq of this.squads.slice()) {
       const m = live(sq);
       if (!m.length || m.length >= AMALG_MIN) continue;
-      if (m.every(crewish)) continue;                 // small is its establishment
+      if (m.every(crewish) || tubed(sq)) continue;    // small is its establishment
       if (sq._holdVp) continue;                       // a garrison is somebody else's decision
       let cx = 0, cz = 0;
       for (const u of m) { cx += u.pos.x; cz += u.pos.z; }
@@ -57905,6 +58182,7 @@ class Game {
       spread: k.spread, hold: 0.55, drift: this.wind,
     });
     c.tint = [0.74, 0.77, 0.8];        // screening smoke: pale grey-white
+    c.kind = 'screen'; c.src = { x: wx, y, z: wz };   // (round 113) see `_smokeBank`
     this.effects.smoke(wx, y + 1 * K_FX, wz, 10);
   }
 
@@ -57999,11 +58277,29 @@ class Game {
         return false;
       });
     }
+    // (round 113) "improve smoke realism" — the user. Each kind of cloud is
+    // drawn as the thing it is (`_smokeBank`, `_smokeColumn`, `_smokeDust`);
+    // the volume the sightline model uses is untouched. `game.smoke113 = false`
+    // is the one emitter below for all of them, as before.
+    const look = this.smoke113 !== false;
+    if (look) {
+      const so = this.sunOffset, sl = so ? hyp3(so.x, so.y, so.z) || 1 : 1;
+      const W = this.wind || { x: 0, z: 0 }, wl = hyp(W.x, W.z);
+      this._smkEnv = { sx: so ? so.x / sl : 0.6, sz: so ? so.z / sl : 0.3, ux: wl > 1e-3 ? W.x / wl : 0, uz: wl > 1e-3 ? W.z / wl : 0, wx: W.x, wz: W.z,
+        q: clamp(vfx.quality || 1, 0.35, 1) };
+    }
     for (const c of this.smoke.clouds) {
       let e = this.smokeMeshes.find(m => m.cloud === c);
       if (!e) { e = { cloud: c, acc: 0 }; this.smokeMeshes.push(e); }
       const R = Math.max(0.4, c.radius), dens = c.density;
       if (dens <= 0.03) continue;
+      if (look) {
+        const kind = c.kind || (c.oily ? (c.life >= 120 ? 'wreck' : 'burst') : 'screen');
+        if (kind === 'wreck') this._smokeColumn(e, c, R, dens, dt);
+        else if (kind === 'burst') this._smokeDust(e, c, R, dens, dt);
+        else this._smokeBank(e, c, R, dens, dt, kind === 'wp');
+        continue;
+      }
       const tint = c.tint || [0.72, 0.75, 0.78];
       const LIFE = 5.5;
       // Population we want standing in the cloud at once, and therefore the
@@ -58032,6 +58328,135 @@ class Game {
           a: Math.min(0.46, 0.32 * dens + 0.09), drag: 0.7,
         });
       }
+    }
+  }
+
+  /** (round 113) A SMOKE SCREEN IS A BANK, NOT A HAZE.
+   *
+   *  A smoke round's screen — HC from a base-ejection shell or a grenade, white
+   *  phosphorus from a bomb — is a dense white-grey wall standing ON the
+   *  ground, tens of metres high, billowing, lit on its top and its sunward
+   *  side and grey underneath, and streaming downwind from where the canisters
+   *  lie. What it was drawn as: a thin sheet of mist. Puffs were laid round
+   *  the sphere's centre, which stands a metre and a half up, from 0.42 of
+   *  the radius BELOW it — so for a mortar's 13-unit screen most of them were
+   *  born five units under the ground and the depth test ate their lower
+   *  halves — at alpha 0.32-0.41 and up to 0.84 of the radius across, so the
+   *  few that showed were faint discs the size of the screen. The sightline
+   *  model was treating the same cloud as a wall.
+   *
+   *  Now: the bank is a height in proportion to its radius (`H`), filled from
+   *  the ground up with most of its mass low; puffs a quarter to a half of the
+   *  radius across, so it has texture; an opaque core and torn edges; each
+   *  puff lit by where it stands in the bank — the top and the sun's side
+   *  bright, the base dark — which is what makes it read as a volume; born on
+   *  the upwind side so the screen streams downwind across its own sphere;
+   *  and longer-lived, so it rolls instead of fizzing. Phosphorus is brilliant
+   *  white and blooms hot and high for its first seconds. Everything stays
+   *  inside the sphere `occlusion` uses, so what hides a man is still what
+   *  you see hiding him. */
+  _smokeBank(e, c, R, dens, dt, wp) {
+    const vfx = this.effects.vfx, V = window.VFX, E = this._smkEnv, T = this.terrain;
+    const tint = c.tint || [0.74, 0.77, 0.8];
+    const H = Math.min(R * 0.45, 7) + (wp ? R * 0.08 : 0);
+    const N = clamp(Math.round(R * 4.2), 12, 80) * Math.pow(dens, 0.5) * E.q;
+    const LIFE = wp ? 10 : 13;
+    const young = wp && c.age < 4;              // the phosphorus bloom
+    // A screen is laid in seconds, not built up over a puff's lifetime: the
+    // whole bank goes in while the cloud builds, and is then kept topped up.
+    const filling = c.age < (c.buildTime || 2.2) + 1.5;
+    e.acc += (filling ? N / Math.max(1.2, c.buildTime || 2.2) : N / LIFE) * dt;
+    let budget = filling ? 10 : 6;
+    const cx = c.center.x, cz = c.center.z;
+    while (e.acc >= 1 && budget-- > 0) {
+      e.acc -= 1;
+      const a = Math.random() * Math.PI * 2, f = Math.sqrt(Math.random());
+      const rr = f * R * 0.85, up = Math.random() * R * 0.28;
+      const px = cx + Math.cos(a) * rr - E.ux * up, pz = cz + Math.sin(a) * rr - E.uz * up;
+      const hf = Math.pow(Math.random(), 1.6);   // most of the smoke is low
+      const size = clamp(R * (0.36 + Math.random() * 0.24) * (1 - 0.2 * f), 1.3, 9);
+      const gy = T.heightAt(px, pz);
+      const core = f < 0.55;
+      // lit by where it stands: the top and the sunward side bright, the base
+      // and the lee side in the bank's own shadow
+      const sun = (Math.cos(a) * E.sx + Math.sin(a) * E.sz) * Math.min(1, f * 1.5);
+      // sunlit screening smoke is WHITE beside the ground it stands on — the
+      // tint is the smoke's colour in shade, and the light lifts it
+      const k = (1.08 + 0.24 * hf) * (1 + 0.12 * sun) * (0.96 + Math.random() * 0.08) * (wp ? 1.08 : 1);
+      vfx.spawn(V.KIND.SMOKE, {
+        x: px, y: gy + size * 0.22 + hf * H, z: pz,
+        vx: Math.cos(a) * 0.14, vy: young ? 0.9 + Math.random() * 1.1 : 0.08 + Math.random() * 0.14, vz: Math.sin(a) * 0.14,
+        size, grow: size * (wp ? 0.06 : 0.035),
+        life: LIFE * (0.75 + Math.random() * 0.5), spin: rand(-0.12, 0.12),
+        cell: Math.random() < (core ? 0.9 : 0.6) ? V.CELL.PUFF : V.CELL.WISP,
+        r: Math.min(1.2, tint[0] * k), g: Math.min(1.2, tint[1] * k), b: Math.min(1.2, tint[2] * k),
+        a: Math.min(0.9, (core ? 0.72 + Math.random() * 0.16 : 0.45 + Math.random() * 0.15) * Math.pow(dens, 0.6)),
+        drag: 0.35,
+      });
+    }
+  }
+  /** (round 113) A BURNING TANK'S SMOKE IS A COLUMN. Fuel, oil and rubber
+   *  burn black and hot: it goes UP, a few metres across where it leaves the
+   *  hull and swelling as it climbs, and leans away downwind — the landmark
+   *  the note on the brew-up describes. It was a dark ball sitting on the
+   *  ground, filled into the sightline sphere round its centre. It rises from
+   *  the wreck (`c.src`), which does not drift, whatever the sphere does. */
+  _smokeColumn(e, c, R, dens, dt) {
+    const vfx = this.effects.vfx, V = window.VFX, E = this._smkEnv;
+    const tint = c.tint || [0.26, 0.24, 0.22], src = c.src || { x: c.center.x, y: c.center.y - 1.6, z: c.center.z };
+    const RATE = 6 * E.q * Math.min(1, dens * 1.6);
+    e.acc += RATE * dt;
+    let budget = 4;
+    while (e.acc >= 1 && budget-- > 0) {
+      e.acc -= 1;
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * 0.7;
+      const size = 1.0 + Math.random() * 0.5;
+      // the lit puff, darkened: SOOT is unlit black and a column of it drew
+      // as a flat black disc; this keeps the sheet's own light and shade
+      const sun = Math.cos(a) * E.sx + Math.sin(a) * E.sz;
+      const k = (0.7 + Math.random() * 0.6) * (1 + 0.12 * sun);
+      vfx.spawn(V.KIND.SMOKE, {
+        x: src.x + Math.cos(a) * rr, y: src.y + 0.5 + Math.random() * 0.4, z: src.z + Math.sin(a) * rr,
+        vx: E.wx + Math.cos(a) * 0.15, vy: 1.8 + Math.random() * 1.0, vz: E.wz + Math.sin(a) * 0.15,
+        // a plume widens to about a quarter of its height: a puff that grew
+        // at 0.6-0.95 u/s was sixty metres across by the top of the column
+        // and smeared the sky with dark blots
+        size, grow: 0.32 + Math.random() * 0.18,
+        life: 10 + Math.random() * 3, spin: rand(-0.2, 0.2),
+        cell: Math.random() < 0.7 ? V.CELL.PUFF : V.CELL.WISP,
+        r: tint[0] * k, g: tint[1] * k, b: tint[2] * k,
+        a: Math.min(0.8, (0.6 + Math.random() * 0.18) * Math.min(1, dens * 1.4)),
+        drag: 0.16,
+      });
+    }
+  }
+  /** (round 113) WHAT HANGS OVER A SHELL HOLE IS DUST, brown-grey and low:
+   *  thrown earth and the burst's smoke, spreading and settling. It was the
+   *  oily emitter's dark ball. Wide, flat and thin, inside the burst's own
+   *  short-lived sphere. */
+  _smokeDust(e, c, R, dens, dt) {
+    const vfx = this.effects.vfx, V = window.VFX, E = this._smkEnv, T = this.terrain;
+    const tint = c.tint || [0.44, 0.41, 0.38];
+    const N = clamp(Math.round(R * 2.2), 5, 26) * dens * E.q;
+    const LIFE = 8;
+    e.acc += (N / LIFE) * dt;
+    let budget = 3;
+    while (e.acc >= 1 && budget-- > 0) {
+      e.acc -= 1;
+      const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * R * 0.8;
+      const px = c.center.x + Math.cos(a) * rr, pz = c.center.z + Math.sin(a) * rr;
+      const size = clamp(R * (0.4 + Math.random() * 0.3), 0.8, 9);
+      const k = 0.92 + Math.random() * 0.22;
+      vfx.spawn(V.KIND.SMOKE, {
+        x: px, y: T.heightAt(px, pz) + size * 0.22 + Math.random() * R * 0.18, z: pz,
+        vx: Math.cos(a) * 0.1, vy: 0.04 + Math.random() * 0.1, vz: Math.sin(a) * 0.1,
+        size, grow: size * 0.05,
+        life: LIFE * (0.7 + Math.random() * 0.6), spin: rand(-0.15, 0.15),
+        cell: Math.random() < 0.55 ? V.CELL.DUST : V.CELL.WISP,
+        r: tint[0] * k * 1.15, g: tint[1] * k * 1.1, b: tint[2] * k,
+        a: (0.3 + Math.random() * 0.15) * dens,
+        drag: 0.5,
+      });
     }
   }
 
@@ -58088,6 +58513,7 @@ class Game {
     // the camera. None of the order lines draw while you are riding.
     if (this.fpv) {
       if (this.orderLines.visible) { this.orderLines.geometry.setDrawRange(0, 0); this.orderLines.visible = false; }
+      if (this._mortLbl) this._mortarRangeLabels(null);
       return;
     }
     const pos = this._orderPos, col = this._orderCol, cap = this._orderCap;
@@ -58177,6 +58603,39 @@ class Game {
         }
       }
     }
+    // (round 113) A MORTAR TEAM SHOWS ITS MORTAR'S REACH — and only that.
+    // Selecting the tube, or any man who carries for it, rings the tube at
+    // its maximum range and its minimum, draped over the ground: everywhere
+    // between the two it can drop a bomb on anything the team has spotted.
+    // Always, not only with the order lines on — it is the one fact about a
+    // mortar a player needs before he gives it an order. The riflemen's own
+    // reach is not drawn (`_updateLosOverlay`, ccmenu's `firers`).
+    // An 81 mm reaches 3,000 m and most of these maps are smaller than that,
+    // so the outer ring is often off the field — the label beside the tube
+    // says it in metres either way (`_mortarRangeLabels`).
+    {
+      const tubes = this.mode === 'play' ? this._selTubes() : [];
+      const inMap = (x, z) => Math.abs(x) <= HALF && Math.abs(z) <= HALF;
+      for (const m of tubes) {
+        const R = m.def.rng || 0, r0 = m.def.minRng || 0;
+        if (!(R > 0)) continue;
+        const cx = m.pos.x, cz = m.pos.z;
+        const px = this._ccPx ? this._ccPx(cx, gY(cx, cz), cz) : 0.15;
+        const hw = Math.max(0.22, 1.25 * px);
+        const ring = (r, cr, cg, cb, w, dash) => {
+          const N = Math.max(48, Math.min(180, Math.ceil(2 * Math.PI * r / 3)));
+          let ax = cx + r, az = cz;
+          for (let i = 1; i <= N; i++) {
+            const a = i / N * Math.PI * 2, bx = cx + Math.cos(a) * r, bz = cz + Math.sin(a) * r;
+            if ((!dash || (i & 1)) && inMap(ax, az) && inMap(bx, bz)) ribbon(ax, gY(ax, az) + 0.05, az, bx, gY(bx, bz) + 0.05, bz, w, cr, cg, cb, true);
+            ax = bx; az = bz;
+          }
+        };
+        ring(R, 1, 0.82, 0.2, hw, false);                     // the reach: amber, the indirect-fire colour
+        if (r0 > 0) ring(r0, 1, 0.42, 0.22, hw * 0.8, true);   // the dead ground round the baseplate
+      }
+      if (tubes.length || this._mortLbl) this._mortarRangeLabels(tubes);
+    }
     const geo = this.orderLines.geometry;
     geo.setDrawRange(0, n);
     geo.attributes.position.needsUpdate = true;
@@ -58202,7 +58661,10 @@ class Game {
     const vtx = (x, y, z, r, g, b) => { const i = n * 3; pos[i] = x; pos[i + 1] = y; pos[i + 2] = z; col[i] = r; col[i + 1] = g; col[i + 2] = b; n++; };
     const N = 48;                               // rays per unit
     const wv = this.visScale ? this.visScale() : 1;   // weather + darkness
-    const sel = this.selection.filter(u => u.alive && u.team === this.playerTeam && !u.downed).slice(0, 6);
+    // (round 113) a mortar team shows its tube, not five riflemen's fans
+    const tubes = this._selTubes();
+    const sel = this.selection.filter(u => u.alive && u.team === this.playerTeam && !u.downed
+      && !(tubes.length && this._bearerHolds(u, tubes))).slice(0, 6);
     for (const u of sel) {
       const reach = Math.max(u._reach() * wv, 8);
       const rngR = u.def.rng || 0;
@@ -58322,8 +58784,12 @@ class Game {
       }
       if (spotted) e._seenT = this.time;
       const visible = !this.fowEnabled || spotted || (this.time - e._seenT < 1.2);
-      // NO UNIT IS EVER INVISIBLE. Fog of war decides what you KNOW, not what
-      // is drawn. This used to set `e.mesh.visible = visible`, and the result
+      // (round 113: the fog hides unseen enemies again — in `_updateLod`, from
+      // `_fowSeen`, by the user's order. What follows is why it is not done
+      // HERE with `mesh.visible`, and that still holds.)
+      //
+      // NO UNIT WAS EVER INVISIBLE (rounds 44-112). Fog of war decided what you
+      // KNEW, not what was drawn. This used to set `e.mesh.visible = visible`, and the result
       // in first person was men and tanks blinking out of existence while the
       // player was looking straight at them: `_applyFpvSight` can only ever
       // ADD visibility, on the frames where its own strict `sightClear` test
@@ -58884,6 +59350,7 @@ class Game {
         // wall rather than a haze, and why you cannot see a thing through it.
         c.tint = opts.wp ? [1.0, 1.0, 1.0] : [0.44, 0.41, 0.38];
         c.oily = !opts.wp;
+        c.kind = opts.wp ? 'wp' : 'burst'; c.src = { x: wx, y: groundY, z: wz };   // (round 113)
       }
     }
 
@@ -60047,9 +60514,58 @@ class Game {
     if (!sel.length) return;
     this.effects.marker(wx, wz, 0xffa040);
     this.sfx.order();
-    for (const u of sel) u.orderAttackGround(
+    // (round 113) a mortar team told to fire: the tube fires
+    const tubes = sel.filter(u => u.def.kind === 'mortar');
+    for (const u of sel) if (!(tubes.length && this._bearerHolds(u, tubes))) u.orderAttackGround(
       wx + rand(-0.6, 0.6) * (sel.length > 1 ? 1 : 0),
       wz + rand(-0.6, 0.6) * (sel.length > 1 ? 1 : 0));
+  }
+
+  /** (round 113) The mortars whose reach the selection shows: every selected
+   *  tube, and the tube of every selected man who carries for one. */
+  _selTubes() {
+    const out = [];
+    if (this.mortarTeam113 === false) return out;
+    for (const u of this.selection) {
+      if (!u.alive || u.team !== this.playerTeam) continue;
+      const m = u.def.kind === 'mortar' && !u.def.vehicle ? u : (u._teamTube ? u._teamTube() : null);
+      if (m && m.alive && !m.embarkedIn && out.indexOf(m) < 0) out.push(m);
+    }
+    return out;
+  }
+  /** (round 113) The mortar's reach in words beside each selected tube: its
+   *  name, its maximum and minimum range in metres, and the bombs left. */
+  _mortarRangeLabels(tubes) {
+    const L = this._mortLbl || (this._mortLbl = []);
+    const n = tubes ? Math.min(tubes.length, 4) : 0;
+    const fm = u => (Math.round(u * WORLD_M / 10) * 10).toLocaleString('en-US') + ' m';
+    for (let i = 0; i < Math.max(n, L.length); i++) {
+      let el = L[i];
+      if (i >= n) { if (el && el.style.display !== 'none') el.style.display = 'none'; continue; }
+      if (!el) {
+        el = L[i] = document.createElement('div');
+        el.className = 'mortRng';
+        el.style.cssText = 'position:fixed;z-index:150;pointer-events:none;display:none;white-space:nowrap;'
+          + 'font:bold 12px ui-monospace,Menlo,Consolas,monospace;color:#ffd23a;text-shadow:0 0 3px #000,0 0 2px #000';
+        document.body.appendChild(el);
+      }
+      const m = tubes[i], v = this._mortV || (this._mortV = new THREE.Vector3());
+      v.set(m.pos.x, m.pos.y + 0.8, m.pos.z).project(this.camera);
+      if (v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) { if (el.style.display !== 'none') el.style.display = 'none'; continue; }
+      const t = (m.def.name || 'Mortar') + ' \u00b7 ' + fm(m.def.rng || 0) + (m.def.minRng ? ' \u00b7 min ' + fm(m.def.minRng) : '')
+        + (m.ammo === Infinity ? '' : m.ammo > 0 ? ' \u00b7 ' + m.ammo + ' HE' : ' \u00b7 NO BOMBS');
+      if (el.textContent !== t) el.textContent = t;
+      el.style.display = 'block';
+      el.style.left = Math.round((v.x + 1) / 2 * window.innerWidth + 14) + 'px';
+      el.style.top = Math.round((-v.y + 1) / 2 * window.innerHeight - 8) + 'px';
+    }
+  }
+  /** (round 113) Is `u` a bearer whose fire belongs to a tube in `tubes` (the
+   *  units an order or a display covers), with bombs left in it? */
+  _bearerHolds(u, tubes) {
+    if (this.mortarTeam113 === false || !u._teamTube) return false;
+    const m = u._teamTube();
+    return !!m && m.alive && tubes.indexOf(m) >= 0 && m.ammo > 0;
   }
 
   // ---- Who fights whom ---------------------------------------------------
@@ -64393,6 +64909,8 @@ class Game {
     const fr = this._frustum || (this._frustum = new THREE.Frustum());
     fr.setFromProjectionMatrix(LOD_MAT.multiplyMatrices(cam.projectionMatrix, LOD_INV));
     const S = LOD_SPHERE, riding = this.fpv ? this.fpv.unit : null;
+    // (round 113) fog of war hides the enemy (see the note in the loop)
+    const fogOn = this.fowEnabled && this.mode === 'play' && this.fog113 !== false, fogPt = this.playerTeam;
     // THE CROWD (round 107): how many men would be drawn in full this frame,
     // counted first; a man on a crowded screen drawn smaller than CROWD_PX is
     // a miniature (see CrowdLod).
@@ -64489,7 +65007,23 @@ class Game {
           const dx = u.pos.x - cam.position.x, dz = u.pos.z - cam.position.z;
           if (dx * dx + dz * dz < LOD_KEEP * LOD_KEEP) on = true;
         }
-        // FOG OF WAR USED TO BE A CULL HERE, AND IS NOT ANY MORE.
+        // (round 113) FOG OF WAR IS A CULL HERE AGAIN, BY THE USER'S ORDER: "You
+        // should not be able to see enemy units in game or on the minimap
+        // unless they are visible to you or your units." An enemy the side
+        // has not seen (`_fowSeen`, set by the army's survey and, frame-exact,
+        // by the eye in first person — `_applyFpvSight` runs before this) is
+        // OFF: no model, no miniature, no shadow, no overlay, nothing to click
+        // (`_pickable`), and frozen, which is the cost the paragraph below
+        // records coming back. It is the LOD's switch, not `mesh.visible`, so
+        // the latched-hide trap round 44 describes cannot come back with it:
+        // the flag is recomputed for every unit every frame. Corpses, wrecks,
+        // neutrals, allies and your own are always drawn. First person blinked
+        // because the survey HID what the eye was looking at; the eye now
+        // stamps the side's knowledge itself, every frame, before this runs.
+        // `game.fog113 = false` (or fog of war off) draws everyone again.
+        if (fogOn && u.alive && u.team !== fogPt && u.team !== 0 && u._fowSeen !== true && areHostile(fogPt, u.team)) on = false;
+        if (u._foxSlot >= 0) u._foxFog(fogOn && u.alive && u.team !== fogPt && u.team !== 0 && areHostile(fogPt, u.team) ? u._fowSeen === true : true);
+        // FOG OF WAR USED TO BE A CULL HERE, AND WAS NOT ANY MORE (rounds 44-112).
         //
         // It was a good one while it lasted: on a contested map most of the
         // enemy army is inside the view, `_updateFoW` cleared `mesh.visible`
@@ -65731,7 +66265,9 @@ cosmeticClass(Game, ['_spawnStrikePlane', '_craterLip', '_mineMesh', '_makeSmoke
   '_makeVpVisual', '_makeDeployVisual', '_makeRouteVisual', '_makeHkMesh', '_setWeatherParticles',
   // the smoke's puffs (~10 draws each, spawned inside stepSim), and a fire's
   // flames, which were drawn only when the camera was near (see `_fireFx`)
-  '_updateSmokeInstanced', '_fireFx', '_structureFireFx']);
+  '_updateSmokeInstanced', '_fireFx', '_structureFireFx',
+  // (round 113) the three kinds of cloud the emitter now draws
+  '_smokeBank', '_smokeColumn', '_smokeDust']);
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);
 

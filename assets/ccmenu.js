@@ -1030,9 +1030,14 @@
     };
     /** Units that can put fire on something: the selection minus the unarmed. */
     function firers(sel) {
-      var out = [];
-      for (var i = 0; i < sel.length && out.length < 16; i++) {
-        var u = sel[i];
+      var out = [], tubes = [], i, u;
+      // (round 113) a mortar team aimed as a whole is its mortar: the riflemen
+      // carry its bombs and hold their fire for it (`Unit._supportHolds`), so
+      // the lines, the odds and the range band are the tube's alone
+      for (i = 0; i < sel.length; i++) if (sel[i].def.kind === 'mortar') tubes.push(sel[i]);
+      for (i = 0; i < sel.length && out.length < 16; i++) {
+        u = sel[i];
+        if (tubes.length && u.game && u.game._bearerHolds && u.game._bearerHolds(u, tubes)) continue;
         if ((u.def.dmg || 0) > 0 || (u.def.mg && u.def.mg.dmg > 0)) out.push(u);
       }
       return out;
