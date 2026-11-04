@@ -285,6 +285,26 @@
     return _spill || (_spill = PK.map(function (e) { return window.unpackCompact(e); }));
   }
 
+  /** (round 113, third batch) THE HOUSES' KIT, modelled in Blender
+   *  (tools/blender/doodads.py `chim_stack`, `chim_pots`, `door_frame`,
+   *  `door_leaf`, `door_step`; PROP_PACK): a chimney stack with its
+   *  oversailing courses and flaunching and the clay pots on it, and an
+   *  outside door — its frame, a ledged and braced plank door (or a panelled
+   *  one), a worn stone step. Occlusion only, tinted per house like the boxes
+   *  they replace, in this file's own units (S = 1). Null without the pack,
+   *  with `game.propPack113 = false`, or `Structures.KIT.on = false` (then
+   *  rebuild): the boxes below. Drawing only — the simulation reads the wall
+   *  grid. Inside doors keep the boxes: a town has thousands of them. */
+  var KIT = { on: true }, _kit = null;
+  function kitPieces() {
+    var P = window.PROP_PACK;
+    if (!KIT.on || !P || !P.chimStack || !P.chimPots || !P.doorFrame || !P.doorLeaf || !P.doorStep || typeof window.unpackCompact !== 'function'
+        || (window.game && window.game.propPack113 === false)) return null;
+    if (_kit) return _kit;
+    var u = function (a) { return a.map(function (e) { return window.unpackCompact(e); }); };
+    return (_kit = { stack: u(P.chimStack), pots: u(P.chimPots), frame: u(P.doorFrame), leaf: u(P.doorLeaf), step: u(P.doorStep) });
+  }
+
   Builder.prototype.reset = function () { this.n = 0; this.ni = 0; };
   /** `slice`, not `subarray`: the geometry has to OWN its buffers, because the
    *  builder itself is reused for the next chunk. */
@@ -594,6 +614,19 @@
       B.box(horiz ? wx + a : wx + b2 * d[0], yy, horiz ? wz + b2 * d[1] : wz + a,
         horiz ? la : ln, ly, horiz ? ln : la, 0, 0, 0, r, g, b, faces);
     }
+    var KP = out ? kitPieces() : null;
+    if (KP) {
+      // (round 113) the Blender door: frame, leaf standing open into the
+      // room on its hinge side, the step outside — where the boxes stood
+      B.mesh(KP.frame[0], wx, y, wz, horiz, S, S, S, frr, frg, frb);
+      var dc0 = hexc(pal.sh, 0.8), dr = dc0.r, dg = dc0.g, db = dc0.b;
+      var inw = -out, hinge0 = open * 0.5 - 0.04 * S, leafW0 = open - 0.08 * S, dep0 = inw * (WALL_TH * 0.5 + leafW0 * 0.5 * 0.985);
+      var lf = KP.leaf[((seed >>> 4) % 100) < 25 ? 1 : 0];
+      B.mesh(lf, horiz ? wx + hinge0 - 0.02 * S : wx + dep0 * d[0], y, horiz ? wz + dep0 * d[1] : wz + hinge0 - 0.02 * S, !horiz, S, S, S, dr, dg, db);
+      var st0 = hexc(0x8a8478, 0.95), sb = out * (WALL_TH * 0.5 + 0.14 * S);
+      B.mesh(KP.step[0], horiz ? wx : wx + sb * d[0], y, horiz ? wz + sb * d[1] : wz, horiz, S, S, S, st0.r, st0.g, st0.b);
+      return;
+    }
     for (var s = -1; s <= 1; s += 2) bx(s * (open * 0.5 - 0.035 * S), 0, y + dh * 0.5, 0.07 * S, dh, WALL_TH * 0.7, frr, frg, frb, NB);
     bx(0, 0, y + dh - 0.035 * S, open, 0.07 * S, WALL_TH * 0.7, frr, frg, frb, NB);
     // the door itself, standing open into the room — its two faces
@@ -660,6 +693,13 @@
     var d = EDGE_D[edge];
     var c = shade(mat, seed + 13, 0, 0.92);
     var x = cx + d[0] * T * 0.36, z = cz + d[1] * T * 0.36;
+    var KP = kitPieces();
+    if (KP) {    // (round 113) the Blender stack and its pots
+      B.mesh(KP.stack[0], x, yRidge, z, true, S, S, S, c.r, c.g, c.b);
+      var pt = hexc(0x7a3b28, 0.9);
+      B.mesh(KP.pots[(seed >>> 3) % KP.pots.length], x, yRidge, z, (seed & 1) === 0, S, S, S, pt.r, pt.g, pt.b);
+      return;
+    }
     B.box(x, yRidge + 0.45 * S, z, 0.46 * S, 1.25 * S, 0.46 * S, 0, 0, 0, c.r, c.g, c.b);
     var k = shade(mat, seed + 17, 0, 0.8);
     B.box(x, yRidge + 1.10 * S, z, 0.56 * S, 0.08 * S, 0.56 * S, 0, 0, 0, k.r, k.g, k.b);           // the capping course
@@ -2973,6 +3013,7 @@
     setGrid: function (n) { if (G) G.GRID = n; },
     MATS: MATS, PRESETS: PRESETS, EDGE_D: EDGE_D, HOUSE_LOOK: HOUSE_LOOK,
     DRESS: DRESS,
+    KIT: KIT,            // (round 113) the Blender chimneys and doors (KIT.on = false, then rebuild)
     /** A map's big plots built as blocks of houses (`_buildBlock`): false, and
      *  a reload, gives the one building per plot back. */
     blocks: true,
