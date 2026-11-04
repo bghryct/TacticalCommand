@@ -303,7 +303,8 @@
     if (_kit) return _kit;
     var u = function (a) { return a.map(function (e) { return window.unpackCompact(e); }); };
     return (_kit = { stack: u(P.chimStack), pots: u(P.chimPots), frame: u(P.doorFrame), leaf: u(P.doorLeaf), step: u(P.doorStep),
-      win: P.winFrame && P.winSill && P.winShutters ? { frame: u(P.winFrame), sill: u(P.winSill), shut: u(P.winShutters) } : null });
+      win: P.winFrame && P.winSill && P.winShutters ? { frame: u(P.winFrame), sill: u(P.winSill), shut: u(P.winShutters) } : null,
+      ridge: P.roofRidge ? u(P.roofRidge) : null });
   }
 
   Builder.prototype.reset = function () { this.n = 0; this.ni = 0; };
@@ -772,6 +773,10 @@
           alongX ? s * pitch : 0, 0, alongX ? 0 : -s * pitch, c.r, c.g, c.b);
       }
       var rc = shade(mat, seed + 5, dmg, 1.06);
+      // (round 113, third batch) half-round ridge tiles, modelled in Blender
+      // (`roof_ridge`), where the pack has them — not on thatch or iron
+      var KR = RISE <= ROOF_RISE * 1.01 ? kitPieces() : null;
+      if (KR && KR.ridge) { B.mesh(KR.ridge[0], cx, base + RISE * 0.5 + 0.03 * S, cz, alongX, T + ov, S, S, rc.r, rc.g, rc.b); return; }
       B.box(cx, base + RISE * 0.5 + 0.08 * S, cz,
         alongX ? T + ov : 0.24 * S, 0.14 * S, alongX ? 0.24 * S : T + ov, 0, 0, 0, rc.r, rc.g, rc.b);
       return;
