@@ -1319,7 +1319,8 @@
           // wood exactly as hard as the field beside it and put Hedgerow Hell's
           // woods at 0.29 against its grass at 0.25.
           var sfc = G.TYPE_DEF[this.terrain.type[z * G.GRID + x]];
-          var thick = sfc && (sfc.name === 'forest' || sfc.name === 'crops' || sfc.name === 'marsh');
+          var sk = sfc && (sfc.kin || sfc.name);   // (round 113) a pine wood is a wood
+          var thick = sk === 'forest' || sk === 'crops' || sk === 'marsh';
           if (!thick) {
             var br = this.terrain.patch ? this.terrain.patch[z * G.GRID + x] : 0.5;
             var t = (br - (opts.floor === undefined ? 0.38 : opts.floor));
@@ -1364,7 +1365,7 @@
       var def = G.TYPE_DEF[t];
       if (!def) return false;
       if (def.passable === false) return false;               // water, chasm
-      var n = def.name;
+      var n = def.kin || def.name;           // (round 113) tarmac and a dirt track are roads
       return !(n === 'stone' || n === 'road' || n === 'ice' || n === 'gravel' || n === 'rubble');
     },
 
@@ -1469,6 +1470,17 @@
       plan(TY.swamp,  'reeds',     0.80, 0.14);
       plan(TY.mud,    'grass',     0.30, 0.58);   // a churned track carries very little
       plan(TY.sand,   'heather',   0.22, 0.66);
+      // (round 113) the surfaces added to paint: rough grass carries tall grass,
+      // pasture a short sward, heath its heather, a bog and a wet meadow their
+      // reeds (bulrush, rushes and sedge by `flora`), a pine wood its bracken;
+      // tracks, tarmac and ploughland carry nothing
+      plan(TY.roughgrass, 'tallgrass', 0.75, 0.25);
+      plan(TY.pasture,    'grass',     0.55, 0.40);
+      plan(TY.drygrass,   'grass',     0.70, 0.30);
+      plan(TY.heath,      'heather',   0.85, 0.12);
+      plan(TY.bog,        'reeds',     0.50, 0.35);
+      plan(TY.wetmeadow,  'reeds',     0.45, 0.30);
+      plan(TY.pinefloor,  'fern',      0.65, 0.20);
       var n = 0;
       for (z = 0; z < GR; z++) for (x = 0; x < GR; x++) {
         i = z * GR + x;

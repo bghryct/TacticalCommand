@@ -32,8 +32,13 @@
   const THREE = root.THREE;
   if (!THREE) return;
   const G = {};
-  const N = 12;
-  G.LAYERS = ['grass', 'soil', 'road', 'crops', 'forest', 'sand', 'snow', 'rubble', 'cobble', 'gravel', 'rock', 'grass2'];
+  // (round 113) twenty: "multiple kinds of grass multiple kinds of road
+  // multiple kinds of swamp and so on" (the user) — rough grass, short pasture,
+  // wet mud, peat bog, a farm track, tarmac, a pine wood's needles and ploughed
+  // furrows after the first twelve. Five weights a vertex (splatA..E).
+  const N = 20;
+  G.LAYERS = ['grass', 'soil', 'road', 'crops', 'forest', 'sand', 'snow', 'rubble', 'cobble', 'gravel', 'rock', 'grass2',
+              'grass3', 'moss', 'mud', 'bog', 'track', 'tarmac', 'needles', 'plough'];
   G.enabled = true;
   G.ready = false;
   const U = {
@@ -98,8 +103,17 @@
       gravel: [[0.88, 0.88, 0.88], [1.10, 1.09, 1.06]],
       rock:   [[0.85, 0.85, 0.86], [1.12, 1.10, 1.06]],
       grass2: [[0.78, 0.86, 0.76], [1.26, 1.12, 0.76]],
+      grass3: [[0.78, 0.86, 0.76], [1.24, 1.12, 0.78]],
+      moss:   [[0.78, 0.86, 0.78], [1.18, 1.10, 0.82]],
+      mud:    [[0.74, 0.72, 0.72], [1.12, 1.08, 1.02]],
+      bog:    [[0.80, 0.80, 0.80], [1.18, 1.12, 0.96]],
+      track:  [[0.86, 0.85, 0.84], [1.12, 1.10, 1.04]],
+      tarmac: [[0.90, 0.90, 0.90], [1.08, 1.08, 1.06]],
+      needles:[[0.82, 0.80, 0.78], [1.14, 1.08, 0.96]],
+      plough: [[0.80, 0.78, 0.76], [1.12, 1.10, 1.04]],
     };
-    const FAR = { grass: 1, soil: 0.5, road: 0, crops: 1, forest: 1, sand: 0.6, snow: 1, rubble: 0, cobble: 0, gravel: 0, rock: 0.8, grass2: 1 };
+    const FAR = { grass: 1, soil: 0.5, road: 0, crops: 1, forest: 1, sand: 0.6, snow: 1, rubble: 0, cobble: 0, gravel: 0, rock: 0.8, grass2: 1,
+                  grass3: 0.8, moss: 0.35, mud: 0.5, bog: 0.8, track: 0, tarmac: 0, needles: 1, plough: 0 };
     for (let i = 0; i < N; i++) {
       U.uGFarL.value[i] = FAR[G.LAYERS[i]] != null ? FAR[G.LAYERS[i]] : 0;
       const m = M[G.LAYERS[i]] || [[1, 1, 1], [1, 1, 1]];
@@ -127,7 +141,9 @@
       const im = new Image();
       im.onload = () => {
         const c = document.createElement('canvas'); c.width = c.height = S;
-        const x = c.getContext('2d'); x.drawImage(im, 0, 0, S, S);
+        // a CPU canvas (round 113): read back from a GPU one, the forty
+        // pictures took 280-520 ms to decode, from this one 65-150
+        const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0, S, S);
         res(x.getImageData(0, 0, S, S).data);
       };
       im.onerror = rej;
@@ -185,12 +201,12 @@
 
   // ---- the shader ------------------------------------------------------------
   const V_PARS = `
-attribute vec4 splatA; attribute vec4 splatB; attribute vec4 splatC;
-varying vec4 vGSplatA; varying vec4 vGSplatB; varying vec4 vGSplatC;
+attribute vec4 splatA; attribute vec4 splatB; attribute vec4 splatC; attribute vec4 splatD; attribute vec4 splatE;
+varying vec4 vGSplatA; varying vec4 vGSplatB; varying vec4 vGSplatC; varying vec4 vGSplatD; varying vec4 vGSplatE;
 varying vec3 vGPos; varying vec3 vGNrm;
 `;
   const V_MAIN = `
-vGSplatA = splatA; vGSplatB = splatB; vGSplatC = splatC;
+vGSplatA = splatA; vGSplatB = splatB; vGSplatC = splatC; vGSplatD = splatD; vGSplatE = splatE;
 vGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 vGNrm = normalize(mat3(modelMatrix) * objectNormal);
 `;
@@ -202,7 +218,7 @@ uniform vec3 uGSun; uniform float uGMicro; uniform float uGDetail; uniform float
 uniform float uGHex;
 uniform vec3 uGMacro; uniform float uGMacAmt; uniform vec3 uGMacLo[${N}]; uniform vec3 uGMacHi[${N}];
 uniform float uGFar; uniform float uGFarAmt; uniform float uGFarL[${N}];
-varying vec4 vGSplatA; varying vec4 vGSplatB; varying vec4 vGSplatC;
+varying vec4 vGSplatA; varying vec4 vGSplatB; varying vec4 vGSplatC; varying vec4 vGSplatD; varying vec4 vGSplatE;
 varying vec3 vGPos; varying vec3 vGNrm;
 vec2 gN2 = vec2(0.0); float gH = 0.5; float gNear = 0.0;
 // NO TILE (round 106). Each surface is one periodic texture, and at true scale
@@ -227,6 +243,8 @@ float gVNoise(vec2 p) {
   gw[0] = vGSplatA.x; gw[1] = vGSplatA.y; gw[2] = vGSplatA.z; gw[3] = vGSplatA.w;
   gw[4] = vGSplatB.x; gw[5] = vGSplatB.y; gw[6] = vGSplatB.z; gw[7] = vGSplatB.w;
   gw[8] = vGSplatC.x; gw[9] = vGSplatC.y; gw[10] = vGSplatC.z; gw[11] = vGSplatC.w;
+  gw[12] = vGSplatD.x; gw[13] = vGSplatD.y; gw[14] = vGSplatD.z; gw[15] = vGSplatD.w;
+  gw[16] = vGSplatE.x; gw[17] = vGSplatE.y; gw[18] = vGSplatE.z; gw[19] = vGSplatE.w;
   vec3 ga = vec3(0.0); float gs = 0.0; float gh = 0.0;
   // the lie of the land (round 113): one value for the whole pixel, every
   // surface's own response to it summed with the surfaces' weights below
@@ -392,6 +410,9 @@ float gVNoise(vec2 p) {
   const BY_TYPE = {
     grass: 0, mud: 1, stone: 10, water: 1, sand: 5, road: 2, forest: 4, rubble: 7, snow: 6,
     swamp: 1, trench: 1, crops: 3, gravel: 9, cobble: 8, marsh: 1, ash: 1, ford: 9, ice: 6,
+    // (round 113) the surfaces added to paint (TYPE_DEF), each its own ground
+    roughgrass: 12, pasture: 13, drygrass: 11, heath: 12, dirttrack: 16, tarmac: 17, muddytrack: 14,
+    bog: 15, wetmeadow: 13, ploughed: 19, pinefloor: 18, beach: 5,
   };
   G.layerOfType = name => (name in BY_TYPE ? BY_TYPE[name] : 1);
   root.GroundSplat = G;
