@@ -19494,6 +19494,16 @@ const OBS_DEF = {
 /** …and how hard a man pushed off a trunk leans round it (tangent per unit
  *  of radial push). */
 const TRUNK_LEAN = 0.55;
+/** (round 113) "Trees are blocking infantry pathing. So are bushes etc." (the
+ *  user). A HEDGEROW is bushes on a bank: a man may now scramble through one
+ *  (`Obstacles.occupied` 3), at this many cells' extra path cost per hedge
+ *  cell — so a section takes the gap when there is one within a few cells and
+ *  pushes through the bank when there is not — and at HEDGE_FOOT_SLOW of his
+ *  pace while he is in it. Vehicles, sight and cover are as they were (a tank
+ *  still has to crush it). `game.hedgeFoot113 = false` before a load: the old
+ *  wall of hedges. */
+const HEDGE_FOOT_COST = 5;
+const HEDGE_FOOT_SLOW = 0.35;
 const FOOT_THROUGH = {
   tree: 0.22, oak: 0.25, pine: 0.18, deadtree: 0.16, bush: 0, scrub: 0,
   hay: 0.12, haystack: 0.5, grave: 0.18, rock: 0.16, menhir: 0.22, well: 0.32, statue: 0.42,
@@ -23460,7 +23470,7 @@ class Obstacles {
   floorAt(o, gx, gz, x, z) { return o.floorLocal ? this.terrain.heightAt(x, z) : this.terrain.height(gx, gz) * HSCALE; }
   blocked(x, z) { return inGrid(x, z) && this.occupied[z * GRID + x] !== 0; }
   /** (round 113) A prop a man on foot walks through (`FOOT_THROUGH`). */
-  footThrough(x, z) { return inGrid(x, z) && this.occupied[z * GRID + x] === 2; }
+  footThrough(x, z) { if (!inGrid(x, z)) return false; const o = this.occupied[z * GRID + x]; return o === 2 || o === 3; }   // (round 113) 3: a hedgerow, scrambled through
 
   /** Re-seat every prop on the current terrain height (call after sculpting so
    *  doodads ride up/down with the ground instead of floating or being buried). */
@@ -24216,7 +24226,7 @@ class Obstacles {
     // WebAssembly search blocks on 1 alone, so it passes these for free; every
     // other reader asks `blocked`, which still means "a prop is here".
     const foot = FOOT_THROUGH[type] != null && !(window.game && window.game.footThrough113 === false);
-    this.occupied[gz * GRID + gx] = foot ? 2 : 1;
+    this.occupied[gz * GRID + gx] = foot ? 2 : (type === 'hedge' && !(window.game && window.game.hedgeFoot113 === false) ? 3 : 1);
     if (foot) obs.footR = FOOT_THROUGH[type];
     const hr = HAZ_RANK[type] || 0;
     if (hr) { this.hazSelf[gz * GRID + gx] = hr; this._hazTouch(gx, gz); }
@@ -26222,6 +26232,9 @@ class Pathfinder {
       // of the corner it cuts (a man's `canCross` has always asked these)
       if (live && this.crushing && cx !== px && cz !== pz && this._cornerWall(px, pz, L, cx - px, cz - pz)) return false;
       if (L === 0 && Math.abs(this.terrain.height(cx, cz) - this.terrain.height(px, pz)) > this.climbMax) return false;
+      // (round 113) …and a line a man would walk through a hedgerow is not a
+      // free one: the search, which prices the scramble, decides
+      if (L === 0 && this.foot && this.obstacles.occupied[cz * GRID + cx] === 3) this.walkCost = true;
       px = cx; pz = cz;
     }
     return true;
@@ -26525,7 +26538,8 @@ class Pathfinder {
         const move = (dx !== 0 && dz !== 0) ? 1.414 : 1;
         const terr = cl === 0 ? 1 / Math.max(this.terrain.speedAt(nx, nz), 0.2) : 1;
         const ng = g[ci] + move * (0.6 + terr * 0.4) + climbCost + wallCost
-          + this._crushCost(nx, nz) + this._brushCost(nx, nz) + this._waterCost(cx, cz, nx, nz);
+          + this._crushCost(nx, nz) + this._brushCost(nx, nz) + this._waterCost(cx, cz, nx, nz)
+          + (this.foot && cl === 0 && this.obstacles.occupied[nz * GRID + nx] === 3 ? HEDGE_FOOT_COST : 0);   // (round 113) a hedgerow scrambled through
         if (ng < g[ni]) {
           g[ni] = ng; from[ni] = ci;
           heap.push({ i: ni, f: ng + heur(nx, nz, cl) });
@@ -26664,6 +26678,7 @@ class Pathfinder {
     const rate = (window.game && window.game._wasmPathRate) || WASM_PATH_RATE;
     const t0 = performance.now();
     const deadline = starved ? Infinity : t0 + left / rate;
+    if (W.setHedgeCost) W.setHedgeCost(HEDGE_FOOT_COST);   // (round 113) a hedgerow scrambled through
     let n = W.find(GRID, LV, any, walls, sx, sz, sL, ex, ez, eL, this.climbMax, CAP, deadline, PATH_CLOCK_EVERY);
     const ms = performance.now() - t0;
     this._frameMs += ms * rate;
@@ -41571,6 +41586,8 @@ class Unit {
       const tn = t && (t.kin || t.name);       // (round 113) tarmac and a dirt track are roads
       if (tn === 'road' || tn === 'cobble') return this.def.roadMul * (tn === 'cobble' ? 0.9 : 1);
     }
+    // (round 113) a man scrambling through a hedgerow bank
+    if (!this.def.vehicle && inGrid(gx, gz) && this.game.obstacles.occupied[gz * GRID + gx] === 3) return T.speedAt(gx, gz) * HEDGE_FOOT_SLOW;
     return T.speedAt(gx, gz);
   }
 
