@@ -1451,6 +1451,7 @@ body.fpv #tacMap { display: none !important; }
      canopy shader's own attribute layout (tools/blender/trees.py). Optional:
      without it `Obstacles._treeVariant` builds its procedural trees. -->
 <script src="assets/trees.pack.js"></script>
+<script src="assets/hedges.pack.js"></script>
 <!-- (round 113) the props' occlusion, baked in Cycles from the page's own
      prop geometry (tools/blender/props_ao.py). Optional: without it the props
      draw as they did. Read by `Obstacles._propAO`. -->
@@ -16053,6 +16054,8 @@ function packedGeometry(e) {
       // a tree's: its kind a byte a corner, its sway 16-bit over `swmax`
       const kd = bytes(e.kd), sw = e.sw ? new Uint16Array(bytes(e.sw).buffer) : null, sm = e.swmax || 0;
       for (let i = 0; i < n; i++) { hk[i * 3] = kd[i]; hk[i * 3 + 1] = sw ? sw[i] / 65535 * sm : 0; }
+      // (round 113) …and a hedge's verge its blades' height (`hedge.z`)
+      if (e.kz) { const kz = bytes(e.kz), km = e.kzmax || 0; for (let i = 0; i < n; i++) hk[i * 3 + 2] = kz[i] / 255 * km; }
     } else if (e.kk && e.kinds) {
       const kk = bytes(e.kk);
       for (let i = 0; i < n; i++) { const k = e.kinds[kk[i]] || e.kinds[0]; hk[i * 3] = k[0]; hk[i * 3 + 1] = k[1]; hk[i * 3 + 2] = k[2]; }
@@ -20495,6 +20498,17 @@ class Obstacles {
     this._hedgeGeos = this._hedgeGeos || [];
     const slot = end ? 8 + i : i;
     if (this._hedgeGeos[slot]) return this._hedgeGeos[slot];
+    // (round 113, third batch) THE CROWN GROWN INTO ONE MASS IN BLENDER
+    // (tools/blender/hedges.py): this builder's own bank, verge and sizes, its
+    // clumps voxel-remeshed into a continuous hedge, decimated to the same
+    // triangle count, roughened, each corner keeping the green, sway and lit
+    // normal of the clump it came from, Cycles' occlusion over the whole — it
+    // was a string of green beads along the bank. Built at life size, so only
+    // at true scale; `game.hedgePack113 = false` before a load is this builder.
+    { const HP = window.HEDGE_PACK;
+      if (HP && HP.length === 16 && K_PROP !== 1 && !(window.game && window.game.hedgePack113 === false)) {
+        const g = packedGeometry(HP[slot]); g.userData.packed = true; return (this._hedgeGeos[slot] = g);
+      } }
     const r = mulberry32(9100 + i * 37);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     // `rn` is the surface's OWN normal, for the leaf cut at its outline; `n` is
