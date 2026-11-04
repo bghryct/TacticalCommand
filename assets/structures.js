@@ -302,7 +302,8 @@
         || (window.game && window.game.propPack113 === false)) return null;
     if (_kit) return _kit;
     var u = function (a) { return a.map(function (e) { return window.unpackCompact(e); }); };
-    return (_kit = { stack: u(P.chimStack), pots: u(P.chimPots), frame: u(P.doorFrame), leaf: u(P.doorLeaf), step: u(P.doorStep) });
+    return (_kit = { stack: u(P.chimStack), pots: u(P.chimPots), frame: u(P.doorFrame), leaf: u(P.doorLeaf), step: u(P.doorStep),
+      win: P.winFrame && P.winSill && P.winShutters ? { frame: u(P.winFrame), sill: u(P.winSill), shut: u(P.winShutters) } : null });
   }
 
   Builder.prototype.reset = function () { this.n = 0; this.ni = 0; };
@@ -587,6 +588,22 @@
     function bx(a, b2, yy, la, ly, ln, r, g, b, faces) {
       B.box(horiz ? wx + a : wx + b2 * d[0], yy, horiz ? wz + b2 * d[1] : wz + a,
         horiz ? la : ln, ly, horiz ? ln : la, 0, 0, 0, r, g, b, faces);
+    }
+    // (round 113, third batch) THE BLENDER WINDOW (tools/blender/doodads.py
+    // `win_frame`, `win_sill`, `win_shutters`): the same frame, sill and
+    // shutters in about the boxes' triangles (42 against 36 — a town has tens
+    // of thousands), the reveal's and the joints' shading baked by Cycles;
+    // turned to whichever side is outside, tinted per house as before
+    var KW = kitPieces();
+    if (KW && KW.win) {
+      var sg = out ? (horiz ? (out * d[1] > 0 ? 1 : -1) : (out * d[0] > 0 ? 1 : -1)) : 1;
+      B.mesh(KW.win.frame[0], wx, y, wz, horiz, sg * S, S, sg * S, frr, frg, frb);
+      if (!out) return;
+      var sc0 = hexc(0x8a8478, 1);
+      B.mesh(KW.win.sill[0], wx, y, wz, horiz, sg * S, S, sg * S, sc0.r, sc0.g, sc0.b);
+      var sh0 = hexc(pal.sh, 0.95 + ((seed >>> 3) % 10) * 0.01), fo = WALL_TH * 0.5 + 0.022 * S;
+      B.mesh(KW.win.shut[((seed >>> 5) % 100) < 14 ? 1 : 0], horiz ? wx : wx + sg * fo, y, horiz ? wz + sg * fo : wz, horiz, sg * S, S, sg * S, sh0.r, sh0.g, sh0.b);
+      return;
     }
     // the casement frame in the opening, and its glazing bars — seen from
     // either side, never edge-on, so two faces each
