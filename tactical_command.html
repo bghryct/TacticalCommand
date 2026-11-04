@@ -22944,6 +22944,7 @@ class Obstacles {
    *  disc with three balls on it. Front is local +Z. */
   _gunpitGeo() {
     if (this._gpGeo) return this._gpGeo;
+    { const pg = this._packed113('gunpit', 0); if (pg) return (this._gpGeo = pg); }
     const r = mulberry32(6613);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
