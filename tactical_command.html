@@ -18940,6 +18940,11 @@ const FOG_N = 56;              // coarse field resolution (GRID/4)
 // over the top of it — which is exactly why a tank commander unbuttons and why
 // an observer goes to the crest.
 const FOG_LAYER_H = 3.4;
+/** (round 113) In first person an enemy is drawn while the eye has him and for
+ *  this long after (`Game._fogShows`): long enough that a man at the edge of a
+ *  hedge, whose torso and helmet sightlines flip frame to frame, does not
+ *  flicker; short enough that one who steps into smoke or the corn is gone. */
+const FPV_EYE_HOLD = 0.5;
 const FOG_LOS_BUDGET = 26;     // density × world-units of mist a sightline survives
 
 class FogBanks {
@@ -31812,7 +31817,7 @@ class Unit {
     this._fatX = undefined; this._fatZ = undefined; this._resting = undefined; this.fatState = undefined;
     this._lullT = undefined; this._animPos = undefined; this._animSpd = undefined; this._animPx = undefined;
     this._animAcc = undefined; this._ovlOff = undefined; this._filStamp = undefined; this._stlT = undefined;
-    this._stlV = undefined; this._sqWait = undefined; this._elem = undefined; this._owStart = undefined; this._fowSeen = undefined;
+    this._stlV = undefined; this._sqWait = undefined; this._elem = undefined; this._owStart = undefined; this._fowSeen = undefined; this._fpvEyeT = undefined;
     this._stepPh = undefined; this._lastThink = undefined; this._faceT = undefined; this._threatNextT = undefined;
     this._threatU = undefined; this._covT = undefined; this._covV = undefined; this._vHalf = undefined; this._vdT = undefined;
     this._vdV = undefined; this._aiInitT = undefined; this._incomingT = undefined; this._bzStamp = undefined;
@@ -45287,8 +45292,9 @@ class UI {
       // the same order of the user's that hides the model ("not … in game or
       // on the minimap unless they are visible to you or your units"). The
       // rule is the LOD's: `_fowSeen`, hostile teams only.
+      // In first person the map is his eyes too (`_fogShows`).
       if (!omniscient && g.fowEnabled && g.fog113 !== false && u.team !== pt && u.team !== 0
-          && areHostile(pt, u.team) && u._fowSeen !== true) continue;
+          && areHostile(pt, u.team) && !g._fogShows(u)) continue;
       const x = (u.pos.x + HALF) / WORLD * 168, z = (u.pos.z + HALF) / WORLD * 168;
       ctx.fillStyle = u.team === 0 ? '#9a9a92' : teamCss[u.team];
       ctx.fillRect(x - 1.5, z - 1.5, 3, 3);
@@ -58424,9 +58430,29 @@ class Game {
       // without them a health bar lags the thing it is attached to.
       e._seenT = this.time;
       e._fowSeen = true;
+      e._fpvEyeT = this.time;      // (round 113) what THIS man sees — `_fogShows`
       if (e.hpGroup) e.hpGroup.visible = true;
       if (e.ring) e.ring.visible = e.selected;
     }
+  }
+
+  /** (round 113) IS THIS ENEMY SHOWN? "you shouldn't have vision of enemies
+   *  occluded by los in first person only in top down mode" (the user). From
+   *  above, an enemy is shown while any of your men has seen him (`_fowSeen`,
+   *  the army's survey). Riding a man, only while THAT man can see him down his
+   *  own sightline — torso or helmet, through the walls, banks, crops, smoke
+   *  and mist `sightClear` reads (`_fpvEyeT`, stamped by `_applyFpvSight` every
+   *  frame before the LOD runs, held `FPV_EYE_HOLD`). What a comrade spotted
+   *  behind the hedge is his business, not your eyes'. While a hunter-killer
+   *  is flown the view is the missile's, so the side's knowledge stands.
+   *  The LOD's cull, the dug-in foxholes and the minimap all ask this.
+   *  `game.fpvEye113 = false`: first person shows the side's knowledge again. */
+  _fogShows(u) {
+    if (this.fpv && !this.hk && this.fpvEye113 !== false) {
+      const age = u._fpvEyeT == null ? Infinity : this.time - u._fpvEyeT;
+      return age >= 0 && age < FPV_EYE_HOLD;      // a stamp from another battle's clock is no stamp
+    }
+    return u._fowSeen === true;
   }
 
   // ---- RTT: volumetric smoke (K key) ------------------------------------
@@ -65345,8 +65371,12 @@ class Game {
         // because the survey HID what the eye was looking at; the eye now
         // stamps the side's knowledge itself, every frame, before this runs.
         // `game.fog113 = false` (or fog of war off) draws everyone again.
-        if (fogOn && u.alive && u.team !== fogPt && u.team !== 0 && u._fowSeen !== true && areHostile(fogPt, u.team)) on = false;
-        if (u._foxSlot >= 0) u._foxFog(fogOn && u.alive && u.team !== fogPt && u.team !== 0 && areHostile(fogPt, u.team) ? u._fowSeen === true : true);
+        // …AND IN FIRST PERSON ONLY WHAT THE MAN YOU RIDE CAN SEE (round 113,
+        // the user): `_fogShows` — the side's knowledge from above, his own
+        // sightline at eye level.
+        const fogged = fogOn && u.alive && u.team !== fogPt && u.team !== 0 && areHostile(fogPt, u.team);
+        if (fogged && !this._fogShows(u)) on = false;
+        if (u._foxSlot >= 0) u._foxFog(fogged ? this._fogShows(u) : true);
         // FOG OF WAR USED TO BE A CULL HERE, AND WAS NOT ANY MORE (rounds 44-112).
         //
         // It was a good one while it lasted: on a contested map most of the
