@@ -1694,12 +1694,17 @@
       // been through one bad minute is deaf to the next one forever.
       if (sq._brokeN) sq._brokeN = sq._brokeN * Math.pow(0.5, dt / 30);
 
-      var target = pressure * 0.62
-        + down * 0.34                                  // how many have actually lost it
-        + mfear * 0.22                                 // …and how close the rest are
-        + sq.shock * 0.42                              // men lost in the last quarter-minute
-        + Math.pow(1 - strength, 1.6) * 0.26           // the worn-down residue
-        + (leader ? 0 : 0.16)                          // ONE leader term, not two
+      // (round 114) "less panic and running away" (the user): every term that
+      // pushes a section toward breaking is cut by about a fifth to a third. A
+      // section under heavy fire still goes to ground (`nervous`, `shaken`,
+      // `pinned`); it takes losses and a lost leader to make it run.
+      var N14 = this.nerve114 !== false;
+      var target = pressure * (N14 ? 0.5 : 0.62)
+        + down * (N14 ? 0.26 : 0.34)                   // how many have actually lost it
+        + mfear * (N14 ? 0.17 : 0.22)                  // …and how close the rest are
+        + sq.shock * (N14 ? 0.3 : 0.42)                // men lost in the last quarter-minute
+        + Math.pow(1 - strength, 1.6) * (N14 ? 0.18 : 0.26)   // the worn-down residue
+        + (leader ? 0 : (N14 ? 0.1 : 0.16))            // ONE leader term, not two
         + green * 0.08
         - vet * 0.12
         - officer * 0.12
@@ -1712,14 +1717,14 @@
       // "Fast" was `1.9`, which at the 4 Hz tick closes 47% of the gap every
       // quarter second: the number reached its target in about a second, and a
       // squad crossed four rungs in two. Fast is not instant.
-      var rise = 0.5, fall = 0.055 * (leader ? 1.4 : 1) * (officer ? 1.5 : 1);
+      var rise = 0.5, fall = (N14 ? 0.095 : 0.055) * (leader ? 1.4 : 1) * (officer ? 1.5 : 1);
       var k = target > sq.fear ? rise : fall;
       sq.fear += (target - sq.fear) * Math.min(1, k * dt);
 
       // A squad that has broken stays broken for a while whatever the numbers
       // say. Men who have run do not turn round because the shooting stopped
       // twelve seconds ago, and a rout that rallies instantly is not a rout.
-      if (sq.state === 'broken' && (this.time - sq.routT) < 25) {
+      if (sq.state === 'broken' && (this.time - sq.routT) < (N14 ? 14 : 25)) {
         sq.fear = Math.max(sq.fear, MORALE[5].enter);
       }
 
@@ -1751,8 +1756,8 @@
       // men — which is the whole Close Combat argument. Rolled per second off
       // a clock the squad owns, so the 4 Hz tick does not multiply it.
       if (want === 'broken' && sq.state !== 'broken') {
-        var hold = 0.2 + (leader ? 0.26 : 0) + officer * 0.22 + steel * 0.5 + Math.max(0, vet) * 0.1;
-        if (Math.random() >= SQ_ROUT_RATE * dt * (1 - Math.min(0.93, hold))) want = 'pinned';
+        var hold = (N14 ? 0.4 : 0.2) + (leader ? 0.26 : 0) + officer * 0.22 + steel * 0.5 + Math.max(0, vet) * 0.1;
+        if (Math.random() >= SQ_ROUT_RATE * (N14 ? 0.45 : 1) * dt * (1 - Math.min(0.93, hold))) want = 'pinned';
       }
       if (want !== sq.state) { sq._rungT = this.time; this._squadStateChange(sq, sq.state, want, live); }
     };
@@ -1813,7 +1818,9 @@
       if (n) { ax = c.x - (ex / n - c.x); az = c.z - (ez / n - c.z); }
       else { ax = sq._homeX !== undefined ? sq._homeX : c.x; az = sq._homeZ !== undefined ? sq._homeZ : c.z; }
       var dx = ax - c.x, dz = az - c.z, d = sqHyp(dx, dz) || 1;
-      var tx = c.x + dx / d * 70, tz = c.z + dz / d * 70;
+      // (round 114) a run for the next hedge, not for the map's edge
+      var runD = this.nerve114 !== false ? 36 : 70;
+      var tx = c.x + dx / d * runD, tz = c.z + dz / d * runD;
       sq.moveGoal = null;
       sq.routT = this.time;
       sq.internal(function () {

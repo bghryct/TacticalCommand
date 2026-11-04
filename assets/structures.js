@@ -295,7 +295,7 @@
    *  with `game.propPack113 = false`, or `Structures.KIT.on = false` (then
    *  rebuild): the boxes below. Drawing only — the simulation reads the wall
    *  grid. Inside doors keep the boxes: a town has thousands of them. */
-  var KIT = { on: true }, _kit = null;
+  var KIT = { on: true, quoins: false }, _kit = null;   // quoins: unfinished, off
   function kitPieces() {
     var P = window.PROP_PACK;
     if (!KIT.on || !P || !P.chimStack || !P.chimPots || !P.doorFrame || !P.doorLeaf || !P.doorStep || typeof window.unpackCompact !== 'function'
@@ -304,7 +304,7 @@
     var u = function (a) { return a.map(function (e) { return window.unpackCompact(e); }); };
     return (_kit = { stack: u(P.chimStack), pots: u(P.chimPots), frame: u(P.doorFrame), leaf: u(P.doorLeaf), step: u(P.doorStep),
       win: P.winFrame && P.winSill && P.winShutters ? { frame: u(P.winFrame), sill: u(P.winSill), shut: u(P.winShutters) } : null,
-      ridge: P.roofRidge ? u(P.roofRidge) : null });
+      ridge: P.roofRidge ? u(P.roofRidge) : null, quoin: P.quoin ? u(P.quoin) : null });
   }
 
   Builder.prototype.reset = function () { this.n = 0; this.ni = 0; };
@@ -2113,6 +2113,26 @@
         var i = this.li(gx, gz, L);
         var y = this.floorY(gx, gz, L);
         var cx = G.cellCenter(gx), cz = G.cellCenter(gz);
+        // (round 113, third batch) QUOINS at a masonry house's outside corners
+        // (`quoin`, Blender): where two neighbouring edges of a room are both
+        // walls of brick or stone with no room across either. UNFINISHED — off
+        // until KIT.quoins (see NORMANDY_HANDOFF.md, "Round 113 paused").
+        var KQ = DRESS.on && KIT.quoins ? kitPieces() : null;
+        if (KQ && KQ.quoin && this._roomAt(gx, gz, L)) {
+          for (var qe = 0; qe < 4; qe++) {
+            var qe2 = (qe + 1) % 4, qm = this.wallM[i * 4 + qe], qm2 = this.wallM[i * 4 + qe2];
+            if (!qm || !qm2 || !MATS[qm].ruin || !MATS[qm2].ruin || (this.wallH[i * 4 + qe] < 230) || (this.wallH[i * 4 + qe2] < 230)) continue;
+            var qa = EDGE_D[qe], qb = EDGE_D[qe2];
+            if (this._roomAt(gx + qa[0], gz + qa[1], L) || this._roomAt(gx + qb[0], gz + qb[1], L)) continue;
+            // the corner's two outward faces → the piece's +X/+Z by a proper turn
+            // (Builder.mesh: alongX keeps x,z; else x,z → z,-x). Corners N-E,
+            // E-S, S-W, W-N are qe 0-3: quarter turn, none, quarter turn and a
+            // half, a half. Worked on paper from the transform, not yet seen.
+            var qAlong = (qe & 1) === 1, qs = qe < 2 ? S : -S;
+            var qc = shade(MATS[qm], seed0 + 41, 0, 1.12);
+            B.mesh(KQ.quoin[0], cx + (qa[0] + qb[0]) * T * 0.5, this.wallBase(gx, gz, qe) + L * FLOOR_H, cz + (qa[1] + qb[1]) * T * 0.5, qAlong, qs, S, qs, qc.r, qc.g, qc.b);
+          }
+        }
         // Walls: only draw the N and W surfaces of each cell, plus the S and E
         // surfaces on the far boundary — otherwise every shared surface would
         // be drawn twice, doubling the triangle count of every interior wall.

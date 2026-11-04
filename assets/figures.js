@@ -777,6 +777,12 @@
     officerHead: 'brodie',
   };
   KITS.ukcommando = K(KITS.uk, { head: 'beret', helm: 0x2e4a2b, pack: 'none', scrim: false });
+  // ---- (round 114) TANK CREWS, ON FOOT -----------------------------------------
+  // A pistol belt and nothing else: no webbing, no pack, no leggings. The US
+  // tanker's herringbone coveralls and his padded fibre helmet; the Panzer black
+  // and its side cap; RAC denims and a black beret; the Red Army's dark overalls
+  // and padded tankoshlem; the French leather coat and Adrian; the Italian's
+  // leather and crash helmet; the Japanese khaki and padded cork.
   KITS.ger = {
     army: 'ger',
     tunic: 0x5c604e, collar: 0x454a3c, trousers: 0x56594b, skin: 0xc38b64,
@@ -843,10 +849,19 @@
   KITS.jpsnlf = K(KITS.jp, { tunic: 0x5c6040, trousers: 0x585c3e, collar: 0x5c6040, legC: 0x585c3e });
   F.KITS = KITS;
 
+  const CREW = { web: 'none', pack: 'none', legs: 'none', scrim: false, officerMark: null, helmCamo: null, helmMark: null, breastPockets: false, skirtPockets: false, mapPocket: false, skirt: 0.03, flare: 0 };
+  KITS.ustanker = K(KITS.us, K(CREW, { tunic: 0x6d6e50, collar: 0x62634a, trousers: 0x66674b, boots: 0x3b2a1c, head: 'crash', officerHead: 'crash', helm: 0x4a3a28 }));
+  KITS.uktanker = K(KITS.uk, K(CREW, { tunic: 0x7c7860, collar: 0x726e58, trousers: 0x76725a, boots: 0x1d1b18, head: 'beret', officerHead: 'beret', helm: 0x17171a }));
+  KITS.gertanker = K(KITS.ger, K(CREW, { tunic: 0x1c1c1f, collar: 0x26262a, trousers: 0x19191c, boots: 0x14110e, head: 'feldmutze', officerHead: 'feldmutze', capC: 0x18181b, helm: 0x18181b }));
+  KITS.sovtanker = K(KITS.sov, K(CREW, { tunic: 0x35393f, collar: 0x2d3136, trousers: 0x31353a, boots: 0x1c1915, head: 'crash', officerHead: 'crash', helm: 0x1f2024 }));
+  KITS.frtanker = K(KITS.fr, K(CREW, { tunic: 0x30291f, collar: 0x28221a, trousers: 0x3a3c32, boots: 0x1d1a16, head: 'adrian', officerHead: 'adrian', helm: 0x2f3438 }));
+  KITS.ittanker = K(KITS.it, K(CREW, { tunic: 0x2d261e, collar: 0x251f18, trousers: 0x4a4636, boots: 0x1d1a16, head: 'crash', officerHead: 'crash', helm: 0x26221c }));
+  KITS.jptanker = K(KITS.jp, K(CREW, { tunic: 0x6f6a4a, collar: 0x665f42, trousers: 0x6a6546, boots: 0x3c2b1c, head: 'crash', officerHead: 'crash', helm: 0x57502f }));
   // Which kit a unit id wears. The id's own prefix is its army (see
   // `nationOf`); the ids named after their weapon are listed.
   const BY_TYPE = {
     uspara: 'uspara', usmarine: 'usmc', usranger: 'usranger',
+    ustanker: 'ustanker', uktanker: 'uktanker', gertanker: 'gertanker', sovtanker: 'sovtanker', frtanker: 'frtanker', ittanker: 'ittanker', jptanker: 'jptanker',
     ukcommando: 'ukcommando',
     gerss: 'gerss', gerfj: 'gerfj', gergebirg: 'gergebirg', gervolks: 'gervolks',
     sovppsh: 'sovsmg', sovsapper: 'sovsmg',
@@ -890,6 +905,10 @@
       return m;
     };
     const shade = (hex, k) => new THREE.Color(hex).multiplyScalar(k).getHex();
+    // (round 114) `userData.body`: a part of the man himself, not of his kit. The
+    // Blender body (tools/blender/soldier.py) replaces all of these with one
+    // rigged skin in `Unit._skinModel`; a figure that is not skinned keeps them.
+    const tag = (m, r) => { m.userData.body = r; return m; };
     const camoGeo = (key, geo) => kit.camo ? cached(key + ':' + kit.camo, () => patterned(geo, kit.camo)) : geo;
     const officer = cfg.helmet === 'cap' || cfg.officer;
     const sniper = cfg.helmet === 'hood';
@@ -905,11 +924,11 @@
       const legG = new THREE.Group(); legG.position.x = side * LEG_X; hips.add(legG);
       // `userData.flex`: a limb part whose skin bends with the joint at its end
       // (round 104, `Unit._skinModel`) rather than staying rigid on one bone
-      put(legG, camoGeo('thigh' + (kit.breeches || 0), GEO.thigh(kit.breeches || 0)), trouserC).userData.flex = 'leg';
+      tag(put(legG, camoGeo('thigh' + (kit.breeches || 0), GEO.thigh(kit.breeches || 0)), trouserC), 'trouser').userData.flex = 'leg';
       if (kit.cargo) put(legG, GEO.cbox(0.036, 0.12, 0.1, 0.01), shade(trouserC, 0.92), side * 0.082, -0.12, 0.012);
       if (kit.mapPocket && side > 0) put(legG, GEO.box(0.085, 0.1, 0.02), shade(trouserC, 0.9), 0.012, -0.08, 0.082, -0.05, 0, 0);
       const knee = new THREE.Group(); knee.position.y = KNEE_Y; legG.add(knee);
-      put(knee, camoGeo('shin', GEO.shin()), trouserC).userData.flex = 'leg';
+      tag(put(knee, camoGeo('shin', GEO.shin()), trouserC), 'trouser').userData.flex = 'leg';
       const lower = kit.legs && kit.legs !== 'none' ? GEO.lower(kit.legs) : null;
       if (lower) {
         const c = kit.legs === 'jumpboots' ? kit.boots : kit.legC;
@@ -921,16 +940,16 @@
       // a walking man's boots tipped with his shins and a kneeling man's toes
       // stood in the air. Built where they were, hung from the joint.
       const ankle = new THREE.Group(); ankle.position.set(0, ANKLE_Y, ANKLE_Z); knee.add(ankle);
-      const boot = put(ankle, GEO.boot(0), kit.boots, 0, -ANKLE_Y, -ANKLE_Z);
+      const boot = tag(put(ankle, GEO.boot(0), kit.boots, 0, -ANKLE_Y, -ANKLE_Z), 'boot');
       boot.userData.flex = 'leg';
-      put(ankle, GEO.sole(), shade(kit.boots, 0.55), 0, -ANKLE_Y, -ANKLE_Z);
+      tag(put(ankle, GEO.sole(), shade(kit.boots, 0.55), 0, -ANKLE_Y, -ANKLE_Z), 'sole');
       return { leg: legG, knee, ankle, boot };
     };
     const L = leg(-1), R = leg(1);
     // the seat of the trousers, and the jacket's skirt over it
-    put(hips, camoGeo('pelvis', GEO.pelvis()), trouserC).userData.flex = 'hip';
+    tag(put(hips, camoGeo('pelvis', GEO.pelvis()), trouserC), 'trouser').userData.flex = 'hip';
     if (kit.skirt > 0) {
-      put(hips, camoGeo('skirt' + kit.skirt + ':' + kit.flare, GEO.skirt(kit.skirt, kit.flare)), tunicC, 0, 0.03, 0).userData.flex = 'hip';
+      tag(put(hips, camoGeo('skirt' + kit.skirt + ':' + kit.flare, GEO.skirt(kit.skirt, kit.flare)), tunicC, 0, 0.03, 0), 'skirt').userData.flex = 'hip';
       if (kit.skirtPockets) for (const sx of [-1, 1]) {
         put(hips, GEO.box(0.088, 0.08, 0.02), shade(tunicC, 0.94), sx * 0.085, -0.02, 0.126, 0, sx * 0.3, 0);
         put(hips, GEO.box(0.094, 0.028, 0.024), shade(tunicC, 0.84), sx * 0.085, 0.024, 0.127, 0, sx * 0.3, 0);
@@ -939,8 +958,8 @@
 
     // ---- torso ---------------------------------------------------------------
     const spine = new THREE.Group(); spine.position.y = 0.03; hips.add(spine);
-    put(spine, camoGeo('torso', GEO.torso()), tunicC).userData.flex = 'torso';
-    put(spine, GEO.collar(0.035), kit.collar);
+    tag(put(spine, camoGeo('torso', GEO.torso()), tunicC), 'tunic').userData.flex = 'torso';
+    tag(put(spine, GEO.collar(0.035), kit.collar), 'collar');
     if (kit.breastPockets) for (const sx of [-1, 1]) {
       const s = onTorso(sx * 0.083, 0.34, 1);
       put(spine, GEO.box(0.084, 0.088, 0.018), shade(tunicC, 0.95), s.p[0], 0.33, s.p[2] + 0.006, 0, sx * 0.25, 0);
@@ -1060,16 +1079,16 @@
 
     // ---- head --------------------------------------------------------------
     const neck = new THREE.Group(); neck.position.y = NECK_Y; spine.add(neck);
-    put(neck, GEO.neck(), kit.skin, 0, 0.0, -0.004).userData.flex = 'neck';   // blends into the collar (round 106)
+    tag(put(neck, GEO.neck(), kit.skin, 0, 0.0, -0.004), 'skin').userData.flex = 'neck';   // blends into the collar (round 106)
     const head = new THREE.Group(); head.position.y = HEAD_Y; neck.add(head);
-    const skull = put(head, GEO.cranium(), kit.skin, 0, 0.012, -0.008);
-    put(head, GEO.jaw(), kit.skin);
-    put(head, GEO.brow(), shade(kit.skin, 0.95), 0, 0.016, 0.07);
+    const skull = tag(put(head, GEO.cranium(), kit.skin, 0, 0.012, -0.008), 'skin');
+    tag(put(head, GEO.jaw(), kit.skin), 'skin');
+    tag(put(head, GEO.brow(), shade(kit.skin, 0.95), 0, 0.016, 0.07), 'skin');
     for (const s of [-1, 1]) {
-      put(head, GEO.eye(), shade(kit.skin, 0.36), s * 0.026, 0.001, 0.077);
-      put(head, GEO.ear(), shade(kit.skin, 0.94), s * 0.07, -0.012, -0.006);
+      tag(put(head, GEO.eye(), shade(kit.skin, 0.36), s * 0.026, 0.001, 0.077), 'eye');
+      tag(put(head, GEO.ear(), shade(kit.skin, 0.94), s * 0.07, -0.012, -0.006), 'skin');
     }
-    put(head, GEO.nose(), kit.skin, 0, -0.024, 0.086);
+    tag(put(head, GEO.nose(), kit.skin, 0, -0.024, 0.086), 'skin');
 
     let helmet = null;
     let headKind = sniper ? 'hood' : officer ? (kit.officerHead || kit.head) : kit.head;
@@ -1130,6 +1149,14 @@
     } else if (headKind === 'kepi') {
       helmet = put(head, CAPS.kepi(), kit.capC, 0, 0, -0.012, -0.18, 0, 0);
       put(head, CAPS.peak(), 0x1b1c19, 0, 0.062, 0.088, 0.2, 0, 0);
+    } else if (headKind === 'crash') {
+      // (round 114) a tank crew's padded helmet: the crown, the ribs, the earphones
+      helmet = put(head, CAPS.hood(), kit.helm, 0, 0.034, -0.012);
+      put(head, GEO.box(0.012, 0.012, 0.19), shade(kit.helm, 0.72), 0, 0.128, -0.012);
+      for (const sx of [-1, 1]) {
+        put(head, GEO.box(0.012, 0.012, 0.17), shade(kit.helm, 0.72), sx * 0.05, 0.11, -0.012);
+        put(head, GEO.box(0.03, 0.058, 0.058), shade(kit.helm, 0.66), sx * 0.092, 0.0, -0.006);
+      }
     } else if (headKind === 'hood') {
       helmet = put(head, CAPS.hood(), shade(kit.tunic, 0.8), 0, 0.03, -0.012);
     }
@@ -1137,13 +1164,13 @@
     // ---- arms ------------------------------------------------------------------
     const arm = (side) => {
       const a = new THREE.Group(); a.position.set(side * ARM_X, ARM_Y, 0); spine.add(a);
-      put(a, camoGeo('shoulder', GEO.shoulder()), tunicC, 0, -0.012, 0).userData.flex = 'arm';
-      put(a, camoGeo('uarm', GEO.upperArm()), tunicC).userData.flex = 'arm';
+      tag(put(a, camoGeo('shoulder', GEO.shoulder()), tunicC, 0, -0.012, 0), 'sleeve').userData.flex = 'arm';
+      tag(put(a, camoGeo('uarm', GEO.upperArm()), tunicC), 'sleeve').userData.flex = 'arm';
       const elbow = new THREE.Group(); elbow.position.y = ELBOW_Y; a.add(elbow);
-      put(elbow, camoGeo('farm', GEO.forearm()), tunicC).userData.flex = 'arm';
+      tag(put(elbow, camoGeo('farm', GEO.forearm()), tunicC), 'sleeve').userData.flex = 'arm';
       const hand = new THREE.Group(); hand.position.y = HAND_Y; elbow.add(hand);
-      put(hand, GEO.hand(), kit.skin, 0, -0.004, 0.006);
-      put(hand, GEO.thumb(), kit.skin, -side * 0.03, 0.004, 0.028, 0.3, 0, 0);
+      tag(put(hand, GEO.hand(), kit.skin, 0, -0.004, 0.006), 'skin');
+      tag(put(hand, GEO.thumb(), kit.skin, -side * 0.03, 0.004, 0.028, 0.3, 0, 0), 'skin');
       return { arm: a, elbow, hand };
     };
     const AL = arm(-1), AR = arm(1);
@@ -1176,6 +1203,118 @@
     AL.arm.rotation.set(-0.35, 0, 0.16); AR.arm.rotation.set(-0.35, 0, -0.16);
     AL.elbow.rotation.x = -0.9; AR.elbow.rotation.x = -0.9;
     return { g, uniform, dark, skin, gear, head: skull, rig };
+  };
+
+  /** (round 114) THE BIND POSE of the Blender body: arms out and legs a little
+   *  apart, the pose it was modelled and weighted in. `Unit._skinModel` puts the
+   *  rig in it to bind and puts the rig back; returns what to put back. */
+  F.BIND_POSE = { armX: 0, armZ: 0.62, elbow: -0.14, legZ: 0.1 };
+  F.bindPose = function (rig) {
+    const B = F.BIND_POSE, keep = {};
+    for (const n of ['armL', 'armR', 'elbowL', 'elbowR', 'legL', 'legR', 'kneeL', 'kneeR', 'ankleL', 'ankleR', 'spine', 'neck', 'body']) if (rig[n]) keep[n] = rig[n].rotation.clone();
+    rig.armL.rotation.set(B.armX, 0, -B.armZ); rig.armR.rotation.set(B.armX, 0, B.armZ);
+    rig.elbowL.rotation.set(B.elbow, 0, 0); rig.elbowR.rotation.set(B.elbow, 0, 0);
+    rig.legL.rotation.set(0, 0, -B.legZ); rig.legR.rotation.set(0, 0, B.legZ);
+    if (rig.kneeL) { rig.kneeL.rotation.set(0, 0, 0); rig.kneeR.rotation.set(0, 0, 0); }
+    if (rig.ankleL) { rig.ankleL.rotation.set(0, 0, 0); rig.ankleR.rotation.set(0, 0, 0); }
+    if (rig.spine) rig.spine.rotation.set(0, 0, 0);
+    if (rig.neck) rig.neck.rotation.set(0, 0, 0);
+    if (rig.body) rig.body.rotation.set(0, 0, 0);
+    return keep;
+  };
+  F.unbindPose = function (rig, keep) { for (const n in keep) rig[n].rotation.copy(keep[n]); };
+
+  // ---- (round 114) THE BLENDER BODY --------------------------------------------
+  // One closed skin (tools/blender/soldier.py -> window.SOLDIER_PACK), rigged in
+  // Blender with bone heat, in place of the thirty rigid `userData.body` parts.
+  // Its texture's red is the cloth's fold shading and its green says which garment
+  // a texel is, so every army's uniform is that one sheet painted with its own
+  // colours, crisp at the cuff and the collar. A kit's painted sheet is made once.
+  let _bodyBase = null, _bodySheet = null;
+  const _bodyKits = new Map();
+  const b64 = (s, T) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); };
+  function bodyBase() {
+    if (_bodyBase !== null) return _bodyBase;
+    const P = window.SOLDIER_PACK;
+    if (!P) return (_bodyBase = false);
+    const n = P.n, pi = b64(P.pos, Int16Array), ni = b64(P.nor, Int8Array), ui = b64(P.uv, Uint16Array);
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      for (let c = 0; c < 3; c++) {
+        pos[i * 3 + c] = P.lo[c] + (pi[i * 3 + c] + 32767) / 65534 * (P.hi[c] - P.lo[c]);
+        nor[i * 3 + c] = ni[i * 3 + c] / 127;
+      }
+      uv[i * 2] = ui[i * 2] / 65535; uv[i * 2 + 1] = ui[i * 2 + 1] / 65535;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setIndex(new THREE.BufferAttribute(b64(P.idx, Uint16Array), 1));
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+    g.setAttribute('bj', new THREE.BufferAttribute(b64(P.bj, Uint8Array), 3));
+    g.setAttribute('bw', new THREE.BufferAttribute(b64(P.bw, Uint8Array), 3));
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+      const x = cv.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0);
+      _bodySheet = { w: img.width, h: img.height, d: x.getImageData(0, 0, img.width, img.height).data };
+      for (const k of _bodyKits.values()) paintKit(k);
+    };
+    img.src = P.img;
+    return (_bodyBase = { geo: g, joints: P.joints, regions: P.regions });
+  }
+  function paintKit(K_) {
+    const S = _bodySheet; if (!S) return;
+    const kit = K_.kit, W = S.w, H = S.h, d = S.d, out = K_.tex.image.data, camo = !!K_.camoId;
+    const shadeHex = (h, k) => new THREE.Color(h).multiplyScalar(k).getHex();
+    const skirtC = kit.skirt > 0 ? kit.tunic : kit.trousers;
+    const clothes = { tunic: kit.tunic, sleeve: kit.tunic, skirt: skirtC, trouser: kit.trousers };
+    const lut = new Uint8Array(16 * 4).fill(255);
+    const put = (i, hex, a) => { lut[i * 4] = (hex >> 16) & 255; lut[i * 4 + 1] = (hex >> 8) & 255; lut[i * 4 + 2] = hex & 255; lut[i * 4 + 3] = a; };
+    _bodyBase.regions.forEach((r, i) => {
+      const c = clothes[r];
+      if (c !== undefined) put(i, c, camo ? 0 : 255);      // alpha 0: `figCamo` (a ratio on this colour) applies here
+      else if (r === 'skin') put(i, kit.skin, 255);
+      else if (r === 'eye') put(i, shadeHex(kit.skin, 0.32), 255);
+      else if (r === 'collar') put(i, kit.collar, 255);
+      else if (r === 'boot') put(i, kit.boots, 255);
+      else if (r === 'sole') put(i, shadeHex(kit.boots, 0.55), 255);
+    });
+    put(15, 0xffffff, camo ? 0 : 255);        // the free strip: every other part of him samples this
+    // The hexes are sRGB and so is this sheet (`tex.encoding`), so the fold shade,
+    // a linear factor, goes on through the same curve.
+    const SH = new Float32Array(256); for (let i = 0; i < 256; i++) SH[i] = Math.pow(i / 255, 1 / 2.2);
+    // The texture's rows go bottom-up (v = 0 first), as the UVs were cut.
+    for (let y = 0; y < H; y++) {
+      const ro = (H - 1 - y) * W * 4, wo = y * W * 4;
+      for (let x = 0; x < W; x++) {
+        const s = ro + x * 4, o = wo + x * 4, sh = SH[d[s]], id = Math.min(15, Math.round(d[s + 1] / 16)) * 4;
+        out[o] = lut[id] * sh; out[o + 1] = lut[id + 1] * sh; out[o + 2] = lut[id + 2] * sh; out[o + 3] = lut[id + 3];
+      }
+    }
+    K_.tex.needsUpdate = true;
+  }
+  /** What `Unit._skinModel` needs to put this kit's body on a man, or null. */
+  F.bodyFor = function (kit) {
+    const B = bodyBase();
+    if (!B || !kit) return null;
+    const camoId = kit.camo && F.pixelCamo ? (PATTERN_ID[kit.camo] || 0) : 0;
+    let K_ = _bodyKits.get(kit);
+    if (!K_) {
+      const W = 512, tex = new THREE.DataTexture(new Uint8Array(W * W * 4).fill(150), W, W, THREE.RGBAFormat);
+      tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = true; tex.flipY = false;
+      tex.encoding = THREE.sRGBEncoding;   // as `_paintVerts` decodes every other part's hex
+      K_ = { kit, tex, camoId, geo: null };
+      if (camoId) {
+        const g = B.geo.clone();
+        g.setAttribute('camo', new THREE.BufferAttribute(new Float32Array(B.geo.attributes.position.count).fill(camoId), 1));
+        K_.geo = g;
+      } else K_.geo = B.geo;
+      _bodyKits.set(kit, K_);
+      paintKit(K_);
+    }
+    return { geo: K_.geo, tex: K_.tex, joints: B.joints };
   };
 
   /** The team's colour as armbands on both upper arms. */

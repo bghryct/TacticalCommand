@@ -1451,6 +1451,8 @@ body.fpv #tacMap { display: none !important; }
      canopy shader's own attribute layout (tools/blender/trees.py). Optional:
      without it `Obstacles._treeVariant` builds its procedural trees. -->
 <script src="assets/trees.pack.js"></script>
+<script src="assets/soldier.pack.js"></script>
+<script src="assets/gaits.js"></script>
 <script src="assets/hedges.pack.js"></script>
 <script src="assets/refine.pack.js"></script>
 <!-- (round 113) the props' occlusion, baked in Cycles from the page's own
@@ -2104,6 +2106,18 @@ const UNIT_DEFS = {
   // ---- Officers (leadership aura) ----------------------------------------
   usofficer:  { name: 'US Officer',   kind: 'officer', hp: 90, spd: 4.6, dmg: 8, rng: 22, atkTime: 0.8, armor: 0.1, shield: 0, size: 0.95, vis: 52, color: 0x4a5040, model: 'officer', aura: 15 },
   gerofficer: { name: 'Offizier',     kind: 'officer', hp: 90, spd: 4.4, dmg: 9, rng: 24, atkTime: 0.9, armor: 0.1, shield: 0, size: 0.95, vis: 52, color: 0x4a5040, model: 'officer', aura: 15 },
+  // ---- Tank crews on foot (round 114) -------------------------------------
+  // "more realistic tank crew bailing out it should be tankers not riflemen and
+  // grenadiers" (the user). Coveralls or the Panzer black, a tank helmet or a
+  // beret, a sidearm and no webbing; never bought, only climbed out of a hull
+  // (`Game._crewOut`). They run for the rear and they stay there.
+  ustanker:   { name: 'US Tank Crew',    kind: 'rifle', hp: 78, spd: 4.3, dmg: 8, rng: 14, atkTime: 0.85, armor: 0.06, shield: 0, size: 0.95, vis: 24, color: 0x63644a, model: 'tanker', tanker: true },
+  uktanker:   { name: 'Tank Crew',       kind: 'rifle', hp: 78, spd: 4.3, dmg: 7, rng: 14, atkTime: 1.0,  armor: 0.06, shield: 0, size: 0.95, vis: 24, color: 0x6c6a52, model: 'tanker', tanker: true },
+  gertanker:  { name: 'Panzerbesatzung', kind: 'rifle', hp: 78, spd: 4.3, dmg: 8, rng: 14, atkTime: 0.85, armor: 0.06, shield: 0, size: 0.95, vis: 24, color: 0x1e1e20, model: 'tanker', tanker: true },
+  sovtanker:  { name: 'Tankist',         kind: 'rifle', hp: 78, spd: 4.3, dmg: 8, rng: 14, atkTime: 0.85, armor: 0.06, shield: 0, size: 0.95, vis: 24, color: 0x3b3e42, model: 'tanker', tanker: true },
+  frtanker:   { name: 'Equipage de char', kind: 'rifle', hp: 78, spd: 4.3, dmg: 7, rng: 14, atkTime: 1.0, armor: 0.06, shield: 0, size: 0.95, vis: 24, color: 0x2f2a24, model: 'tanker', tanker: true },
+  ittanker:   { name: 'Carrista',        kind: 'rifle', hp: 78, spd: 4.3, dmg: 6, rng: 14, atkTime: 1.0,  armor: 0.06, shield: 0, size: 0.95, vis: 24, color: 0x2c2620, model: 'tanker', tanker: true },
+  jptanker:   { name: 'Sensha-hei',      kind: 'rifle', hp: 78, spd: 4.3, dmg: 6, rng: 14, atkTime: 1.0,  armor: 0.06, shield: 0, size: 0.95, vis: 24, color: 0x6a6648, model: 'tanker', tanker: true },
   // ---- Combat engineers ---------------------------------------------------
   usengineer: { name: 'US Engineer',  kind: 'engineer', hp: 90, spd: 4.4, dmg: 10, rng: 18, atkTime: 0.7, armor: 0.1, shield: 0, size: 0.95, vis: 44, color: 0x55603f, model: 'engineer', engineer: true },
   gerengineer:{ name: 'Pionier',      kind: 'engineer', hp: 92, spd: 4.2, dmg: 12, rng: 20, atkTime: 0.9, armor: 0.1, shield: 0, size: 0.95, vis: 44, color: 0x55603f, model: 'engineer', engineer: true },
@@ -4308,6 +4322,7 @@ const RTT_AMMO = { // finite rounds; MG/coax pools are large, AT rockets scarce
   usmortar: 30, germortar: 30,
   tiger: 92, panther: 79, pershing: 70, stuart: 147, puma: 55, m8: 80,
   ustruck: 2000, gertruck: 2000, arty155: 24,
+  ustanker: 21, uktanker: 18, gertanker: 24, sovtanker: 24, frtanker: 21, ittanker: 21, jptanker: 21,
   usflame: 300, gerflame: 300, usofficer: 40, gerofficer: 40, usengineer: 60, gerengineer: 60,
   t3485: 60, is2: 28, hetzer: 41, marder: 37, m16aa: 3200, katyusha: 6, nebelwerfer: 10,
   wespe: 40, carrier: 2000, sniper: 40,   // katyusha/nebelwerfer ammo = number of salvos
@@ -5040,6 +5055,7 @@ const RTT_RANGE = {
 const RTT_MV = {
   // ---- American small arms ----
   usrifle: 853, usbar: 853, us30cal: 853, usengineer: 853, uspara: 853,
+  ustanker: 253, uktanker: 190, gertanker: 365, sovtanker: 420, frtanker: 345, ittanker: 260, jptanker: 290,
   usmarine: 853, usmedic: 853, usofficer: 853, usfo: 853, usscout: 853,
   ussmg: 285, usranger: 285, usgrease: 280, uscarbine: 607,
   fiftycal: 890, m16aa: 890, sniper: 853, usjeep: 890,
@@ -6489,6 +6505,7 @@ for (const k in AT_ROF) {
 const RIFLE_ROF = {
   // self-loading
   usrifle: 45, uspara: 45, usmarine: 45, usranger_: 0,
+  ustanker: 30, uktanker: 24, gertanker: 30, sovtanker: 30, frtanker: 24, ittanker: 24, jptanker: 24,
   uscarbine: 45, usscout: 45, usofficer: 40, usengineer: 40,
   // An SS Gruppe's riflemen carried the K98k like everybody else's, and a bolt
   // gun does not fire forty aimed rounds a minute in anybody's hands — that
@@ -6814,6 +6831,9 @@ const RTT_KIT = {
   usranger:  { arm: 'thompson', load: 300, nades: 4, side: 'm1911', sideLoad: 21 },
   usgrease:  { arm: 'm3grease', load: 180, nades: 2 },
   usbar:     { arm: 'bar', load: 220, nades: 2 },
+  ustanker:  { arm: 'm1911', load: 21, nades: 0 }, uktanker: { arm: 'enfield2', load: 18, nades: 0 },
+  gertanker: { arm: 'p38', load: 24, nades: 0 }, sovtanker: { arm: 'tt33', load: 24, nades: 0 },
+  frtanker:  { arm: 'mas35', load: 21, nades: 0 }, ittanker: { arm: 'beretta34', load: 21, nades: 0 }, jptanker: { arm: 'nambu14', load: 21, nades: 0 },
   usofficer: { arm: 'm1911', load: 21, nades: 2 },
   usfo:      { arm: 'm1911', load: 21, nades: 2 },
   usmedic:   { arm: 'm1911', load: 0, nades: 0 },
@@ -15862,6 +15882,12 @@ const nationOf = t => {
   return AXIS_UNITS.has(t) ? 'axis' : SOVIET_UNITS.has(t) ? 'soviet' : 'allied';
 };
 
+/** (round 114) Who climbs out of this hull: its army's tank crew. */
+const UK_HULLS = new Set(['firefly', 'achilles', 'crocodile', 'carrier', 'wasp', 'churchill', 'cromwell', 'sexton', 'kangaroo']);
+const tankerOf = t => t.startsWith('it') ? 'ittanker' : t.startsWith('jp') ? 'jptanker' : t.startsWith('fr') ? 'frtanker'
+  : nationOf(t) === 'soviet' ? 'sovtanker' : nationOf(t) === 'axis' ? 'gertanker'
+  : t.startsWith('uk') || UK_HULLS.has(t) ? 'uktanker' : 'ustanker';
+
 // ---- WHAT A SECTION IS ----------------------------------------------------
 //
 // The paper strength of an infantry section, by the army that wrote it down.
@@ -16118,6 +16144,7 @@ class SFX {
     this.right = { x: 1, z: 0 };
     this._budget = {};                      // per-category voice budget this frame
     try { this.muted = localStorage.getItem('tc_muted') === '1'; } catch (e) {}
+    try { if (localStorage.getItem('tc.genguns') === '0') this.genGuns = false; } catch (e) {}
   }
 
   /** Lazily create the AudioContext (must happen after a user gesture). */
@@ -16414,6 +16441,9 @@ class SFX {
    *  So a name backed by a sample gets under half the send. */
   _wet(name, synth) {
     const W = window.WarAudio;
+    // (round 114) A generated report carries the ground and the nearest hedge
+    // and no more: the valley is this convolver's to give it.
+    if (String(name).startsWith('gen_')) return synth * 0.5;
     // A full-range recording (round 103) was made outdoors and carries its
     // own decay — the Kar 98k's runs a second — so it gets less again.
     if (W && W.full && W.full(name)) return synth * 0.26;
@@ -16428,6 +16458,18 @@ class SFX {
   _gunName(kind, def, tail) {
     const W = window.WarAudio, t = tail ? '.' + tail : '';
     if (!def) return kind + t;
+    // (round 114) THE GENERATED BANKS (tools/audio_gen/gen_guns.py): every gun
+    // built from its charge, velocity and action, by weapon. A section gun on a
+    // vehicle plays through `mg` and on a man through `rifle`: the same weapon,
+    // so each looks in both. Snipers keep the far-off recordings chosen for them.
+    // `localStorage['tc.genguns'] = '0'` / `sfx.genGuns = false`: the recordings.
+    if (W && W.has && this.genGuns !== false && W.has('gen_' + kind + t) && def.kind !== 'sniper') {
+      const A = 'gen_' + kind, B = kind === 'mg' ? 'gen_rifle' : 'gen_mg';
+      if (def.id && W.has(A + '.' + def.id + t)) return A + '.' + def.id + t;
+      if (def.arms && W.has(A + '.' + def.arms + t)) return A + '.' + def.arms + t;
+      if (!t && def.arms && W.has(B + '.' + def.arms)) return B + '.' + def.arms;
+      return A + t;
+    }
     if (W && W.has) {
       if (def.id && W.has(kind + '.' + def.id + t)) return kind + '.' + def.id + t;
       if (def.arms && W.has(kind + '.' + def.arms + t)) return kind + '.' + def.arms + t;
@@ -16442,6 +16484,7 @@ class SFX {
    *  that is mud. The manifest lists those banks as `full`. */
   _bodyK(name) {
     const W = window.WarAudio;
+    if (String(name).startsWith('gen_')) return 0;   // (round 114) built with its own chest
     return W && W.full && W.full(name) ? 0.3 : 1;
   }
 
@@ -16634,7 +16677,10 @@ class SFX {
   mg(pos, heavy, rate, def) {
     if (rate >= SFX.RIP_RATE) return this._mgRip(pos, heavy, rate, def);
     const p = this._ok(pos, 'mg', 7, { ref: 34, absorb: 52 }); if (!p) return;
-    const nm = def && (def.id || def.arms) ? this._gunName('mg', def) : (heavy ? 'mg.heavy' : 'mg');
+    let nm = def && (def.id || def.arms) ? this._gunName('mg', def) : (heavy ? 'mg.heavy' : 'mg');
+    if (nm === 'gen_mg' && heavy) nm = 'gen_mg.heavy';
+    else if (!def && this.genGuns !== false && window.WarAudio && window.WarAudio.has && window.WarAudio.has('gen_mg')) nm = heavy ? 'gen_mg.heavy' : 'gen_mg';
+    this._brass(pos, 0.3);
     const b = this._bus(p, this._wet(nm, 0.85));
     if (this._sample(nm, p, b)) { this._body(p, b, heavy ? 58 : 68, 0.09, (heavy ? 0.34 : 0.26) * this._bodyK(nm)); return; }
     this._noise('highpass', heavy ? 3600 : 4600, 1500, 0.03, heavy ? 0.6 : 0.44, p.t, 0.7, b, 0.0008);
@@ -16654,6 +16700,7 @@ class SFX {
     this._ripT[key] = now;
     const p = this._ok(pos, 'mg', 4, { ref: 38, absorb: 52 }); if (!p) return;
     const nm = def && (def.id || def.arms) ? this._gunName('mg', def, 'rip') : 'mg.rip';
+    this._brass(pos, 0.5);
     const b = this._bus(p, this._wet(nm, 1.0));
     if (this._sample(nm, p, b)) { this._body(p, b, 62, SFX.RIP_LEN * 0.9, 0.26 * this._bodyK(nm)); return; }
     const L = SFX.RIP_LEN;
@@ -16668,6 +16715,15 @@ class SFX {
     if (p.d < 26) this._noise('bandpass', 2400, 2400, L, 0.05, p.t, 6, b);   // receiver clatter
   }
 
+  /** (round 114) BRASS. A machine gun close to you is a rain of empty cases and
+   *  belt links on hard ground, and it is what tells you the gun is near and not
+   *  merely loud. Only inside a few metres, so it costs nothing in a firefight
+   *  seen from the camera's usual height; never more than two at once. */
+  _brass(pos, chance) {
+    if (this.genGuns === false || !this.ctx || vrand(0, 1) > chance) return;
+    const p = this._ok(pos, 'brass', 2, { ref: 7, absorb: 16 }); if (!p) return;
+    this._sample('gen_brass', p, this._bus(p, 0.08), { delay: vrand(0.06, 0.2), detune: 0.14 });
+  }
   /** THE PING. The en-bloc clip of an M1 Garand flying out of the receiver
    *  after the eighth round — the most recognisable sound any infantry weapon
    *  made in this war, and the one thing a rifleman could not switch off. */
@@ -16729,8 +16785,17 @@ class SFX {
   snap(pos) {
     const p = this._ok(pos, 'snap', 3, { ref: 12, absorb: 26 }); if (!p) return;
     const b = this._bus(p, 0.4);
+    if (this.genGuns !== false && this._sample('gen_snap', p, b, { detune: 0.12 })) return;
     if (this._sample('snap', p, b, { detune: 0.16 })) return;
     this._noise('bandpass', vrand(3200, 5200), 900, 0.028, 0.5, p.t, 1.6, b, 0.0006);
+  }
+  /** (round 114) WHERE A ROUND LANDS: the thump and hiss of one going into the
+   *  ground beside you, or the crack of one on a wall. Nothing else in a firefight
+   *  tells you the fire is falling HERE. Only inside a few metres. */
+  impact(pos, hard) {
+    if (this.genGuns === false) return;
+    const p = this._ok(pos, 'impact', 3, { ref: 8, absorb: 22 }); if (!p) return;
+    this._sample(hard ? 'gen_impact.hard' : 'gen_impact', p, this._bus(p, 0.14), { detune: 0.14 });
   }
   /** Ricochet whine — the round skips off armour and sings away. */
   ricochet(pos) {
@@ -16926,6 +16991,13 @@ class SFX {
       // the floor the extra weight goes into LENGTH and LEVEL instead, which
       // is what separates a 15 cm from a 105 anyway.
       this._body(p, b, clamp(42 / Math.pow(s, 0.6), 24, 50), clamp(0.5 * s, 0.35, 1.6), clamp(0.55 * s, 0.5, 1.6));
+      // (round 114) AND THEN IT COMES DOWN. Earth thrown up has to land: a clod
+      // or two and a patter of dirt, a second after a burst near enough to hear
+      // it — the thing that says the shell landed HERE.
+      if (this.genGuns !== false && p.d < 46 * clamp(s, 0.8, 2) && s >= 0.8) {
+        const pd = { ...p, t: p.t + clamp(0.35 + s * 0.14, 0.4, 0.85) };
+        this._sample('gen_debris', pd, this._bus(pd, 0.1), { detune: 0.1, gain: clamp(s * 0.6, 0.45, 1) });
+      }
       // AND THE GROUND MOVES FURTHER FOR A BIGGER ONE. Thirteen units was a
       // fixed radius whatever had just gone off, so a 15 cm burst shook the
       // camera over exactly the ground a grenade did.
@@ -17103,6 +17175,7 @@ class SFX {
   clang(pos) {
     const p = this._ok(pos, 'clang', 4, { ref: 24, absorb: 44 }); if (!p) return;
     const b = this._bus(p, 0.22);                                          // barely any tail
+    if (this.genGuns !== false && this._sample('gen_clang', p, b, { detune: 0.1 })) return;
     const f = vrand(96, 148);
     this._noise('lowpass', 1500, 260, 0.045, 0.42, p.t, 0.9, b, 0.0006);   // the strike itself
     this._osc('triangle', f, f * 0.55, 0.10, 0.30, p.t, b);                // low, dead body
@@ -18944,11 +19017,6 @@ const FOG_N = 56;              // coarse field resolution (GRID/4)
 // over the top of it — which is exactly why a tank commander unbuttons and why
 // an observer goes to the crest.
 const FOG_LAYER_H = 3.4;
-/** (round 113) In first person an enemy is drawn while the eye has him and for
- *  this long after (`Game._fogShows`): long enough that a man at the edge of a
- *  hedge, whose torso and helmet sightlines flip frame to frame, does not
- *  flicker; short enough that one who steps into smoke or the corn is gone. */
-const FPV_EYE_HOLD = 0.5;
 const FOG_LOS_BUDGET = 26;     // density × world-units of mist a sightline survives
 
 class FogBanks {
@@ -27903,6 +27971,12 @@ class Projectiles {
     const px = s.x + ax * t, py = s.y + ay * t, pz = s.z + az * t;
     const dd = hyp3(px - L.x, py - L.y, pz - L.z);
     if (dd < 7 && dd > 0.4) this.game.sfx.snap({ x: px, y: py, z: pz });
+    // (round 114) …and where it lands, if that is close enough to hear.
+    const de = hyp3(e.x - L.x, e.y - L.y, e.z - L.z);
+    if (de < 16) {
+      const T = this.game.terrain, kn = T && T.typeAt ? typeKin(T.typeAt(worldToCell(e.x), worldToCell(e.z))) : '';
+      this.game.sfx.impact(e, /road|cobble|stone|tarmac|rock/.test(kn));
+    }
   }
 
   /** A rifle or MG round's picture. Roughly one round in five is a tracer;
@@ -31017,6 +31091,29 @@ let MODEL_BUILD_UNIT = null;
     shadow(g);
     return { group: g, flashMats: [uniform, dark, skin, gear], muzzle: pistol.muzzle, barrelTip: pistol.muzzle, weapon: pistol.g, rig };
   };
+  // (round 114) A tank's crew on foot: the officer's frame (a holster and a
+  // pistol in hand) without his map case and glasses; the kit is the rest.
+  MODEL_BUILDERS.tanker = (unit, teamC) => {
+    const { g, uniform, dark, skin, gear, rig } = infantry(0x4a5040, 0xc9a887, kitCfg(unit, { helmet: 'cap', webbing: 'ger', gearC: 0x3a2f22, pack: false, helmC: 0x39402f }));
+    const holster = box(0.09, 0.14, 0.07, LEATHER); holster.position.set(-0.2, -0.04, 0.06); rig.spine.add(holster);
+    if (rig.v2) {
+      // A period figure is narrower than the box body these were placed for:
+      // hang the map case and the holster on the belt, face out, and the
+      // glasses on the chest where the strap holds them.
+      const F = window.Figures;
+      let x, z, ry;
+      [x, z, ry] = F.onBelt(-1.55, 0.04); holster.position.set(x, -0.03, z); holster.rotation.set(0, ry, 0);
+    }
+    const pistol = wpnPistol();
+    holdWeapon(rig, pistol, { x: 0.09, y: 0.02, z: 0.06 });
+    rigPatch(rig, teamC);
+    // rank pips catch the eye — officers are worth shooting at
+    for (const px of rig.v2 ? [-0.15, 0.15] : [-0.245, 0.245]) {
+      const pip = box(0.03, 0.02, 0.03, std(0xc8b062, 0.4, 0.7)); pip.position.set(px, rig.v2 ? 0.54 : 0.585, rig.v2 ? -0.01 : 0.04); rig.spine.add(pip);
+    }
+    shadow(g);
+    return { group: g, flashMats: [uniform, dark, skin, gear], muzzle: pistol.muzzle, barrelTip: pistol.muzzle, weapon: pistol.g, rig };
+  };
   MODEL_BUILDERS.engineer = (unit, teamC) => {
     const { g, uniform, dark, skin, gear, rig } = infantry(0x55603f, 0xc9a887, kitCfg(unit, { helmet: 'm1', webbing: 'us', gearC: 0x5d5a3c, helmC: 0x45502f }));
     const spade = new THREE.Group();                           // entrenching tool across the pack
@@ -32576,6 +32673,17 @@ class Unit {
 
   _mergeModelMeshes(built) {
     if (!MERGE_MODELS || this.def.custom) return;
+    // (round 114) THE MAN'S OWN PARTS GO BEFORE ANYTHING MERGES THEM. The Blender
+    // body replaces them in `_skinModel`, but by then this merge has folded them in
+    // with his kit and the tag is gone: he wore the old body under the new one, half
+    // as many triangles again. Same conditions as `_skinModel`'s.
+    const r0 = this.rig;
+    if (SKIN_MODELS && r0 && r0.v2 && !this.def.vehicle && !r0.generic && !r0.suit && !built.crewFigs && !built.drones && !built.turret
+        && window.Figures && Figures.bodyFor && this.game.soldier114 !== false && Figures.bodyFor(r0.kit)) {
+      const gone = [];
+      this.mesh.traverse(o => { if (o.isMesh && o.userData.body) gone.push(o); });
+      for (const o of gone) if (o.parent) o.parent.remove(o);
+    }
     // AN AUTHORED MESH IS ALREADY MERGED, and not the same way. This merge
     // bakes each material's COLOUR into vertex colours and collapses the model
     // onto one `vertexColors` material — right for a model built of flat boxes,
@@ -32944,10 +33052,25 @@ class Unit {
       if (c && c.traverse) c.traverse(o => { if (!vwSet.has(o)) skip.add(o); });
     }
     if (rig.heatVent) skip.add(rig.heatVent);
+    // (round 114) THE BLENDER BODY: one closed skin, weighted in Blender, in place
+    // of the man's own thirty rigid parts (`Figures.bodyFor`). The rig goes to the
+    // pose it was modelled in to bind, and back. His kit stays as it was: straps,
+    // pouches, helmet and weapon are still parts on their bones.
+    const bodyK = rig.v2 && window.Figures && Figures.bodyFor && this.game.soldier114 !== false ? Figures.bodyFor(rig.kit) : null;
+    let bindKeep = null, bodyMesh = null;
+    if (bodyK) {
+      const gone = [];
+      root.traverse(o => { if (o.isMesh && o.userData.body) gone.push(o); });
+      for (const o of gone) if (o.parent) o.parent.remove(o);
+      bindKeep = Figures.bindPose(rig);
+      bodyMesh = new THREE.Mesh(bodyK.geo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      rig.body.parent.add(bodyMesh);
+    }
     root.updateMatrixWorld(true);
     const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
     const bones = [], boneIdx = new Map();
     const boneOf = o => { let i = boneIdx.get(o); if (i === undefined) { i = bones.length; bones.push(o); boneIdx.set(o, i); } return i; };
+    const bodyJ = bodyK ? bodyK.joints.map(n => boneOf(rig[n])) : null;
     const parts = [];
     root.traverse(o => {
       if (!o.isMesh || o.children.length || skip.has(o) || !o.visible) return;
@@ -32988,7 +33111,7 @@ class Unit {
       if (!geo.attributes.color) {
         // baseY 0: baked into the root's space at the bind pose above.
         this._paintVerts(geo, p.mesh.material, 0);
-      }
+      } else if (geo.attributes.bj) this._bakeSurface(geo, 0);     // (round 114) the same weathering as every other part
       const ni = geo.index ? geo.index.count : n;
       geos.push({ geo, bone: p.bone, n, ni, wpn: vwSet.has(p.mesh), bayo: !!(vwSet.has(p.mesh) && p.mesh.userData.bayonet),
                   flex: !!(SKIN_FLEX && p.mesh.userData && p.mesh.userData.flex),
@@ -33045,6 +33168,8 @@ class Unit {
     }
     const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
     const si = new Uint16Array(total * 4), sw = new Float32Array(total * 4);
+    // (round 114) the body's sheet; everything else samples its free white strip
+    const uvs = bodyK ? new Float32Array(total * 2).fill(0.985) : null;
     // which camouflage each vertex's part wears (`Figures.camoGLSL`, round 106)
     const camo = geos.some(g => g.geo.attributes.camo) ? new Float32Array(total) : null;
     const idx = total > 65535 ? new Uint32Array(totalI) : new Uint16Array(totalI);
@@ -33055,7 +33180,18 @@ class Unit {
       col.set(g.geo.attributes.color.array, o * 3);
       if (camo && g.geo.attributes.camo) camo.set(g.geo.attributes.camo.array, o);
       const gp = g.geo.attributes.position.array;
-      for (let i = 0; i < g.n; i++) {
+      const gbj = g.geo.attributes.bj;
+      if (gbj) {
+        // Blender's weights: up to three bones a vertex, on the game's own joints
+        const bj = gbj.array, bw = g.geo.attributes.bw.array;
+        uvs.set(g.geo.attributes.uv.array, o * 2);
+        for (let i = 0; i < g.n; i++) {
+          const k = (o + i) * 4, a = i * 3;
+          const tw = (bw[a] + bw[a + 1] + bw[a + 2]) || 255;
+          si[k] = bodyJ[bj[a]]; si[k + 1] = bodyJ[bj[a + 1]]; si[k + 2] = bodyJ[bj[a + 2]];
+          sw[k] = bw[a] / tw; sw[k + 1] = bw[a + 1] / tw; sw[k + 2] = bw[a + 2] / tw;
+        }
+      } else for (let i = 0; i < g.n; i++) {
         const k = (o + i) * 4;
         si[k] = g.bone; sw[k] = 1;
         if (!g.flex && !(g.flexv && g.flexv[i] > 0.5)) continue;
@@ -33095,6 +33231,7 @@ class Unit {
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+    if (uvs) geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     if (camo) geo.setAttribute('camo', new THREE.BufferAttribute(camo, 1));
     geo.computeBoundingSphere();
     geo.boundingSphere.radius *= 1.6;   // the culling bound must hold a man lying down, not just standing
@@ -33102,6 +33239,7 @@ class Unit {
     if (armsIdx < totalI) geo.userData.armsIdx = armsIdx;
     if (hasBayo) geo.userData.bayoIdx = bayoIdx;
     const mat = new PaintedMaterial({ vertexColors: true, skinning: true, roughness: 0.78, metalness: 0.04 });
+    if (bodyK) mat.map = bodyK.tex;
     // THE CAMOUFLAGE, DRAWN PER PIXEL (round 106): the splinter smock, the
     // pea-dot, the oak-leaf helmet cover at their real size, from the part's
     // bind-pose position so the pattern rides the cloth. One program for every
@@ -33115,7 +33253,7 @@ class Unit {
           .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFigCamo = camo;\nvFigCamoP = position;');
         sh.fragmentShader = sh.fragmentShader
           .replace('#include <common>', '#include <common>\nvarying float vFigCamo;\nvarying vec3 vFigCamoP;\n' + glsl)
-          .replace('#include <color_fragment>', '#include <color_fragment>\nif (vFigCamo > 0.5) diffuseColor.rgb *= figCamo(floor(vFigCamo + 0.5), vFigCamoP);');
+          .replace('#include <color_fragment>', '#include <color_fragment>\n#ifdef USE_MAP\nif (vFigCamo > 0.5 && diffuseColor.a < 0.5) diffuseColor.rgb *= figCamo(floor(vFigCamo + 0.5), vFigCamoP);\ndiffuseColor.a = 1.0;\n#else\nif (vFigCamo > 0.5) diffuseColor.rgb *= figCamo(floor(vFigCamo + 0.5), vFigCamoP);\n#endif');
       };
       mat.customProgramCacheKey = function () { return (prevK ? prevK.call(this) : '') + '|figcamo2'; };
       mat.extensions = Object.assign({}, mat.extensions || {}, { derivatives: true });
@@ -33125,6 +33263,7 @@ class Unit {
     root.add(skin);
     skin.updateMatrixWorld(true);
     skin.bind(new THREE.Skeleton(bones));
+    if (bodyK) { Figures.unbindPose(rig, bindKeep); if (bodyMesh.parent) bodyMesh.parent.remove(bodyMesh); bodyMesh.material.dispose(); }
     // LIFT FIRST. `_liftViewModel` walks each weapon mesh's PARENT CHAIN up to
     // the aim bone, so it has to run while the meshes are still in the
     // hierarchy — doing it after the loop below left every chain walk starting
@@ -34628,7 +34767,32 @@ class Unit {
 
     // Gait clock — stride cadence scales with how fast the man is actually going
     const cadence = p.gait * (this._condMul ? 1 : 1);
-    this.bobT += dt * cadence;
+    // (round 114) THE FEET ARE ON THE GROUND. Walk, run, sneak and the loaded man's
+    // plod are solved on an IK rig in Blender (tools/blender/gaits.py -> GAITS), and
+    // the clock runs off the ground he really covers, one cycle a stride, so a foot
+    // that is down stays down. A man does not walk at the same speed as his mate:
+    // `_gaitK`, his own stride. `game.gait114 = false`: the old sine.
+    const GT = window.GAITS, gaitOn = !!GT && p.bx < 0.8 && this.alive && !this.downed && !r.brute && this.game.gait114 !== false;
+    const gdx = this._gx === undefined ? 0 : this.pos.x - this._gx, gdz = this._gz === undefined ? 0 : this.pos.z - this._gz;
+    this._gx = this.pos.x; this._gz = this.pos.z;
+    let gW = 0, gR = 0, gS = 0, gA = GT ? GT.walk : null, gw = 0, gPh = 0;
+    if (gaitOn) {
+      this._gsp = lerp(this._gsp || 0, hyp(gdx, gdz) / Math.max(dt, 1e-3), Math.min(1, dt * 7));
+      if (this._gaitK === undefined) { let h = (this.uid || this.id || 0) * 2654435761 >>> 0; h ^= h >>> 15; this._gaitK = 0.93 + (h % 1000) / 1000 * 0.14; }
+      gR = clamp((p.gait - 7.6) / 3.8, 0, 1); gS = clamp((7.6 - p.gait) / 2.4, 0, 1); gW = 1 - gR - gS;
+      if (KIND_HEAVY_LOAD.has(this.def.kind) || this.def.towed) gA = GT.heavy;
+      const scaleY = this.mesh ? (this.mesh.scale.y || 1) : 1;
+      const stride = (gW * gA.S + gR * GT.run.S + gS * GT.sneak.S) * scaleY * this._gaitK;
+      const nominal = cadence / (2 * Math.PI);
+      this.bobT += dt * 2 * Math.PI * clamp(this._gsp / Math.max(stride, 1e-3), nominal * 0.4, nominal * 1.6);
+      gPh = (this.bobT - Math.PI / 2) / (2 * Math.PI);        // heel strike where the footfall sound is
+      gw = clamp(p.amp / 0.2, 0, 1);
+    } else this.bobT += dt * cadence;
+    const gSample = (key, ph) => {
+      const N = GT.N, x = (((ph % 1) + 1) % 1) * N, i = x | 0, f = x - i, j = (i + 1) % N;
+      const one = T => T[key][i] + (T[key][j] - T[key][i]) * f;
+      return gW * one(gA) + (gR > 0 ? gR * one(GT.run) : 0) + (gS > 0 ? gS * one(GT.sneak) : 0);
+    };
     const swing = p.amp > 0.001 ? Math.sin(this.bobT) : 0;
     const swing2 = p.amp > 0.001 ? Math.sin(this.bobT + Math.PI) : 0;
     // THE STRIDE (round 104). A thigh angle here is POSITIVE BACKWARD (a
@@ -34702,12 +34866,32 @@ class Unit {
     r.spine.rotation.x = p.sx + (r.hunch || 0) + (p.amp > 0.001 ? -bounce * 0.04 : 0);
     r.spine.rotation.y = p.sy + (p.amp > 0.001 ? swing * 0.09 : 0);
     r.neck.rotation.x = p.hx;
+    let gFootL = 0, gFootR = 0;
+    if (r.hips) r.hips.rotation.set(0, 0, 0);
+    if (gaitOn && gw > 0.001) {
+      // the pelvis rides over the stance leg, turns and lists; the shoulders answer
+      const yaw = gSample('yaw', gPh) * gw, roll = gSample('roll', gPh) * gw, sway = gSample('sway', gPh) * gw;
+      r.body.position.set(sway, lerp(p.by, gSample('y', gPh), gw), p.bz);
+      r.body.rotation.z = 0;
+      if (r.hips) r.hips.rotation.set(0, yaw, roll);
+      r.spine.rotation.y = p.sy - yaw * 1.5;
+      r.spine.rotation.z = -roll * 0.85;
+      r.spine.rotation.x = p.sx + (r.hunch || 0);
+      r.neck.rotation.z = roll * 0.3;
+      gFootL = gSample('foot', gPh); gFootR = gSample('foot', gPh + 0.5);
+    } else if (r.spine.rotation.z) { r.spine.rotation.z = 0; r.neck.rotation.z = 0; }
 
     // -- legs (stride) --
     r.legL.rotation.x = p.lx + swing * p.amp;
     r.legR.rotation.x = p.lx + swing2 * p.amp;
     r.legL.rotation.z = -p.lz; r.legR.rotation.z = p.lz;
-    if (upright && p.amp > 0.001) {
+    if (gaitOn && gw > 0.001) {
+      // Blender's angles are the world's: the body's own lean comes back out
+      r.legL.rotation.x = lerp(p.lx, gSample('thigh', gPh) - p.bx, gw);
+      r.legR.rotation.x = lerp(p.lx, gSample('thigh', gPh + 0.5) - p.bx, gw);
+      r.kneeL.rotation.x = lerp(p.kx, gSample('knee', gPh), gw);
+      r.kneeR.rotation.x = lerp(p.kx, gSample('knee', gPh + 0.5), gw);
+    } else if (upright && p.amp > 0.001) {
       r.kneeL.rotation.x = p.kx + kneeAt(0) * p.amp;
       r.kneeR.rotation.x = p.kx + kneeAt(Math.PI) * p.amp;
     } else {
@@ -34726,7 +34910,9 @@ class Unit {
         const leg = i ? r.legR : r.legL, knee = i ? r.kneeR : r.kneeL, ank = i ? r.ankleR : r.ankleL;
         const phi = r.body.rotation.x + leg.rotation.x + knee.rotation.x;
         const e = clamp((Math.abs(phi) - 0.8) / 0.5, 0, 1), w = live ? 1 - e * e * (3 - 2 * e) : 0;
-        ank.rotation.x = clamp(-phi, -0.45, 0.9) * w;
+        ank.rotation.x = gaitOn && gw > 0.001
+          ? lerp(clamp(-phi, -0.45, 0.9) * w, clamp((i ? gFootR : gFootL) - phi, -0.7, 1.2), gw)   // heel, flat, ball, toe
+          : clamp(-phi, -0.45, 0.9) * w;
       }
     }
 
@@ -34740,7 +34926,16 @@ class Unit {
     // torso blade so the muzzle stays on the unit's bearing while the shoulders
     // are turned into the shot.
     const vm = this.game.vmMount && r.aim.parent === this.game.vmMount;   // weapon is a first-person viewmodel
-    if (!vm) { r.aim.position.set(0.02, p.ay, p.az); r.aim.rotation.y = -r.spine.rotation.y; }
+    if (!vm) {
+      r.aim.position.set(0.02, p.ay, p.az); r.aim.rotation.y = -r.spine.rotation.y;
+      // (round 114) a carried weapon rides the stride: up and down with the man,
+      // a little across, more at a run. The hands follow it (`_handsOnWeapon`).
+      if (gaitOn && gw > 0.001) {
+        const wb = Math.sin(this.bobT * 2 + 0.6), ws = Math.sin(this.bobT);
+        r.aim.position.y += wb * (0.007 + 0.012 * gR) * gw;
+        r.aim.position.x += ws * (0.006 + 0.012 * gR) * gw;
+      }
+    }
     let elev = p.ax;
     if (fpv) elev = -this.game.fpv.pitch;                       // the player's own aim
     else if (this.target && this.target.alive) {                // lay the weapon on the target
@@ -34787,6 +34982,13 @@ class Unit {
     // Idle life: breathing + the scanning head sweep the vision cone already uses
     if (p.amp < 0.001 && this.alive && !this.downed) {
       r.spine.rotation.x += Math.sin(this.game.time * 1.7 + this._scanPhase) * 0.016;
+      // (round 114) nobody stands like a post: the weight drifts from foot to foot
+      if (window.GAITS && this.game.gait114 !== false && p.bx < 0.3) {
+        const dr = Math.sin(this.game.time * 0.37 + this._scanPhase * 3.1);
+        r.body.position.x = dr * 0.01;
+        if (r.hips) r.hips.rotation.z = dr * 0.018;
+        r.spine.rotation.z = -dr * 0.014;
+      }
       if (!this.target && !fpv) r.neck.rotation.y = Math.sin(this.game.time * VISION.scanRate + this._scanPhase) * 0.5;
       else r.neck.rotation.y = lerp(r.neck.rotation.y || 0, 0, Math.min(1, dt * 6));
     } else r.neck.rotation.y = lerp(r.neck.rotation.y || 0, 0, Math.min(1, dt * 6));
@@ -40204,12 +40406,18 @@ class Unit {
       // that has been worn down, it is an attack that has stopped. Running is
       // unchanged: forty seconds of sprinting under load still finishes a man,
       // and that is the trade the player is meant to be making.
-      const rate = this.moveMode === 'fast' ? 0.030 : this.moveMode === 'sneak' ? 0.005 : 0.0065;
+      // (round 114) "less units getting worn out though they still can it's just
+      // tiresome watching them just sit around": half the rate at a run (over a
+      // minute of sprinting now) and well under half at a walk, which is what
+      // was putting a whole advance on the ground. Same to get up: see below.
+      const T14 = this.game.tire114 !== false;
+      const rate = this.moveMode === 'fast' ? (T14 ? 0.015 : 0.030) : this.moveMode === 'sneak' ? (T14 ? 0.002 : 0.005) : (T14 ? 0.0026 : 0.0065);
       this.fatigue = Math.min(1.25, this.fatigue + rate * dt * (heavy ? 1.5 : 1) / (0.45 + this.aStrength * 0.9));
     } else {
       // "…tired but able to recover with a short break." Half a minute lying
       // down gets a winded man back on his feet.
-      this.fatigue = Math.max(0, this.fatigue - (this.dugin || this.posture === 'prone' ? 0.045 : 0.032) * dt);
+      const k14 = this.game.tire114 !== false ? 2 : 1;   // (round 114) a breather is a breather, not a rest day
+      this.fatigue = Math.max(0, this.fatigue - (this.dugin || this.posture === 'prone' ? 0.045 : 0.032) * k14 * dt);
     }
     // THE HALT. Only for men carrying something — a rifleman keeps walking.
     if (heavy && !this.def.vehicle) {
@@ -40225,7 +40433,7 @@ class Unit {
     // spends the battle flickering between Fatigued and Winded and never
     // actually recovers or actually fights. He is out until he has had a real
     // breather, which is what "recover with a short break" means.
-    const out = was === 'Fatigued' ? 0.80 : 1.0;
+    const out = was === 'Fatigued' ? (this.game.tire114 !== false ? 0.72 : 0.80) : 1.0;
     this.fatState = this.fatigue >= out ? 'Fatigued' : this.fatigue >= 0.6 ? 'Winded' : 'Rested';
     if (this.fatState === 'Fatigued' && was !== 'Fatigued') {
       // He stops where he is. This is not a morale failure — his legs are gone.
@@ -40278,7 +40486,10 @@ class Unit {
     // FEAR COMES FROM SHOCKS, SUPPRESSION FROM VOLUME. The suppression above is
     // the whole of what passing fire does; only an EVENT reaches the nerve at
     // full weight. See `SUPP_FEAR_AMBIENT`.
-    this.fear = clamp(this.fear + amt * SUPP_FEAR * (ambient ? SUPP_FEAR_AMBIENT : 1) * soak, 0, 1.3);
+    // (round 114) "less panic and running away": two thirds as much of being
+    // shot at turns into fear, and he comes back faster (`_decayFear`). They
+    // still go to ground: suppression is untouched, it is the fire doing its job.
+    this.fear = clamp(this.fear + amt * SUPP_FEAR * (this.game.nerve114 !== false ? 0.66 : 1) * (ambient ? SUPP_FEAR_AMBIENT : 1) * soak, 0, 1.3);
     // CUMULATIVE STRAIN. Fear is what a man feels now and it drains in a
     // minute. Strain is what the day has done to him and it does not: it is the
     // reason a company relieved after a week in the line is not the company
@@ -40324,12 +40535,19 @@ class Unit {
     if (this._inCC) return;
     if (this.def.vehicle) { this.ccState = this.suppression > 0.8 ? 'pinned' : this.suppression > 0.5 ? 'suppressed' : 'steady'; return; }
     if (this._shellShocked && this._shellShocked()) { this.ccState = 'stunned'; return; }
-    if (this.ccState === 'routed') return;               // "he cannot be recovered"
+    // "He cannot be recovered" (the manual) made every routed man a casualty
+    // for the rest of the battle. (round 114) Out of the fire for twenty seconds
+    // he stops, and his section gets him back: he comes down the ladder as any
+    // frightened man does. Still running is still running.
+    if (this.ccState === 'routed') {
+      if (this.game.nerve114 === false || this.game.time - (this._attackedT || -99) < 20 || (this.suppression || 0) > 0.2) return;
+      this.ccState = 'broken'; this.fear = Math.min(this.fear, 0.9); this.path = []; this._ccT = this.game.time;
+    }
     // Steadiness: what the man brings, plus whoever is standing near him.
     const steel = (this.aMorale * 0.55 + this.aExp * 0.30 + this._leaderBonus() * 0.5
       + (this.dugin ? 0.18 : 0) + (this.garrison ? 0.12 : 0))
       * (1 - (this.strain || 0) * 0.45);
-    const eff = clamp(this.fear - steel * 0.42, 0, 1.2);
+    const eff = clamp(this.fear - steel * (this.game.nerve114 !== false ? 0.56 : 0.42), 0, 1.2);
     const prev = this.ccState;
     const prevRank = (CCSTATE[prev] || CCSTATE.steady).rank;
     let want = 'steady';
@@ -40405,7 +40623,7 @@ class Unit {
       const hold = this.aMorale * 0.5 + this._leaderBonus() * 0.9 + (this.squad ? 0.15 : 0);
       // ~50% over half a minute of continued pressure for an unled regular;
       // a well-led man is very unlikely to go at all.
-      if (mayRoll && Math.random() < CC_ROUT_RATE * span * (1 - clamp(hold, 0, 0.95))) want = 'routed';
+      if (mayRoll && Math.random() < CC_ROUT_RATE * (this.game.nerve114 !== false ? 0.35 : 1) * span * (1 - clamp(hold, 0, 0.95))) want = 'routed';
     }
     // BERSERK / HEROIC. "Intelligence reflects how likely the soldier is to go
     // berserk or panic in a firefight. Intelligent men are less likely to make
@@ -40493,14 +40711,14 @@ class Unit {
   }
   /** …and take it back out again, slowly. */
   _decayFear(dt) {
-    if (this.ccState === 'routed') return;
+    if (this.ccState === 'routed' && this.game.nerve114 === false) return;
     // A man calms down faster when somebody is telling him what to do and his
     // mates are still standing. "The presence of a battlefield commander and
     // his unit may help bring him around."
     const rally = 0.055 + this._leaderBonus() * 0.16 + this.aMorale * 0.05
       + (this.dugin ? 0.03 : 0) + (this.squad && this.squad.livingCount() > 2 ? 0.02 : 0);
     const under = this.game.time - (this._attackedT || -99) < 3 || this.suppression > 0.25;
-    this.fear = Math.max(0, this.fear - rally * (under ? 0.25 : 1) * dt);
+    this.fear = Math.max(0, this.fear - rally * (this.game.nerve114 !== false ? 1.5 : 1) * (under ? 0.25 : 1) * dt);
     // Strain comes off two hundred times slower than fear, and only out of
     // contact: twenty minutes clear of the fighting to shed a battle's worth,
     // which inside one battle means it does not come off at all. Measured at
@@ -41184,24 +41402,9 @@ class Unit {
         pax.posture = 'prone'; pax._proneReflex = true;
       }
     }
-    // nearest enemy, to run away from
-    let en = null, ed = Infinity;
-    for (const u of this.game.units) {
-      if (!u.alive || u.team === this.team || u.team === 0 || u.downed) continue;
-      const d = dist2(this.pos, u.pos); if (d < ed) { ed = d; en = u; }
-    }
-    const crewType = (this.team === 2 ? (UNIT_DEFS.gergren ? 'gergren' : 'usrifle') : (UNIT_DEFS.usrifle ? 'usrifle' : 'gergren'));
-    const n = Math.min(2, this.crew || 2);
-    for (let i = 0; i < n; i++) {
-      const ang = rand(0, Math.PI * 2);
-      const cx = this.pos.x + Math.cos(ang) * 2.2, cz = this.pos.z + Math.sin(ang) * 2.2;
-      const c = UNIT_DEFS[crewType] && this.game.addUnitNear(worldToCell(cx), worldToCell(cz), this.team, crewType);
-      if (!c) continue;
-      c.applySuppression(0.7);
-      if (c.ammo !== Infinity) c.ammo = Math.min(c.ammo, 12);   // bailed crew: sidearms only, near combat-ineffective
-      const away = en ? Math.atan2(c.pos.x - en.pos.x, c.pos.z - en.pos.z) : rand(0, Math.PI * 2);
-      c.orderMove(c.pos.x + Math.sin(away) * 14, c.pos.z + Math.cos(away) * 14, false, 'fast');
-    }
+    // (round 114) THE CREW, AND ALL OF THEM: tankers, one after another as the
+    // hatches go. It was two riflemen, or two grenadiers, in the same instant.
+    this.game._crewOut(this, this.crew === undefined ? 3 : this.crew);
     this.game.effects.debris(this.pos.x, this.pos.y + 0.6 * K_FX, this.pos.z, 8, 0x2c2c28);
     this.game.effects.smoke(this.pos.x, this.pos.y + 1.0 * K_FX, this.pos.z, 2);
     if (this.game.ui) this.game.ui.toast(this.def.name + ' crew bailing out!');
@@ -42454,6 +42657,7 @@ class Unit {
     const at = this._paintWound(loc, dx, dz, loc);
     const p = at || (opts.impactAt ? opts.impactAt : { x: this.pos.x, y: this.pos.y + 1.1 * HEIGHT_U_PER_M, z: this.pos.z });
     g.effects.woundSpray(p.x, p.y, p.z, dx, dz, loc === 'head' ? 2.2 : loc === 'torso' ? 1.1 : 0.6);
+    g._bloodSpatter(p.x, p.z, dx, dz, loc === 'head' ? 5 : loc === 'torso' ? 3 : 1, loc === 'head' ? 1.6 : 1.1);
     // a man walking with a hole in him leaves a trail of it
     if (this.alive && (loc === 'leg' || loc === 'torso')) (g._bleeders || (g._bleeders = new Set())).add(this);
   }
@@ -42734,6 +42938,16 @@ class Unit {
     if (this._squadRing) this._squadRing.visible = false;
     if (this.squad && this.squad.leader === this) this.squad._pickLeader();   // promote a new squad leader
     if (this.passengers && this.passengers.length) this.game._wreckPassengers(this);   // embarked squad caught in the wreck
+    // (round 114) A KNOCKED-OUT TANK IS NOT A DEAD CREW. On the published figures
+    // about one man in five died in a Sherman that was penetrated and most of the
+    // rest got out; ammunition going up (`_brewUp`) leaves few. Whoever lives
+    // climbs out and runs. A crew that has already bailed is not in it.
+    if (!this.crewBailed && this.crew > 0 && (this.def.kind === 'tank' || this.def.kind === 'flametank' || this.def.kind === 'apc')) {
+      const live = this._brewUp ? 0.2 : 0.62;
+      let n = 0;
+      for (let i = 0; i < Math.min(6, this.crew); i++) if (Math.random() < live) n++;
+      if (n) this.game._crewOut(this, n);
+    }
 
     if (killer && killer.alive) killer.kills++;
     this.game.sfx.death(this.pos, this._voiceSeed);
@@ -42754,6 +42968,7 @@ class Unit {
     if (o.violent && this.spriteMode) {
       // Blown apart: no corpse — body parts fly instead
       this.game.effects.gibs(this, 1);
+      this.game._bloodSpatter(this.pos.x, this.pos.z, 0, 0, 14, 2.4);
       this.game.effects.blood(this.pos.x, this.pos.y + 0.6 * K_FX, this.pos.z, 10);
       this.game.terrain.addStain(gx, gz, 0.4);
       this.corpseT = 0.05;
@@ -42771,6 +42986,7 @@ class Unit {
       const heavy = clamp(R / 9, 0.55, 2.6);
       const blast = (o.explosion ? rand(1.4, 2.1) : rand(1.0, 1.5)) * heavy;
       this.game.effects.gibModel(this, blast);
+      this.game._bloodSpatter(this.pos.x, this.pos.z, 0, 0, 14, 2.4);   // (round 114) what a shell did lands all round him
       this.game.effects.blood(this.pos.x, this.pos.y + 0.7 * K_FX, this.pos.z, Math.round(30 * heavy));
       this.game.effects.debris(this.pos.x, this.pos.y + 0.6 * K_FX, this.pos.z, Math.round(16 * heavy), 0x6a1410);
       this.game.effects.debris(this.pos.x, this.pos.y + 0.4 * K_FX, this.pos.z, Math.round(10 * heavy), 0x4a3a2a);   // kit and cloth
@@ -45372,9 +45588,9 @@ class UI {
       // the same order of the user's that hides the model ("not … in game or
       // on the minimap unless they are visible to you or your units"). The
       // rule is the LOD's: `_fowSeen`, hostile teams only.
-      // In first person the map is his eyes too (`_fogShows`).
+      // The map shows the side's knowledge, in first person too.
       if (!omniscient && g.fowEnabled && g.fog113 !== false && u.team !== pt && u.team !== 0
-          && areHostile(pt, u.team) && !g._fogShows(u)) continue;
+          && areHostile(pt, u.team) && u._fowSeen !== true) continue;
       const x = (u.pos.x + HALF) / WORLD * 168, z = (u.pos.z + HALF) / WORLD * 168;
       ctx.fillStyle = u.team === 0 ? '#9a9a92' : teamCss[u.team];
       ctx.fillRect(x - 1.5, z - 1.5, 3, 3);
@@ -45391,6 +45607,17 @@ class UI {
       ctx.stroke();
       ctx.fillStyle = '#0a0e12'; ctx.font = 'bold 6px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText(v.name, x, z + 2.2);
+      // (round 114) …AND WHAT THE PLACE IS: the map is where an objective is
+      // named now that nothing stands over it on the field. Beside the disc,
+      // on the side with room, so a point at the map's edge is never clipped.
+      if (v.label) {
+        ctx.font = '600 7px sans-serif';
+        const w = ctx.measureText(v.label).width, right = x + 6 + w <= 167;
+        ctx.textAlign = right ? 'left' : 'right';
+        const lx = right ? x + 6 : x - 6, ly = clamp(z + 2.4, 7, 166);
+        ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(8,10,14,0.9)'; ctx.strokeText(v.label, lx, ly);
+        ctx.fillStyle = '#e8ebee'; ctx.fillText(v.label, lx, ly);
+      }
     }
     // Camera target
     const cx = (g.cameraRig.target.x + HALF) / WORLD * 168;
@@ -46825,6 +47052,41 @@ class Game {
   }
   /** addUnit with spiral fallback to a nearby free cell — used by load so
    *  bunched-up armies never lose soldiers on save/restore. */
+  /** (round 114) THE CREW COMES OUT. `n` men of this hull's own army, a hatch at a
+   *  time, on the side away from the nearest enemy, and away to the rear at the
+   *  run. A queue, stepped by `stepSim` and emptied with the map, because the
+   *  hull they are leaving may be dead and no longer stepping itself. */
+  _crewOut(v, n) {
+    if (!(n > 0)) return;
+    (this._bailQ || (this._bailQ = [])).push({ x: v.pos.x, z: v.pos.z, team: v.team, type: tankerOf(v.type), n: Math.min(6, n), t: rand(0.25, 0.7) });
+  }
+  _crewTick(dt) {
+    const Q = this._bailQ;
+    for (let q = Q.length - 1; q >= 0; q--) {
+      const b = Q[q];
+      if ((b.t -= dt) > 0) continue;
+      b.t = rand(0.45, 1.15);
+      if (--b.n <= 0) Q.splice(q, 1);
+      if (!UNIT_DEFS[b.type]) continue;
+      let en = null, ed = Infinity;
+      for (const u of this.units) {
+        if (!u.alive || u.team === b.team || u.team === 0 || u.downed || !areHostile(b.team, u.team)) continue;
+        const d = (u.pos.x - b.x) ** 2 + (u.pos.z - b.z) ** 2; if (d < ed) { ed = d; en = u; }
+      }
+      const away = en ? Math.atan2(b.x - en.pos.x, b.z - en.pos.z) : rand(0, Math.PI * 2);
+      const side = away + rand(-1.1, 1.1), cx = b.x + Math.sin(side) * 1.1, cz = b.z + Math.cos(side) * 1.1;
+      const c = this.addUnitNear(worldToCell(cx), worldToCell(cz), b.team, b.type);
+      if (!c) continue;
+      c.applySuppression(0.45);
+      this.sfx.clang({ x: b.x, y: 0, z: b.z });
+      // Behind what he has just left, then back toward his own lines.
+      const d = this._rearDir ? this._rearDir(b.team) : { x: 0, z: 0 };
+      let fx = Math.sin(away) + d.x * 1.2, fz = Math.cos(away) + d.z * 1.2;
+      const L = hyp(fx, fz) || 1, run = rand(28, 46);
+      c.orderMove(clamp(c.pos.x + fx / L * run, -HALF + 3, HALF - 3), clamp(c.pos.z + fz / L * run, -HALF + 3, HALF - 3), false, 'fast');
+      c.explicit = true; c._lastOrderT = this.time + 1e6;   // the commander does not march them back up
+    }
+  }
   addUnitNear(gx, gz, team, type) {
     const direct = this.addUnit(gx, gz, team, type);
     if (direct) return direct;
@@ -58510,29 +58772,20 @@ class Game {
       // without them a health bar lags the thing it is attached to.
       e._seenT = this.time;
       e._fowSeen = true;
-      e._fpvEyeT = this.time;      // (round 113) what THIS man sees — `_fogShows`
       if (e.hpGroup) e.hpGroup.visible = true;
       if (e.ring) e.ring.visible = e.selected;
     }
   }
 
-  /** (round 113) IS THIS ENEMY SHOWN? "you shouldn't have vision of enemies
-   *  occluded by los in first person only in top down mode" (the user). From
+  /** IS THIS ENEMY DRAWN? (round 114) "must not have enemies invisible in first
+   *  person ... only switch visibility on off in top down" (the user). From
    *  above, an enemy is shown while any of your men has seen him (`_fowSeen`,
-   *  the army's survey). Riding a man, only while THAT man can see him down his
-   *  own sightline — torso or helmet, through the walls, banks, crops, smoke
-   *  and mist `sightClear` reads (`_fpvEyeT`, stamped by `_applyFpvSight` every
-   *  frame before the LOD runs, held `FPV_EYE_HOLD`). What a comrade spotted
-   *  behind the hedge is his business, not your eyes'. While a hunter-killer
-   *  is flown the view is the missile's, so the side's knowledge stands.
-   *  The LOD's cull, the dug-in foxholes and the minimap all ask this.
-   *  `game.fpvEye113 = false`: first person shows the side's knowledge again. */
+   *  the army's survey). In first person nobody is ever switched off: the walls,
+   *  the hedges and the ground in front of you hide him, as they hide anything,
+   *  and a man who steps out of a doorway does not pop into being. The minimap
+   *  is a map, not your eyes: it stays on the side's knowledge either way. */
   _fogShows(u) {
-    if (this.fpv && !this.hk && this.fpvEye113 !== false) {
-      const age = u._fpvEyeT == null ? Infinity : this.time - u._fpvEyeT;
-      return age >= 0 && age < FPV_EYE_HOLD;      // a stamp from another battle's clock is no stamp
-    }
-    return u._fowSeen === true;
+    return this.fpv ? true : u._fowSeen === true;
   }
 
   // ---- RTT: volumetric smoke (K key) ------------------------------------
@@ -58739,7 +58992,7 @@ class Game {
         const a = Math.random() * Math.PI * 2;
         const rr = Math.sqrt(Math.random()) * R * 0.72;
         const k = 0.86 + Math.random() * 0.26;
-        vfx.spawn(V.KIND.SMOKE, {
+        vfx.spawn(V.KIND.SMOKE, { flip: 1,
           x: c.center.x + Math.cos(a) * rr,
           y: c.center.y - R * 0.42 + Math.random() * R * 0.35,
           z: c.center.z + Math.sin(a) * rr,
@@ -58806,7 +59059,7 @@ class Game {
       // sunlit screening smoke is WHITE beside the ground it stands on — the
       // tint is the smoke's colour in shade, and the light lifts it
       const k = (1.08 + 0.24 * hf) * (1 + 0.12 * sun) * (0.96 + Math.random() * 0.08) * (wp ? 1.08 : 1);
-      vfx.spawn(V.KIND.SMOKE, {
+      vfx.spawn(V.KIND.SMOKE, { flip: 1,
         x: px, y: gy + size * 0.22 + hf * H, z: pz,
         vx: Math.cos(a) * 0.14, vy: young ? 0.9 + Math.random() * 1.1 : 0.08 + Math.random() * 0.14, vz: Math.sin(a) * 0.14,
         size, grow: size * (wp ? 0.06 : 0.035),
@@ -58838,7 +59091,7 @@ class Game {
       // as a flat black disc; this keeps the sheet's own light and shade
       const sun = Math.cos(a) * E.sx + Math.sin(a) * E.sz;
       const k = (0.7 + Math.random() * 0.6) * (1 + 0.12 * sun);
-      vfx.spawn(V.KIND.SMOKE, {
+      vfx.spawn(V.KIND.SMOKE, { flip: 1,
         x: src.x + Math.cos(a) * rr, y: src.y + 0.5 + Math.random() * 0.4, z: src.z + Math.sin(a) * rr,
         vx: E.wx + Math.cos(a) * 0.15, vy: 1.8 + Math.random() * 1.0, vz: E.wz + Math.sin(a) * 0.15,
         // a plume widens to about a quarter of its height: a puff that grew
@@ -58870,7 +59123,7 @@ class Game {
       const px = c.center.x + Math.cos(a) * rr, pz = c.center.z + Math.sin(a) * rr;
       const size = clamp(R * (0.4 + Math.random() * 0.3), 0.8, 9);
       const k = 0.92 + Math.random() * 0.22;
-      vfx.spawn(V.KIND.SMOKE, {
+      vfx.spawn(V.KIND.SMOKE, { flip: 1,
         x: px, y: T.heightAt(px, pz) + size * 0.22 + Math.random() * R * 0.18, z: pz,
         vx: Math.cos(a) * 0.1, vy: 0.04 + Math.random() * 0.1, vz: Math.sin(a) * 0.1,
         size, grow: size * 0.05,
@@ -61234,7 +61487,10 @@ class Game {
     if (this.victoryPoints.length) {
       for (const vp of this.victoryPoints) {
         vp.owner = 0; vp.capTeam = 0; vp.cap = 0; vp._contested = false;
-        if (vp._grp) vp._grp.position.y = this.terrain.heightAt(vp.x, vp.z);   // sculpted ground moved under it
+        if (vp._grp) {                 // sculpted ground moved under it
+          vp._grp.position.y = this.terrain.heightAt(vp.x, vp.z);
+          vp._ring.geometry.dispose(); vp._ring.geometry = this._vpRingGeo(vp, vp.r - 0.5, vp.r);
+        }
         this._vpApplyColors(vp); this._vpUpdateVisual(vp);
       }
       return;
@@ -61915,6 +62171,7 @@ class Game {
     if (this.ui && this.ui.hideDeployBar) this.ui.hideDeployBar();
     this._resetBattleClock();
     this.battleActive = false;   // re-armed by _checkVictory once both sides are up
+    this._bailQ = null;          // (round 114) a queue of crews belongs to the last battle
     if (this.ui) this.ui.toast('Battle begins');
     this.sfx.order();
   }
@@ -62186,40 +62443,42 @@ class Game {
     this._timeWarned = {};
     this.ui.toast(this.battleDuration ? `Battle timer: ${mins} minutes` : 'Battle timer: unlimited');
   }
+  /** A RING THAT LIES ON THE GROUND. A flat ring on a hillside cuts into the
+   *  slope on one side and floats on the other, and a faint one that does that
+   *  reads as a rendering fault: every point takes the height under it. `a0`,
+   *  `da`: the arc, in radians, north first (the capture progress). */
+  _vpRingGeo(vp, r0, r1, a0 = 0, da = Math.PI * 2) {
+    const T = this.terrain, N = Math.max(6, Math.ceil(120 * da / (Math.PI * 2))), gy = T.heightAt(vp.x, vp.z);
+    const pos = new Float32Array((N + 1) * 6), idx = [];
+    for (let i = 0; i <= N; i++) {
+      const a = a0 + da * i / N, c = Math.cos(a), s = Math.sin(a);
+      for (let j = 0; j < 2; j++) {
+        const r = j ? r1 : r0, x = c * r, z = s * r, k = (i * 2 + j) * 3;
+        pos[k] = x; pos[k + 1] = T.heightAt(vp.x + x, vp.z + z) - gy + 0.14; pos[k + 2] = z;
+      }
+      if (i < N) { const q = i * 2; idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx);
+    return g;
+  }
+  /** (round 114) "victory locations don't need the huge flags just labeled on
+   *  minimap and a faint circle in game" (the user). The pole, the flag and the
+   *  floating name are gone: a thin faint ring on the ground in the holder's
+   *  colour, the progress arc inside it while it is being taken, and the name
+   *  on the minimap (`_drawMinimap`). */
   _makeVpVisual(vp) {
     const grp = new THREE.Group();
     grp.position.set(vp.x, this.terrain.heightAt(vp.x, vp.z), vp.z);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(vp.r - 0.7, vp.r, 48),
-      new THREE.MeshBasicMaterial({ color: 0xc9ccd0, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.25; ring.renderOrder = 5;
-    const arc = new THREE.Mesh(
-      new THREE.RingGeometry(vp.r - 2.0, vp.r - 1.0, 48, 1, 0, 0.02),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
-    arc.rotation.x = -Math.PI / 2; arc.position.y = 0.28; arc.renderOrder = 5; arc.visible = false;
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 7, 6), new THREE.MeshLambertMaterial({ color: 0x8a8578 }));
-    pole.position.y = 3.5;
-    const flag = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.9), new THREE.MeshLambertMaterial({ color: 0xdddddd, side: THREE.DoubleSide }));
-    flag.position.set(1.6, 6.0, 0);
-    // The letter is how the scoreboard refers to it; the LABEL is what the
-    // place is. Both go on one sprite so an objective announces itself from
-    // across the field — "B · the crossroads" is an order, "B" is a token.
-    const cnv = document.createElement('canvas'); cnv.width = 256; cnv.height = 96;
-    const c2 = cnv.getContext('2d');
-    c2.textAlign = 'center'; c2.textBaseline = 'middle';
-    c2.font = 'bold 46px sans-serif';
-    c2.lineWidth = 7; c2.strokeStyle = 'rgba(0,0,0,0.85)'; c2.strokeText(vp.name, 128, 30);
-    c2.fillStyle = '#fff'; c2.fillText(vp.name, 128, 30);
-    if (vp.label) {
-      c2.font = '600 26px sans-serif';
-      c2.lineWidth = 5; c2.strokeStyle = 'rgba(0,0,0,0.85)'; c2.strokeText(vp.label, 128, 72);
-      c2.fillStyle = '#e6e9ec'; c2.fillText(vp.label, 128, 72);
-    }
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cnv), transparent: true, depthWrite: false }));
-    spr.scale.set(vp.label ? 9.6 : 3.4, vp.label ? 3.6 : 3.4, 1); spr.position.y = 8.6;
-    grp.add(ring, arc, pole, flag, spr);
+    const ring = new THREE.Mesh(this._vpRingGeo(vp, vp.r - 0.5, vp.r),
+      new THREE.MeshBasicMaterial({ color: 0xc9ccd0, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false }));
+    ring.renderOrder = 5;
+    const arc = new THREE.Mesh(this._vpRingGeo(vp, vp.r - 1.2, vp.r - 0.7, -Math.PI / 2, 0.02),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+    arc.renderOrder = 5; arc.visible = false;
+    grp.add(ring, arc);
     this.scene.add(grp);
-    vp._grp = grp; vp._ring = ring; vp._arc = arc; vp._flag = flag;
+    vp._grp = grp; vp._ring = ring; vp._arc = arc; vp._flag = null;
     this._vpApplyColors(vp);
   }
   _vpApplyColors(vp) {
@@ -62318,19 +62577,16 @@ class Game {
   }
   _vpUpdateVisual(vp) {
     if (!vp._ring) return;
-    // (round 111) in first person the flag on its pole is the objective; the
-    // ring and the capture arc painted round it are the commander's map
-    vp._ring.visible = !this.fpv;
-    const capping = vp.capTeam && vp.cap > 0.02 && !vp._contested && !this.fpv;
-    vp._ring.material.opacity = vp._contested ? 0.45 + 0.3 * Math.abs(Math.sin(this.time * 7))
-      : capping ? 0.4 + 0.3 * Math.abs(Math.sin(this.time * 5)) : 0.45;
+    const capping = vp.capTeam && vp.cap > 0.02 && !vp._contested;
+    vp._ring.material.opacity = vp._contested ? 0.26 + 0.2 * Math.abs(Math.sin(this.time * 7))
+      : capping ? 0.26 + 0.14 * Math.abs(Math.sin(this.time * 5)) : 0.24;
     if (capping) {
       vp._arc.visible = true;
       vp._arc.material.color.setHex(this.teamColorHex(vp.capTeam));
       if (Math.abs((vp._arcCap || 0) - vp.cap) > 0.02) {   // rebuild the progress arc only when it moved
         vp._arcCap = vp.cap;
         vp._arc.geometry.dispose();
-        vp._arc.geometry = new THREE.RingGeometry(vp.r - 2.0, vp.r - 1.0, 48, 1, -Math.PI / 2, Math.max(0.02, vp.cap * Math.PI * 2));
+        vp._arc.geometry = this._vpRingGeo(vp, vp.r - 1.2, vp.r - 0.7, -Math.PI / 2, Math.max(0.02, vp.cap * Math.PI * 2));
       }
     } else vp._arc.visible = false;
   }
@@ -62529,7 +62785,8 @@ class Game {
     const live = {}, dead = {};
     for (const u of this.units) {
       if (u.team <= 0) continue;
-      if (u.alive && !u.crewBailed) live[u.team] = (live[u.team] || 0) + 1;   // abandoned wrecks aren't combatants
+      // (round 114) …and a tank crew on foot, running for the rear, is not holding the field
+      if (u.alive && !u.crewBailed && !u.def.tanker) live[u.team] = (live[u.team] || 0) + 1;   // abandoned wrecks aren't combatants
       dead[u.team] = (dead[u.team] || 0) + 1;                                  // …and who was ever here at all
     }
     const standing = TEAMS.filter(t => live[t] > 0);
@@ -63878,7 +64135,7 @@ class Game {
    *  lay bleeding than for one killed outright — and the drops a wounded man
    *  leaves walking (`_bleeders`). On the cosmetic stream; nothing reads it. */
   _bloodKit() {
-    const cap = 320;
+    const cap = 640;
     const cv = document.createElement('canvas'); cv.width = cv.height = 128;
     const x = cv.getContext('2d');
     let seed = 1066;
@@ -63926,6 +64183,22 @@ class Game {
     if (tau) r.tau = tau;
     P.active.add(r);
     this._poolSet(P, r);
+  }
+  /** (round 114) SPATTER ON THE GROUND: what the round carried out of a man lands
+   *  beyond him along its path, and what a shell did lands all round him. A few
+   *  drops of the pool's own instanced decal, cosmetic, on the ring of 640. */
+  _bloodSpatter(x, z, dx, dz, n, reachM) {
+    return cosmeticScope(this._bloodSpatterNow, this, arguments);
+  }
+  _bloodSpatterNow(x, z, dx, dz, n, reachM) {
+    if (!this.scene || !this.terrain) return;
+    const um = (1.555 / 1.75) * K_FIG, L = Math.hypot(dx, dz);
+    for (let i = 0; i < n; i++) {
+      let a, d = vrand(0.15, 1) * reachM * um;
+      if (L > 1e-3) a = Math.atan2(dz, dx) + vrand(-0.5, 0.5) * vrand(0.2, 1);
+      else a = vrand(0, 6.283);
+      this._bloodDrop(x + Math.cos(a) * d, z + Math.sin(a) * d, vrand(0.03, 0.05 + 0.07 * (1 - d / (reachM * um))));
+    }
   }
   /** A drop or two where a bleeding man walked. */
   _bloodDrop(x, z, rM) {
@@ -65451,9 +65724,8 @@ class Game {
         // because the survey HID what the eye was looking at; the eye now
         // stamps the side's knowledge itself, every frame, before this runs.
         // `game.fog113 = false` (or fog of war off) draws everyone again.
-        // …AND IN FIRST PERSON ONLY WHAT THE MAN YOU RIDE CAN SEE (round 113,
-        // the user): `_fogShows` — the side's knowledge from above, his own
-        // sightline at eye level.
+        // …AND ONLY FROM ABOVE (round 114, the user): `_fogShows` is always true
+        // in first person. Nothing is switched off at eye level.
         const fogged = fogOn && u.alive && u.team !== fogPt && u.team !== 0 && areHostile(fogPt, u.team);
         if (fogged && !this._fogShows(u)) on = false;
         if (u._foxSlot >= 0) u._foxFog(fogged ? this._fogShows(u) : true);
@@ -65905,6 +66177,7 @@ class Game {
    *  battle unfold — squad cohesion, morale, an AI change, a balance question —
    *  is untestable through the render loop alone. This is the seam. */
   stepSim(dt) {
+    if (this._bailQ && this._bailQ.length) this._crewTick(dt);
     this._thinkMs = 0;   // what `Unit.think` costs this tick — the governor reads it below
     this._frameN = (this._frameN || 0) + 1;   // staggers the animation LOD (see `_updateModelAnim`)
     this._sweptRays = 0; // sightlines `_sweptAt` has cast this tick — see SWEPT_RAYS

@@ -66,6 +66,7 @@
     FBALL: 10,   // flipbook: a fuel / ammunition fireball rolling into black smoke
     MFLASH: 11,  // a muzzle flash, laid along the bore as the camera sees it
     STREAK: 12,  // a hot round in flight (a ricochet): laid along its velocity ON SCREEN
+    LICK: 13,    // (round 114) flipbook: one tongue of simulated flame
   };
 
   // Which layer each behaviour draws in.
@@ -73,7 +74,7 @@
   LAYER[K.SMOKE] = 1; LAYER[K.FIRE] = 0; LAYER[K.SPARK] = 0; LAYER[K.DEBRIS] = 1;
   LAYER[K.BOOM] = 2; LAYER[K.FLASH] = 0; LAYER[K.DUST] = 1; LAYER[K.TRAIL] = 1;
   LAYER[K.GIB] = 1; LAYER[K.EMBER] = 0; LAYER[K.FBALL] = 3; LAYER[K.MFLASH] = 0;
-  LAYER[K.STREAK] = 0;
+  LAYER[K.STREAK] = 0; LAYER[K.LICK] = 5;
 
   // HOW HARD THE WIND HAS HOLD OF IT.
   //
@@ -91,12 +92,12 @@
   // trajectory and the wind is not going to move them.
   var WIND = {};
   WIND[K.SMOKE] = 0.85; WIND[K.DUST] = 0.5; WIND[K.TRAIL] = 0.7;
-  WIND[K.EMBER] = 0.6;  WIND[K.FIRE] = 0.3;
+  WIND[K.EMBER] = 0.6;  WIND[K.FIRE] = 0.3; WIND[K.LICK] = 0.25;
 
   // Eviction priority — higher survives. A blast core outranks a smoke wisp.
   var PRIO = {};
   PRIO[K.SMOKE] = 1; PRIO[K.FIRE] = 3; PRIO[K.SPARK] = 2; PRIO[K.DEBRIS] = 2;
-  PRIO[K.STREAK] = 3;
+  PRIO[K.STREAK] = 3; PRIO[K.LICK] = 3;
   PRIO[K.BOOM] = 6; PRIO[K.FLASH] = 6; PRIO[K.DUST] = 2; PRIO[K.TRAIL] = 1;
   PRIO[K.GIB] = 4; PRIO[K.EMBER] = 2; PRIO[K.FBALL] = 6; PRIO[K.MFLASH] = 5;
 
@@ -320,7 +321,8 @@
     if (bk && bk.general && bk.boom) {
       BAKED = bk;
       _sheets = { enc: true, general: bakedTex(bk.general.src), boom: bakedTex(bk.boom.src),
-                  fireball: bk.fireball ? bakedTex(bk.fireball.src) : null };
+                  fireball: bk.fireball ? bakedTex(bk.fireball.src) : null,
+                  billow: bk.billow ? bakedTex(bk.billow.src) : null, lick: bk.lick ? bakedTex(bk.lick.src) : null };
       return _sheets;
     }
     var mk = function (draw, seed) {
@@ -352,20 +354,40 @@
     'attribute vec3 iPos;',
     'attribute vec4 iCol;',
     'attribute vec3 iSize;',     // w, h, roll
-    'attribute vec2 iUv;',       // atlas cell offset
+    'attribute vec2 iUv;',       // atlas cell offset (a flipbook: x is the frame, fractional)
+    'attribute float iGnd;',     // (round 114) the ground under a flipbook puff
     'uniform vec2 uAtlas;',
+    'uniform vec2 uFlip;',       // (frames, on): blend between two frames of a simulated sheet
     'varying vec2 vUvF;',
+    'varying vec2 vUvB;',
+    'varying float vMix;',
+    'varying float vSoft;',
     'varying vec4 vColF;',
     'varying float vDepth;',
     'void main() {',
-    '  vUvF = uv * uAtlas + iUv;',
     '  vColF = iCol;',
+    '  vSoft = 1.0;',
+    '  if (uFlip.y > 0.5) {',
+    '    float f = floor(iUv.x), G = 1.0 / uAtlas.x, f1 = min(f + 1.0, uFlip.x - 1.0);',
+    '    vMix = iUv.x - f;',
+    '    vUvF = (uv + vec2(mod(f, G), G - 1.0 - floor(f / G))) * uAtlas;',
+    '    vUvB = (uv + vec2(mod(f1, G), G - 1.0 - floor(f1 / G))) * uAtlas;',
+    '  } else { vUvF = uv * uAtlas + iUv; vUvB = vUvF; vMix = 0.0; }',
     // View-space billboard: the quad is built in the camera's own plane, so it
     // faces the eye by construction. No per-particle quaternion, no matrix.
     '  vec4 mv = modelViewMatrix * vec4(iPos, 1.0);',
     '  float cr = cos(iSize.z), sr = sin(iSize.z);',
     '  vec2 q = position.xy * iSize.xy;',
-    '  mv.xy += vec2(q.x * cr - q.y * sr, q.x * sr + q.y * cr);',
+    '  vec2 qr = vec2(q.x * cr - q.y * sr, q.x * sr + q.y * cr);',
+    '  mv.xy += qr;',
+    // SOFT AT THE GROUND: where a puff's quad would cut the ground it thins out
+    // first, so smoke and dust settle on the field instead of ending in a line.
+    // The world height of this corner is the particle's plus the camera's axes;
+    // the varying carries it per pixel for one texture read's worth of nothing.
+    '  if (uFlip.y > 0.5 && iGnd > -9000.0) {',
+    '    float wy = iPos.y + viewMatrix[0][1] * qr.x + viewMatrix[1][1] * qr.y;',
+    '    vSoft = (wy - iGnd) / max(0.02, iSize.x * 0.22);',
+    '  } else vSoft = 1.0;',
     '  vDepth = -mv.z;',
     '  gl_Position = projectionMatrix * mv;',
     '}',
@@ -381,7 +403,11 @@
     'uniform float uMode;',    // 0 light (additive), 1 smoke (alpha), 2 fire-in-smoke (premultiplied)
     'uniform float uHeat;',    // how bright heat 1.0 is, linear — tone mapped after
     'uniform float uGlowOnly;', // 1 while PostFX draws the glow source: fire only, no smoke
+    'uniform vec2 uFlip;',
     'varying vec2 vUvF;',
+    'varying vec2 vUvB;',
+    'varying float vMix;',
+    'varying float vSoft;',
     'varying vec4 vColF;',
     'varying float vDepth;',
     // The fire ramp the sheets were baked with (vfx_bake.py FIRE): deep red,
@@ -395,6 +421,10 @@
     '}',
     'void main() {',
     '  vec4 t = texture2D(uMap, vUvF);',
+    '  if (uFlip.y > 0.5) {',
+    '    t = mix(t, texture2D(uMap, vUvB), vMix);',
+    '    float sf = clamp(vSoft, 0.0, 1.0); t.g *= sf * sf * (3.0 - 2.0 * sf);',
+    '  }',
     '  float fog = clamp(1.0 - exp(-uFogDensity * uFogDensity * vDepth * vDepth), 0.0, 1.0);',
     '  if (uEnc > 0.5) {',
     '    float lit = pow(t.r, 2.2), cov = t.g * vColF.a, heat = t.b * t.b;',
@@ -465,6 +495,8 @@
     this.col = new Float32Array(cap * 4);
     this.size = new Float32Array(cap * 3);
     this.uv = new Float32Array(cap * 2);
+    this.gnd = new Float32Array(cap).fill(-1e4);
+    this.frames = o.frames || 0;
     this.additive = additive;
 
     var g = new THREE.InstancedBufferGeometry();
@@ -475,6 +507,8 @@
     this.aCol = new THREE.InstancedBufferAttribute(this.col, 4).setUsage(THREE.DynamicDrawUsage);
     this.aSize = new THREE.InstancedBufferAttribute(this.size, 3).setUsage(THREE.DynamicDrawUsage);
     this.aUv = new THREE.InstancedBufferAttribute(this.uv, 2).setUsage(THREE.DynamicDrawUsage);
+    this.aGnd = new THREE.InstancedBufferAttribute(this.gnd, 1).setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('iGnd', this.aGnd);
     g.setAttribute('iPos', this.aPos);
     g.setAttribute('iCol', this.aCol);
     g.setAttribute('iSize', this.aSize);
@@ -489,6 +523,7 @@
       uniforms: {
         uMap: { value: tex },
         uAtlas: { value: new THREE.Vector2(1 / grid, 1 / grid) },
+        uFlip: { value: new THREE.Vector2(o.frames || 0, o.frames ? 1 : 0) },
         uEnc: { value: o.enc ? 1 : 0 },
         uMode: { value: premul ? 2 : additive ? 0 : 1 },
         uHeat: { value: o.heat || 1 },
@@ -525,6 +560,7 @@
     this.aCol.updateRange.count = n * 4; this.aCol.needsUpdate = true;
     this.aSize.updateRange.count = n * 3; this.aSize.needsUpdate = true;
     this.aUv.updateRange.count = n * 2; this.aUv.needsUpdate = true;
+    if (this.frames) { this.aGnd.updateRange.count = n; this.aGnd.needsUpdate = true; }
   };
   Batch.prototype.dispose = function () {
     this.mesh.parent && this.mesh.parent.remove(this.mesh);
@@ -566,6 +602,7 @@
     this.drag = new Float32Array(C);
     this.grav = new Float32Array(C);
     this.dirx = new Float32Array(C); this.dirz = new Float32Array(C);   // a muzzle flash's bore
+    this.flip = new Uint8Array(C); this.gnd = new Float32Array(C);      // (round 114) drawn from the simulated smoke sheet; the ground under it
     this.n = 0;                          // live count; [0, n) is live, compacted
 
     var sh = sheets(), bk = BAKED;
@@ -576,11 +613,23 @@
       new Batch(scene, sh.boom, !sh.enc, 256, { enc: sh.enc, premul: sh.enc,                                     // 2 flipbook: the ground burst
         grid: bk ? bk.boom.grid : SHEET, heat: bk ? bk.boom.heat : 1 }),
     ];
+    // (round 114) THE FLUID SIMS (tools/blender/vfx_sim.py). Slots 4 and 5 whether
+    // or not there is a sheet for them: `update` asks `b4`, `b5` for what it can use.
+    this.lickFrames = 0; this.billowFrames = 0;
+    this.batches[3] = this.batches[3] || null;
+    if (sh.billow) {
+      this.batches[4] = new Batch(scene, sh.billow, false, 1400, { enc: true, grid: bk.billow.grid, frames: bk.billow.frames });
+      this.billowFrames = bk.billow.frames;
+    }
+    if (sh.lick) {
+      this.batches[5] = new Batch(scene, sh.lick, false, 256, { enc: true, premul: true, grid: bk.lick.grid, heat: bk.lick.heat, frames: bk.lick.frames });
+      this.lickFrames = bk.lick.frames;
+    }
     this.boomFrames = bk ? bk.boom.frames : 16;
     this.boomGround = bk ? bk.boom.ground : 0.5;      // where the ground line sits in a cell (from the bottom)
     if (sh.fireball) {
-      this.batches.push(new Batch(scene, sh.fireball, false, 128, { enc: true, premul: true,                  // 3 flipbook: a fireball
-        grid: bk.fireball.grid, heat: bk.fireball.heat }));
+      this.batches[3] = new Batch(scene, sh.fireball, false, 128, { enc: true, premul: true,                  // 3 flipbook: a fireball
+        grid: bk.fireball.grid, heat: bk.fireball.heat });
       this.fbFrames = bk.fireball.frames;
     }
     // Reusable sort scratch for the alpha layer (back-to-front).
@@ -621,6 +670,7 @@
         this.alpha[i] = this.alpha[last]; this.kind[i] = this.kind[last]; this.cell[i] = this.cell[last];
         this.stretch[i] = this.stretch[last]; this.drag[i] = this.drag[last]; this.grav[i] = this.grav[last];
         this.dirx[i] = this.dirx[last]; this.dirz[i] = this.dirz[last];
+        this.flip[i] = this.flip[last]; this.gnd[i] = this.gnd[last];
       }
     },
 
@@ -647,6 +697,7 @@
       this.drag[i] = o.drag !== undefined ? o.drag : 0.6;
       this.grav[i] = o.gravity !== undefined ? o.gravity : 0;
       this.dirx[i] = o.dx || 0; this.dirz[i] = o.dz || 0;
+      this.flip[i] = o.flip && this.billowFrames && (kind === K.SMOKE || kind === K.DUST || kind === K.TRAIL) ? 1 : 0;
       if (this._fxD) {                  // inside an authored effect: see `K`
         var k = this.K;
         this.px[i] = this._ox + (o.x - this._ox) * k;
@@ -657,6 +708,7 @@
         // the hull an exhaust rides on) is not part of the picture
         if (!o.keepV) { this.vx[i] *= k; this.vy[i] *= k; this.vz[i] *= k; this.grav[i] *= k; }
       }
+      if (this.flip[i] || kind === K.LICK) this.gnd[i] = this.terrain ? this.terrain.heightAt(this.px[i], this.pz[i]) : -1e4;
       return i;
     },
 
@@ -670,7 +722,8 @@
       if (dt <= 0) dt = 0.0001;
       this._t += dt;
       var b0 = this.batches[0], b1 = this.batches[1], b2 = this.batches[2], b3 = this.batches[3] || null;
-      var n0 = 0, n1 = 0, n2 = 0, n3 = 0;
+      var b4 = this.batches[4] || null, b5 = this.batches[5] || null;
+      var n0 = 0, n1 = 0, n2 = 0, n3 = 0, n4 = 0, n5 = 0;
       var T = this.terrain;
       // the view matrix, for laying a muzzle flash along its bore on screen
       var ve = camera ? camera.matrixWorldInverse.elements : null;
@@ -762,6 +815,8 @@
           var nf = this.boomFrames;
           cellIdx = Math.min(nf - 1, Math.floor((1 - t) * nf));
           a *= this.enc ? (t < 0.1 ? t / 0.1 : 1) : (t > 0.85 ? (1 - t) / 0.15 : 1);
+        } else if (k === K.LICK) {
+          a *= t < 0.15 ? t / 0.15 : 1;
         } else if (k === K.FBALL) {
           var nfb = this.fbFrames || 1;
           cellIdx = Math.min(nfb - 1, Math.floor((1 - t) * nfb));
@@ -791,6 +846,17 @@
         // -- pack ----------------------------------------------------------
         var layer = LAYER[k], B, at;
         if (layer === 3 && !b3) layer = 2;
+        if (this.flip[i] || k === K.LICK) {
+          // A simulated sheet: the frame walks over the life and blends in the shader.
+          if (k === K.LICK) { if (!b5 || n5 >= b5.cap) continue; B = b5; at = n5++; }
+          else { if (!b4 || n4 >= b4.cap) continue; B = b4; at = n4++; }
+          B.pos[at * 3] = this.px[i]; B.pos[at * 3 + 1] = this.py[i]; B.pos[at * 3 + 2] = this.pz[i];
+          B.col[at * 4] = cr; B.col[at * 4 + 1] = cg; B.col[at * 4 + 2] = cb; B.col[at * 4 + 3] = a;
+          B.size[at * 3] = sx; B.size[at * 3 + 1] = sy; B.size[at * 3 + 2] = this.rot[i];
+          B.uv[at * 2] = Math.min(B.frames - 1.001, (1 - t) * (B.frames - 1)); B.uv[at * 2 + 1] = 0;
+          B.gnd[at] = k === K.LICK ? -1e4 : this.gnd[i];
+          continue;
+        }
         if (layer === 3) { B = b3; at = n3; if (n3 >= B.cap) continue; n3++; }
         else if (layer === 2) { B = b2; at = n2; if (n2 >= B.cap) continue; n2++; }
         else if (layer === 0) { B = b0; at = n0; if (n0 >= B.cap) continue; n0++; }
@@ -807,10 +873,11 @@
       // back-to-front. Additive blending is order-independent by definition and
       // the flipbook layer is additive too, so neither needs this.
       if (n1 > 1 && n1 <= 2400 && camera) this._sortAlpha(b1, n1, camera);
+      if (b4 && n4 > 1 && camera) this._sortAlpha(b4, n4, camera);
 
-      b0.flush(n0); b1.flush(n1); b2.flush(n2); if (b3) b3.flush(n3);
+      b0.flush(n0); b1.flush(n1); b2.flush(n2); if (b3) b3.flush(n3); if (b4) b4.flush(n4); if (b5) b5.flush(n5);
       this.stats.live = this.n;
-      this.stats.draws = (n0 > 0) + (n1 > 0) + (n2 > 0) + (n3 > 0);
+      this.stats.draws = (n0 > 0) + (n1 > 0) + (n2 > 0) + (n3 > 0) + (n4 > 0) + (n5 > 0);
     },
 
     _sortAlpha: function (B, n, camera) {
@@ -831,6 +898,7 @@
       B.size.set(tmp.subarray(0, n * 3));
       for (i = 0; i < n; i++) { j = view[i]; tmp[i * 2] = B.uv[j * 2]; tmp[i * 2 + 1] = B.uv[j * 2 + 1]; }
       B.uv.set(tmp.subarray(0, n * 2));
+      if (B.frames) { for (i = 0; i < n; i++) tmp[i] = B.gnd[view[i]]; B.gnd.set(tmp.subarray(0, n)); }
       for (i = 0; i < n; i++) { j = view[i]; tmp[i * 4] = B.col[j * 4]; tmp[i * 4 + 1] = B.col[j * 4 + 1]; tmp[i * 4 + 2] = B.col[j * 4 + 2]; tmp[i * 4 + 3] = B.col[j * 4 + 3]; }
       B.col.set(tmp.subarray(0, n * 4));
     },
@@ -873,8 +941,8 @@
       for (var i = 0; i < this.batches.length; i++) this.batches[i].mat.uniforms.uLight.value.setRGB(r, g, b);
     },
 
-    clear: function () { this.n = 0; for (var i = 0; i < this.batches.length; i++) this.batches[i].flush(0); },
-    dispose: function () { for (var i = 0; i < this.batches.length; i++) this.batches[i].dispose(); },
+    clear: function () { this.n = 0; for (var i = 0; i < this.batches.length; i++) if (this.batches[i]) this.batches[i].flush(0); },
+    dispose: function () { for (var i = 0; i < this.batches.length; i++) if (this.batches[i]) this.batches[i].dispose(); },
 
     // =====================================================================
     // AUTHORED EFFECTS — what the game actually calls
@@ -996,6 +1064,36 @@
       var s = scale || 1, n = Math.max(1, Math.round(count * this.quality));
       var tr = tint ? tint.r : 1, tg = tint ? tint.g : 0.86, tb = tint ? tint.b : 0.55;
       var er = tint ? tint.r : 1, eg = tint ? tint.g : 0.62, eb = tint ? tint.b : 0.22;
+      if (this.lickFrames && !tint) {
+        // (round 114) TONGUES OF FLAME from a fluid simulation: each rises, necks
+        // and tears away, and a fire is two or three of them overlapping. It was a
+        // handful of orange dots shrinking on the way up. Fewer particles, a warm
+        // glow under them, and sparks off the top. A tinted fire (phosphorus) is
+        // not a wood fire and keeps its own white glow below.
+        var m = Math.max(1, Math.round(n * 0.55));
+        for (var li = 0; li < m; li++) {
+          var ls = this.rnd(2.2, 3.6) * s;
+          this.spawn(K.LICK, {
+            x: x + this.rnd(-0.42, 0.42) * s, y: y + ls * 0.38, z: z + this.rnd(-0.42, 0.42) * s,
+            vy: this.rnd(0.1, 0.45) * s, vx: this.rnd(-0.1, 0.1), vz: this.rnd(-0.1, 0.1),
+            size: ls, grow: 0.12 * s, life: this.rnd(0.75, 1.3), rot: this.rnd(-0.14, 0.14), spin: this.rnd(-0.06, 0.06),
+            r: 0.16, g: 0.14, b: 0.13, a: this.rnd(0.82, 1), drag: 0.5,
+          });
+        }
+        if (crand() < 0.5) {
+          this.spawn(K.FIRE, { x: x, y: y + 0.25 * s, z: z, size: this.rnd(1.6, 2.4) * s, life: this.rnd(0.3, 0.55), cell: S.GLOW,
+            r: 1, g: 0.5, b: 0.16, a: 0.3, drag: 0 });
+        }
+        if (crand() < 0.3 * n) {
+          this.spawn(K.EMBER, {
+            x: x + this.rnd(-0.4, 0.4) * s, y: y + this.rnd(0.3, 0.9) * s, z: z + this.rnd(-0.4, 0.4) * s,
+            vx: this.rnd(-0.5, 0.5), vy: this.rnd(1.4, 3.0), vz: this.rnd(-0.5, 0.5),
+            size: this.rnd(0.05, 0.11), life: this.rnd(0.9, 2.2),
+            cell: S.CINDER, r: er, g: eg, b: eb, a: 1, drag: 0.8,
+          });
+        }
+        return;
+      }
       for (var i = 0; i < n; i++) {
         this.spawn(K.FIRE, {
           x: x + this.rnd(-0.5, 0.5) * s, y: y + this.rnd(0, 0.4) * s, z: z + this.rnd(-0.5, 0.5) * s,
@@ -1026,6 +1124,25 @@
       o = o || {};
       var s = o.scale || 1;
       var n = Math.max(1, Math.round(count * this.quality));
+      if (this.billowFrames) {
+        // (round 114) A PUFF THAT CHANGES SHAPE: a dense knot opening into a torn
+        // rag as it goes, from a fluid simulation, so fewer of them make a thicker
+        // column than the old round sprites did. Bigger quad: most of the sheet's
+        // frames do not fill their cell. Oily soot off a fire is dark and rises
+        // fast; a burst's smoke is grey and drifts.
+        n = Math.max(1, Math.round(n * 0.75));
+        for (var bi = 0; bi < n; bi++) {
+          var bd = o.oily ? this.rnd(0.1, 0.17) : this.rnd(0.42, 0.6);
+          this.spawn(K.SMOKE, {
+            flip: 1, x: x + this.rnd(-0.7, 0.7) * s, y: y + this.rnd(0.1, 0.9) * s, z: z + this.rnd(-0.7, 0.7) * s,
+            vx: this.rnd(-0.35, 0.35), vy: this.rnd(o.dense ? 0.22 : 0.7, o.dense ? 0.7 : 1.6) * s, vz: this.rnd(-0.35, 0.35),
+            size: this.rnd(2.0, 3.4) * s, grow: this.rnd(0.35, 0.8) * s,
+            life: this.rnd(o.dense ? 6.5 : 3.0, o.dense ? 13 : 5.5), rot: this.rnd(-0.5, 0.5), spin: this.rnd(-0.08, 0.08),
+            r: bd * 1.04, g: bd, b: bd * 0.95, a: this.rnd(o.dense ? 0.55 : 0.34, o.dense ? 0.78 : 0.56), drag: 0.55,
+          });
+        }
+        return;
+      }
       for (var i = 0; i < n; i++) {
         var dark = o.oily ? this.rnd(0.14, 0.24) : this.rnd(0.42, 0.62);
         this.spawn(K.SMOKE, {
@@ -1057,6 +1174,24 @@
       var th = o.throw === undefined ? 1 : o.throw, up = o.rise === undefined ? 1 : o.rise;
       var c = o.color, cr = c ? c.r : 0.74, cg = c ? c.g : 0.68, cb = c ? c.b : 0.54;
       var life = o.life === undefined ? 1 : o.life;
+      if (this.billowFrames) {
+        // (round 114) Dust is the same physics at the ground: it billows out and
+        // hangs, in the colour of what it came off, and thins where it meets the
+        // field (`iGnd`) rather than ending in a line across it.
+        n = Math.max(1, Math.round(n * 0.7));
+        for (var di = 0; di < n; di++) {
+          var da = crand() * 6.283, dsp = this.rnd(1.0, 3.2) * s * th;
+          this.spawn(K.DUST, {
+            flip: 1, x: x + Math.cos(da) * this.rnd(0, 0.5) * s, y: y + this.rnd(0.25, 0.6) * s,
+            z: z + Math.sin(da) * this.rnd(0, 0.5) * s,
+            vx: Math.cos(da) * dsp, vy: this.rnd(0.15, 0.7) * up, vz: Math.sin(da) * dsp,
+            size: this.rnd(1.3, 2.5) * s, grow: this.rnd(0.3, 0.7) * s,
+            life: this.rnd(1.5, 3.2) * life, rot: this.rnd(-0.6, 0.6), spin: this.rnd(-0.1, 0.1),
+            r: cr * 0.8, g: cg * 0.8, b: cb * 0.8, a: this.rnd(0.2, 0.36) * (o.a || 1), drag: 2.4,
+          });
+        }
+        return;
+      }
       for (var i = 0; i < n; i++) {
         // Thrown on a bearing rather than in a box: the sheet leaves the seat
         // of the burst radially, which is what makes it read as a ring.
@@ -1183,8 +1318,8 @@
         this.spawn(K.DEBRIS, {
           x: x, y: y, z: z,
           vx: Math.cos(a) * sp, vy: this.rnd(1.2, 4.5), vz: Math.sin(a) * sp,
-          size: this.rnd(0.07, 0.17), life: this.rnd(0.5, 1.1), spin: this.rnd(-4, 4),
-          cell: S.DROP, r: 1, g: 1, b: 1, a: 0.95, gravity: 16, drag: 0.2,
+          size: this.rnd(0.05, 0.13), life: this.rnd(0.5, 1.1), spin: this.rnd(-4, 4),
+          cell: S.DROP, r: 1.0, g: 0.045, b: 0.035, a: 0.95, gravity: 16, drag: 0.2,
         });
       }
     },
@@ -1207,14 +1342,16 @@
           x: x + dx * 0.08, y: y, z: z + dz * 0.08,
           vx: (dx - dz * side) * sp, vy: up * sp + this.rnd(0.4, 1.8), vz: (dz + dx * side) * sp,
           size: this.rnd(0.045, 0.1) * (0.85 + 0.15 * k), life: this.rnd(0.35, 0.75), spin: this.rnd(-4, 4),
-          cell: S.DROP, r: 0.8, g: 0.8, b: 0.8, a: 0.95, gravity: 16, drag: 0.5,
+          // (round 114) THE BAKED DROP CELL IS GREY, and it was tinted grey: every
+          // droplet in the game was a dark grey speck. The red has to be the tint.
+          cell: S.DROP, r: 1.0, g: 0.045, b: 0.035, a: 0.95, gravity: 16, drag: 0.5,
         });
       }
       // the mist: finer than the drops, carried a little way and gone
       this.spawn(K.SMOKE, {
         x: x + dx * 0.12, y: y, z: z + dz * 0.12, vx: dx * 1.4 * k, vy: 0.15, vz: dz * 1.4 * k,
-        size: 0.12 + 0.08 * k, grow: 0.45 * k, life: this.rnd(0.2, 0.36) * (0.8 + 0.2 * k), rot: this.rnd(0, 6.283),
-        cell: S.PUFF, r: 0.42, g: 0.035, b: 0.03, a: 0.38 + 0.12 * Math.min(1, k), drag: 2.4,
+        size: 0.12 + 0.08 * k, grow: 0.5 * k, life: this.rnd(0.22, 0.42) * (0.8 + 0.2 * k), rot: this.rnd(0, 6.283),
+        cell: S.PUFF, r: 0.36, g: 0.02, b: 0.018, a: 0.42 + 0.14 * Math.min(1, k), drag: 2.4,
       });
       // …and the back-spatter: a few drops thrown back the way it came
       var nb = Math.max(1, Math.round(2 * k * this.quality));
@@ -1224,7 +1361,7 @@
           x: x - dx * 0.04, y: y, z: z - dz * 0.04,
           vx: (-dx - dz * bside) * bs, vy: this.rnd(0.6, 2.2), vz: (-dz + dx * bside) * bs,
           size: this.rnd(0.04, 0.07), life: this.rnd(0.3, 0.55), spin: this.rnd(-4, 4),
-          cell: S.DROP, r: 0.8, g: 0.8, b: 0.8, a: 0.9, gravity: 16, drag: 0.4,
+          cell: S.DROP, r: 1.0, g: 0.045, b: 0.035, a: 0.9, gravity: 16, drag: 0.4,
         });
       }
     },
