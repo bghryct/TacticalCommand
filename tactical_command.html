@@ -22570,6 +22570,7 @@ class Obstacles {
   _fortVariant(kind) {
     this._fortGeos = this._fortGeos || {};
     if (this._fortGeos[kind]) return this._fortGeos[kind];
+    { const pg = this._packed113('fort_' + kind, 0); if (pg) return (this._fortGeos[kind] = pg); }
     const r = mulberry32(kind === 'bunker' ? 5501 : 5507);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
