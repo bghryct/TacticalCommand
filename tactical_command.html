@@ -1452,6 +1452,7 @@ body.fpv #tacMap { display: none !important; }
      without it `Obstacles._treeVariant` builds its procedural trees. -->
 <script src="assets/trees.pack.js"></script>
 <script src="assets/hedges.pack.js"></script>
+<script src="assets/refine.pack.js"></script>
 <!-- (round 113) the props' occlusion, baked in Cycles from the page's own
      prop geometry (tools/blender/props_ao.py). Optional: without it the props
      draw as they did. Read by `Obstacles._propAO`. -->
@@ -21043,6 +21044,7 @@ class Obstacles {
     this._trenchGeos = this._trenchGeos || [];
     const slot = end === 'both' ? 8 + i : end ? 4 + i : i;
     if (this._trenchGeos[slot]) return this._trenchGeos[slot];
+    { const pg = this._refined113('trench', slot); if (pg) return (this._trenchGeos[slot] = pg); }
     const r = mulberry32(6400 + i * 29 + (end ? 7 : 0));
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
@@ -21170,6 +21172,7 @@ class Obstacles {
     pal = pal || 'turf';
     this._foxGeos = this._foxGeos || {};
     if (this._foxGeos[pal + i]) return this._foxGeos[pal + i];
+    { const pg = this._refined113('foxhole', pal + i); if (pg) return (this._foxGeos[pal + i] = pg); }
     const r = mulberry32(3300 + i * 41);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
@@ -21826,6 +21829,17 @@ class Obstacles {
     if (!pk || !pk.length || (window.game && window.game.propPack113 === false)) return null;
     const g = packedGeometry(pk[i % pk.length]); g.userData.packed = true;
     if (dry) { const h = g.attributes.hedge; for (let k = 0; k < h.count; k++) if (h.getX(k) === 4) h.setZ(k, 1); }
+    return g;
+  }
+  /** (round 113, third batch) AN EARTHWORK FINISHED IN BLENDER (tools/blender/
+   *  refine.py -> assets/refine.pack.js): this page's own trench, foxhole or
+   *  bunker, its earth subdivided and lumped by a spadeful's noise, Cycles'
+   *  occlusion over the whole, by the builder's cache key. Built at life size,
+   *  so only at true scale; `game.refine113 = false` before a load is the page's. */
+  _refined113(group, key) {
+    const RP = window.REFINE_PACK, e = RP && RP[group] && RP[group][key];
+    if (!e || K_PROP === 1 || (window.game && window.game.refine113 === false)) return null;
+    const g = packedGeometry(e); g.userData.packed = true;
     return g;
   }
   _kit() {
@@ -22594,7 +22608,7 @@ class Obstacles {
   _fortVariant(kind) {
     this._fortGeos = this._fortGeos || {};
     if (this._fortGeos[kind]) return this._fortGeos[kind];
-    { const pg = this._packed113('fort_' + kind, 0); if (pg) return (this._fortGeos[kind] = pg); }
+    { const pg = this._packed113('fort_' + kind, 0) || this._refined113('fort', kind); if (pg) return (this._fortGeos[kind] = pg); }
     const r = mulberry32(kind === 'bunker' ? 5501 : 5507);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
@@ -24492,7 +24506,8 @@ const PROP_AO_FLOOR = 0.55;
     return g;
   };
   for (const m of ['_caseVariant', '_hayVariant', '_graveVariant', '_fenceVariant', '_sandbagVariant', '_teethVariant', '_drumVariant',
-                   '_logVariant', '_barricadeVariant', '_rubbleVariant', '_concreteVariant', '_cartVariant', '_statueVariant']) {
+                   '_logVariant', '_barricadeVariant', '_rubbleVariant', '_concreteVariant', '_cartVariant', '_statueVariant',
+                   '_wallVariant', '_wireVariant']) {   // (round 113, third batch) the field walls and the wire: tools/blender/refine.py
     const f = P[m];
     if (typeof f !== 'function') continue;
     P[m] = function () {
