@@ -439,7 +439,13 @@
     B.box(wx, y + H * 0.5, wz, lx, H, lz, 0, 0, 0, c.r, c.g, c.b);
     if (mat.ruin) {
       var t2 = shade(mat, seed + 3, dmg, 0.88);
-      B.box(wx, y + H - 0.09 * S, wz, lx * 1.03, 0.1 * S, lz * 1.5, 0, 0, 0, t2.r, t2.g, t2.b);
+      // (round 113) 3% longer ALONG the wall and half again as thick ACROSS it,
+      // whichever way it runs. It was `lx * 1.03, lz * 1.5` for both, so on a
+      // north-south wall (lx its thickness, lz its length) the band ran half
+      // again the cell's length — a quarter cell past each end: a strip at
+      // the top of every storey sticking 1.5 m out into the street wherever
+      // an inside wall met a facade, and past the corner of every gable end.
+      B.box(wx, y + H - 0.09 * S, wz, horiz ? lx * 1.03 : lx * 1.5, 0.1 * S, horiz ? lz * 1.5 : lz * 1.03, 0, 0, 0, t2.r, t2.g, t2.b);
     }
   }
 
