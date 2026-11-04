@@ -59,7 +59,54 @@
     // world unit; `uGTile`: 0 plain tiling, 1 the two offsets, 2 hexagons.
     uGHex: { value: 3.3 },
     uGTile: { value: 2 },
+    // (round 113) THE LIE OF THE LAND. Every surface was one colour for as far
+    // as it ran: the cell colour carries the type and the map's patch noise,
+    // and from the playing camera a grass tile (~1.8 m) is a few pixels, so its
+    // structure mip-averages away and a field was a flat painted green — "the
+    // textures don't feel realistic" (the user). Two octaves of world-space
+    // noise, ~40 m and ~140 m (`uGMacro`, per world unit), and each surface's
+    // own answer to them (`uGMacLo` / `uGMacHi`, linear multipliers): grass goes
+    // from lush and dark to dry and straw-yellow, soil from damp to pale, a
+    // crop from green to ripe. `uGMacAmt` scales it all; 0 is the old ground.
+    uGMacro: { value: new THREE.Vector3(0.1, 0.0286, 0.31) },
+    uGMacAmt: { value: 1.0 },
+    // (round 113) …AND STRUCTURE AT RANGE: past the distance where a tile has
+    // mip-averaged to its mean, the same surface sampled at `uGFar` of its
+    // scale (six times the size: a clump, a patch, a wheel-rut's worth) is
+    // mixed in, `uGFarAmt` of the way — one more fetch, for far pixels only
+    uGFar: { value: 0.17 },
+    uGFarAmt: { value: 0.6 },
+    // …per surface: a stone, a sett or a pebble drawn six times its size is a
+    // giant, so a pattern of things (road, setts, gravel, rubble) takes none
+    // and the organic ones (grass, crops, litter, snow) all of it
+    uGFarL: { value: new Float32Array(N) },
+    uGMacLo: { value: [] },
+    uGMacHi: { value: [] },
   };
+  {
+    //            lush / damp / dark          dry / pale / ripe
+    const M = {
+      grass:  [[0.74, 0.84, 0.74], [1.26, 1.10, 0.74]],
+      soil:   [[0.76, 0.74, 0.72], [1.16, 1.12, 1.04]],
+      road:   [[0.86, 0.86, 0.86], [1.12, 1.10, 1.05]],
+      crops:  [[0.80, 0.92, 0.74], [1.10, 1.02, 0.82]],
+      forest: [[0.80, 0.82, 0.78], [1.16, 1.07, 0.90]],
+      sand:   [[0.92, 0.92, 0.90], [1.08, 1.06, 1.03]],
+      snow:   [[0.95, 0.96, 1.00], [1.03, 1.03, 1.02]],
+      rubble: [[0.84, 0.84, 0.84], [1.12, 1.10, 1.06]],
+      cobble: [[0.88, 0.88, 0.88], [1.08, 1.07, 1.05]],
+      gravel: [[0.88, 0.88, 0.88], [1.10, 1.09, 1.06]],
+      rock:   [[0.85, 0.85, 0.86], [1.12, 1.10, 1.06]],
+      grass2: [[0.78, 0.86, 0.76], [1.26, 1.12, 0.76]],
+    };
+    const FAR = { grass: 1, soil: 0.5, road: 0, crops: 1, forest: 1, sand: 0.6, snow: 1, rubble: 0, cobble: 0, gravel: 0, rock: 0.8, grass2: 1 };
+    for (let i = 0; i < N; i++) {
+      U.uGFarL.value[i] = FAR[G.LAYERS[i]] != null ? FAR[G.LAYERS[i]] : 0;
+      const m = M[G.LAYERS[i]] || [[1, 1, 1], [1, 1, 1]];
+      U.uGMacLo.value.push(new THREE.Vector3(m[0][0], m[0][1], m[0][2]));
+      U.uGMacHi.value.push(new THREE.Vector3(m[1][0], m[1][1], m[1][2]));
+    }
+  }
   G.uniforms = U;
   G.set = function (o) {
     if (o.noTile != null) U.uGNoTile.value = o.noTile;
@@ -69,6 +116,8 @@
     if (o.micro != null) U.uGMicro.value = o.micro;
     if (o.detail != null) U.uGDetail.value = o.detail;
     if (o.ao != null) U.uGAO.value = o.ao;
+    if (o.macro != null) U.uGMacAmt.value = o.macro;
+    if (o.far != null) U.uGFarAmt.value = o.far;
     return { micro: U.uGMicro.value, detail: U.uGDetail.value, ao: U.uGAO.value };
   };
 
@@ -151,6 +200,8 @@ uniform sampler2DArray uGAlb; uniform sampler2DArray uGNh;
 uniform float uGScale[${N}]; uniform vec3 uGMean[${N}];
 uniform vec3 uGSun; uniform float uGMicro; uniform float uGDetail; uniform float uGAO; uniform float uGNoTile;
 uniform float uGHex;
+uniform vec3 uGMacro; uniform float uGMacAmt; uniform vec3 uGMacLo[${N}]; uniform vec3 uGMacHi[${N}];
+uniform float uGFar; uniform float uGFarAmt; uniform float uGFarL[${N}];
 varying vec4 vGSplatA; varying vec4 vGSplatB; varying vec4 vGSplatC;
 varying vec3 vGPos; varying vec3 vGNrm;
 vec2 gN2 = vec2(0.0); float gH = 0.5; float gNear = 0.0;
@@ -177,11 +228,18 @@ float gVNoise(vec2 p) {
   gw[4] = vGSplatB.x; gw[5] = vGSplatB.y; gw[6] = vGSplatB.z; gw[7] = vGSplatB.w;
   gw[8] = vGSplatC.x; gw[9] = vGSplatC.y; gw[10] = vGSplatC.z; gw[11] = vGSplatC.w;
   vec3 ga = vec3(0.0); float gs = 0.0; float gh = 0.0;
+  // the lie of the land (round 113): one value for the whole pixel, every
+  // surface's own response to it summed with the surfaces' weights below
+  float gMv = gVNoise(vGPos.xz * uGMacro.x) * 0.55 + gVNoise(vGPos.xz * uGMacro.y + 31.7) * 0.45;
+  gMv = smoothstep(0.18, 0.82, gMv + (gVNoise(vGPos.xz * uGMacro.z + 7.3) - 0.5) * 0.18);
+  vec3 gMac = vec3(0.0);
   // How much ground one pixel covers. Past a few texels the mip chain has
   // averaged every normal flat, so the second fetch is skipped: gNear is 1
   // close in and 0 by the time a pixel spans ~5 texels of the finest layer.
   float gPix = length(fwidth(vGPos.xz));
   gNear = clamp(1.6 - gPix * 45.0, 0.0, 1.0);
+  // (round 113) how far into the range where the tile is only its mean
+  float gFarW = clamp(gPix * 45.0 - 1.2, 0.0, 1.0) * uGFarAmt;
   // (round 108) THE TILING IS COMPILED IN, not chosen per pixel: with all
   // three modes in one program every pixel carried the registers of the
   // two it was not using, and the ground was a third of the GPU's frame.
@@ -236,11 +294,19 @@ float gVNoise(vec2 p) {
 #else
       vec4 at = textureGrad(uGAlb, vec3(uv, li), ddx, ddy);
 #endif
+      float gFw = gFarW * uGFarL[i];
+      if (gFw > 0.0) {
+        // the same surface at six times the size, turned off the near grid
+        vec2 uf = mat2(0.799, -0.602, 0.602, 0.799) * uv * uGFar + vec2(0.37, 0.61);
+        vec4 af = textureGrad(uGAlb, vec3(uf, li), ddx * uGFar, ddy * uGFar);
+        at = mix(at, af, gFw);
+      }
       // height-weighted: the taller surface wins, pixel by pixel
       float x = 0.15 + at.a, x2 = x * x;
       float b = w * x2 * x2 * x;
       vec3 a = at.rgb * (at.rgb * (at.rgb * 0.305306011 + 0.682171111) + 0.012522878);   // sRGB -> linear, fitted
       ga += b * a / uGMean[i];
+      gMac += b * mix(uGMacLo[i], uGMacHi[i], gMv);
       if (gNear > 0.0) {
 #if G_TILE == 2
         vec2 nh = textureGrad(uGNh, vec3(uv + gO1, li), ddx, ddy).rg * h1;
@@ -261,6 +327,7 @@ float gVNoise(vec2 p) {
   if (gs > 0.0) {
     ga /= gs; gN2 /= gs; gH = gh / gs;
     diffuseColor.rgb *= mix(vec3(1.0), ga, uGDetail);
+    diffuseColor.rgb *= mix(vec3(1.0), gMac / gs, uGMacAmt);
   }
 }
 `;

@@ -16027,12 +16027,24 @@ function packedGeometry(e) {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(A.N, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(A.C, 3));
     const hk = new Float32Array(n * 3);
-    if (e.kk && e.kinds) {
+    if (e.kd) {
+      // a tree's: its kind a byte a corner, its sway 16-bit over `swmax`
+      const kd = bytes(e.kd), sw = e.sw ? new Uint16Array(bytes(e.sw).buffer) : null, sm = e.swmax || 0;
+      for (let i = 0; i < n; i++) { hk[i * 3] = kd[i]; hk[i * 3 + 1] = sw ? sw[i] / 65535 * sm : 0; }
+    } else if (e.kk && e.kinds) {
       const kk = bytes(e.kk);
       for (let i = 0; i < n; i++) { const k = e.kinds[kk[i]] || e.kinds[0]; hk[i * 3] = k[0]; hk[i * 3 + 1] = k[1]; hk[i * 3 + 2] = k[2]; }
     } else if (e.kind) for (let i = 0; i < n; i++) { hk[i * 3] = e.kind[0]; hk[i * 3 + 1] = e.kind[1]; hk[i * 3 + 2] = e.kind[2]; }
     g.setAttribute('hedge', new THREE.Float32BufferAttribute(hk, 3));
-    g.setAttribute('hedgeRim', new THREE.Float32BufferAttribute(A.N.slice(), 3));
+    let rim = A.N.slice();
+    if (e.rim) {                                  // a crown's rim normal (the leaf cut's), unit length
+      const rr = new Int8Array(bytes(e.rim).buffer);
+      for (let i = 0; i < n; i++) {
+        const x = rr[i * 3] / 127, y = rr[i * 3 + 1] / 127, z = rr[i * 3 + 2] / 127, l = Math.hypot(x, y, z) || 1;
+        rim[i * 3] = x / l; rim[i * 3 + 1] = y / l; rim[i * 3 + 2] = z / l;
+      }
+    }
+    g.setAttribute('hedgeRim', new THREE.Float32BufferAttribute(rim, 3));
     g.computeBoundingSphere();
     return g;
   }
@@ -19269,7 +19281,7 @@ const PROP_VARIANT_H = {
   // spruce with the 1.12 it stands taller): `_simV` takes 85% of them
   // (round 113) regrown in Blender (tools/blender/trees.py): the tops off the
   // pack at its own 2.53 m a unit (the oak's 4.93), poplars 8-9, apples 10-11
-  tree: { broad: [8.90, 10.10, 9.47, 9.18, 9.83, 9.56, 9.71, 10.20, 14.36, 14.61, 5.02, 4.45], conifer: [10.65, 10.02, 10.02, 10.45, 10.03, 10.39] },
+  tree: { broad: [8.90, 10.10, 9.47, 9.18, 9.83, 9.56, 9.71, 10.20, 14.74, 15.01, 5.02, 4.45], conifer: [10.65, 10.02, 10.02, 10.45, 10.03, 10.39] },
   oak: [15.31, 13.85, 14.66, 14.85], pine: [19.0, 19.4, 19.26, 19.12, 19.3, 19.9],
   bush: [1.62, 1.60, 1.73, 1.65, 1.62, 1.60], scrub: [0.99, 0.93, 0.94, 0.97, 1.02, 0.99],
   // the ruined wall by its stone too (`_wallVariant` seeds with the palette)
@@ -21202,6 +21214,13 @@ class Obstacles {
   _deadTreeVariant(i) {
     this._deadGeos = this._deadGeos || [];
     if (this._deadGeos[i]) return this._deadGeos[i];
+    // (round 113, second batch) GROWN IN BLENDER (tools/blender/trees.py
+    // `build_dead`): limbs and forks by the living trees' pipe rule, bare, a
+    // third snapped short, the top broken off, bark weathered silver; each to
+    // the top of the variant below, which `PROP_VARIANT_H.deadtree` is
+    // measured off. The page's dead tree is the fallback.
+    const pk = window.TREE_PACK && window.TREE_PACK.dead;
+    if (pk && pk[i]) return (this._deadGeos[i] = packedGeometry(pk[i]));
     const r = mulberry32(4700 + i * 61);
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
