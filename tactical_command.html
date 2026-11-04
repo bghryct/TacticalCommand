@@ -21678,6 +21678,7 @@ class Obstacles {
     this._rockGeos = this._rockGeos || {};
     const slot = pal + i;
     if (this._rockGeos[slot]) return this._rockGeos[slot];
+    { const pg = this._packed113('rock_' + pal, i); if (pg) return (this._rockGeos[slot] = pg); }
     const r = mulberry32(4409 + i * 131 + ({ sand: 7, lime: 13, coral: 17, basalt: 19, granite: 23 }[pal] || 0));
     const PALS = {
       sand:    { c: [[0.520, 0.450, 0.340], [0.480, 0.410, 0.300], [0.560, 0.490, 0.370], [0.440, 0.370, 0.270]], dry: 1, strata: 0.07 },
@@ -21786,6 +21787,23 @@ class Obstacles {
    *  (weathered; moss on the tops unless `hedge.z` says dry — steel and paint
    *  are always dry), 0 earth. Snow lies on all of it. The occlusion is baked
    *  into the vertex colours: darker toward the ground and underneath. */
+  /** (round 113, third batch) A SMALL PROP MODELLED IN BLENDER, when the pack
+   *  has it (tools/blender/doodads.py, baked by tools/blender/props.py into
+   *  assets/props.pack.js): variant `i` of `key`, each built to the top of the
+   *  page variant it replaces — the simulation's `PROP_VARIANT_H` is measured
+   *  off those. Bevelled edges, planked and battened cases, chimed and hooped
+   *  drums, sheaves bound at the waist, a roped rick, boulders broken along
+   *  their stone's grain, a cart on spoked wheels, riveted angle iron, and
+   *  Cycles' occlusion in the colour. `dry` bleaches the stone (the desert's).
+   *  The page's builders below are the fallback; `game.propPack113 = false`
+   *  before a map loads. */
+  _packed113(key, i, dry) {
+    const pk = window.PROP_PACK && window.PROP_PACK[key];
+    if (!pk || !pk.length || (window.game && window.game.propPack113 === false)) return null;
+    const g = packedGeometry(pk[i % pk.length]); g.userData.packed = true;
+    if (dry) { const h = g.attributes.hedge; for (let k = 0; k < h.count; k++) if (h.getX(k) === 4) h.setZ(k, 1); }
+    return g;
+  }
   _kit() {
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const norm = v => { const l = hyp3(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
@@ -21889,6 +21907,7 @@ class Obstacles {
     const dry = this._dry(), slot = i + (dry ? 'd' : '');
     this._concGeos = this._concGeos || {};
     if (this._concGeos[slot]) return this._concGeos[slot];
+    { const pg = this._packed113('concrete', i, dry); if (pg) return (this._concGeos[slot] = pg); }
     const r = mulberry32(5501 + i * 71), K = this._kit(), S = [4, 0, dry];
     const tone = 0.94 + r() * 0.1, C = [0.54 * tone, 0.53 * tone, 0.49 * tone], D = [C[0] * 0.8, C[1] * 0.8, C[2] * 0.8], REBAR = [0.30, 0.17, 0.10];
     const broken = i % 2 === 1, H = 1.22;
@@ -21922,6 +21941,7 @@ class Obstacles {
     const dry = this._dry(), slot = i + (dry ? 'd' : '');
     this._teethGeos = this._teethGeos || {};
     if (this._teethGeos[slot]) return this._teethGeos[slot];
+    { const pg = this._packed113('teeth', i, dry); if (pg) return (this._teethGeos[slot] = pg); }
     const r = mulberry32(6607 + i * 37), K = this._kit(), S = [4, 0, dry];
     K.box(K.at(0, 0.03, 0), 0.76, 0.07, 0.66, [0.44, 0.43, 0.40], S);
     const rows = [
@@ -21945,6 +21965,7 @@ class Obstacles {
     const slot = kind + i;
     this._caseGeos = this._caseGeos || {};
     if (this._caseGeos[slot]) return this._caseGeos[slot];
+    { const pg = this._packed113(kind, i); if (pg) return (this._caseGeos[slot] = pg); }
     const r = mulberry32(7103 + i * 29 + kind.length * 1009), K = this._kit(), W = K.WOOD, P = [4, 0, 1];
     const PINE = [0.53, 0.43, 0.29], OLIVE = [0.29, 0.30, 0.19], FGREY = [0.33, 0.34, 0.31], BAND = [0.55, 0.44, 0.12], CAN = [[0.24, 0.26, 0.17], [0.30, 0.31, 0.28], [0.36, 0.30, 0.18]];
     // a case: body, battens round both ends, a rope becket at each end
@@ -21987,6 +22008,7 @@ class Obstacles {
   _drumVariant(i) {
     this._drumGeos = this._drumGeos || [];
     if (this._drumGeos[i]) return this._drumGeos[i];
+    { const pg = this._packed113('drum', i); if (pg) return (this._drumGeos[i] = pg); }
     const r = mulberry32(8209 + i * 53), K = this._kit(), P = [4, 0, 1];
     const PAINTS = [[0.27, 0.29, 0.18], [0.30, 0.31, 0.29], [0.34, 0.17, 0.11], [0.16, 0.16, 0.15]];
     const drum = (x, z, lying, yaw, paint) => {
@@ -22019,6 +22041,7 @@ class Obstacles {
     const slot = (stack ? 's' : 'h') + i;
     this._hayGeos = this._hayGeos || {};
     if (this._hayGeos[slot]) return this._hayGeos[slot];
+    { const pg = this._packed113(stack ? 'haystack' : 'hay', i); if (pg) return (this._hayGeos[slot] = pg); }
     const r = mulberry32(9311 + i * 61 + (stack ? 500 : 0)), K = this._kit(), W = K.WOOD;
     const STRAW = [0.60, 0.50, 0.27], EARS = [0.52, 0.41, 0.20], OLD = [0.44, 0.38, 0.25];
     if (stack) {
@@ -22059,6 +22082,7 @@ class Obstacles {
     const slot = (stack ? 's' : 'w') + i;
     this._logGeos = this._logGeos || {};
     if (this._logGeos[slot]) return this._logGeos[slot];
+    { const pg = this._packed113(stack ? 'logstack' : 'logwall', i); if (pg) return (this._logGeos[slot] = pg); }
     const r = mulberry32(4801 + i * 17 + (stack ? 300 : 0)), K = this._kit(), W = K.WOOD;
     const BARK = [0.25, 0.20, 0.15], CUT = [0.60, 0.48, 0.32];
     const log = (x0, y, z0, x1, z1, rad) => {
@@ -22087,6 +22111,7 @@ class Obstacles {
   _graveVariant(i) {
     this._graveGeos = this._graveGeos || [];
     if (this._graveGeos[i]) return this._graveGeos[i];
+    { const pg = this._packed113('grave', i); if (pg) return (this._graveGeos[i] = pg); }
     const r = mulberry32(2203 + i * 89), K = this._kit(), S = K.STONE;
     const t = 0.88 + r() * 0.2, STONE = [[0.50, 0.49, 0.46], [0.56, 0.54, 0.49], [0.42, 0.42, 0.41]][i % 3].map(v => v * t);
     const DK = STONE.map(v => v * 0.82);
@@ -22124,6 +22149,7 @@ class Obstacles {
   _fenceVariant(i) {
     this._fenceGeos = this._fenceGeos || [];
     if (this._fenceGeos[i]) return this._fenceGeos[i];
+    { const pg = this._packed113('fence', i); if (pg) return (this._fenceGeos[i] = pg); }
     const r = mulberry32(3907 + i * 23), K = this._kit(), W = K.WOOD;
     const WOOD = [0.38, 0.32, 0.24], L = TILE / 2;
     // A LINE prop keeps its length (`PROP_LINE_X`): one post a 6 m piece, built
@@ -22152,6 +22178,7 @@ class Obstacles {
   _cartVariant(i) {
     this._cartGeos = this._cartGeos || [];
     if (this._cartGeos[i]) return this._cartGeos[i];
+    { const pg = this._packed113('cart', i); if (pg) return (this._cartGeos[i] = pg); }
     const r = mulberry32(1709 + i * 13), K = this._kit(), W = K.WOOD, IRON = [0.15, 0.14, 0.13];
     const WOOD = [0.40, 0.33, 0.24].map(v => v * (0.9 + r() * 0.15)), DKW = WOOD.map(v => v * 0.8);
     // pitched about the axle until the shaft tips reach the ground (0.28), or
@@ -22192,6 +22219,7 @@ class Obstacles {
   _barricadeVariant(i) {
     this._barGeos = this._barGeos || [];
     if (this._barGeos[i]) return this._barGeos[i];
+    { const pg = this._packed113('barricade', i); if (pg) return (this._barGeos[i] = pg); }
     const r = mulberry32(6121 + i * 47), K = this._kit(), W = K.WOOD, P = [4, 0, 1];
     const WOOD = [0.36, 0.30, 0.22], SETT = [0.42, 0.40, 0.37], HESS = [0.47, 0.415, 0.29], RUB = [0.36, 0.33, 0.30];
     const DOORS = [[0.20, 0.28, 0.22], [0.25, 0.30, 0.36], [0.36, 0.22, 0.16]];
@@ -22644,6 +22672,7 @@ class Obstacles {
    *  neither the moss nor the leaves of the shared prop shader). */
   _hedgehogGeo() {
     if (this._hhGeo) return this._hhGeo;
+    { const pg = this._packed113('hedgehog', 0); if (pg) return (this._hhGeo = pg); }
     const r = mulberry32(7717);
     const pos = [], nor = [], col = [];
     const norm = v => { const l = hyp3(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
