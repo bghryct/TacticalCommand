@@ -20901,9 +20901,12 @@ class Obstacles {
     this._coniferGeos = this._coniferGeos || [];
     const slot = pine ? 8 + i : i;
     if (this._coniferGeos[slot]) return this._coniferGeos[slot];
-    // Grown in Blender when the pack is there (see `_treeVariant`): spruce as
-    // whorls of drooping branches carrying flat fronds, Scots pine as a long
-    // bole going orange toward a cloud of crown in the top third.
+    // Grown in Blender when the pack is there (tools/blender/trees.py, round
+    // 113 third pass): more tiers than these and leaner, each a fan from an
+    // inner ring to a ragged rim of drooping tips, the year's growth light at
+    // the tips, Cycles' occlusion between the tiers; the pine on a bole going
+    // orange with dead stubs below its crown. Each to this variant's top (the
+    // simulation measures `PROP_VARIANT_H` off it) and in about its triangles.
     const pk = window.TREE_PACK && window.TREE_PACK[pine ? 'pine' : 'conifer'];
     if (pk && pk.length) return (this._coniferGeos[slot] = packedGeometry(pk[i % pk.length]));
     const r = mulberry32(5100 + i * 71 + (pine ? 433 : 0));
