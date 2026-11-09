@@ -26568,6 +26568,8 @@ const FRAG_WALL_MASONRY = 0.08;
 // count against a way out (`_fleeFire`).
 const STACK_R = 16, STACK_OFF = 0.36, STACK_STEP = 0.24, STACK_GAP = 1.2, NADE_ROOM_WAIT = 2.2, STACK_MAX = 25, STACK_ARRIVE = 0.3;
 const FLEE_FOE_R = 10;
+// (round 115) how far above a storey's floor a man is on a flight's treads, not on the floor (u)
+const STAIR_STEP = 0.12;
 // (round 115) giving up a house (`Game._houseFallBack`): enemies known within
 // FALLBACK_R (u) at FALLBACK_ODDS to one against his side's men round him;
 // every man looked at every FALLBACK_S s; not sent back in for FALLBACK_HOLD s
@@ -28082,6 +28084,8 @@ class Pathfinder {
       // pulled straight past the door's edge it went through the wall beside
       // it (`Structures.moveSpan`); the search keeps the cells either side
       if (live && this.foot && !this.crushing && !(window.game && window.game.clear115 === false) && !this._doorLeg(px, pz, cx, cz, L, x1, z1, dx, dz)) return false;
+      // (round 115) …and a pulled leg does not go under a flight from its foot either (`underFlight`)
+      if (live && this.foot && !this.crushing && S.underFlight && !(window.game && window.game.stair115 === false) && S.underFlight(px, pz, L, cx - px, cz - pz)) return false;
       // (round 110) …nor past the corner of a HOUSE: the walls on the far side
       // of the corner it cuts (a man's `canCross` has always asked these)
       if (live && this.crushing && cx !== px && cz !== pz && this._cornerWall(px, pz, L, cx - px, cz - pz)) return false;
@@ -28357,6 +28361,8 @@ class Pathfinder {
       return (Math.max(hx, hz) + 0.414 * Math.min(hx, hz)) * 1.01 + Math.abs(eL - l) * 2.6;
     };
 
+    // (round 115) under a flight from its foot: the rule both searches keep
+    const stairHead = !!(S && S.underFlight) && !(window.game && window.game.stair115 === false);
     while (heap.size && iter++ < CAP) {
       if (TIMED && (iter & PATH_CLOCK_EVERY) === 0 && performance.now() > deadline) break;
       const cur = heap.pop();
@@ -28401,6 +28407,8 @@ class Pathfinder {
             // (round 110) a diagonal step past the corner of a house clips it
             if (dx !== 0 && dz !== 0 && this._cornerWall(cx, cz, cl, dx, dz)) continue;
           } else if (!S.canCross(cx, cz, cl, dx, dz)) continue;
+          // (round 115) …nor under a flight from its foot (`underFlight`)
+          else if (stairHead && S.underFlight(cx, cz, cl, dx, dz)) continue;
         }
         let climbCost = 0;
         if (cl === 0) {
@@ -28562,6 +28570,9 @@ class Pathfinder {
     if (!W.owns(T.h, 'H') || !W.owns(T.type, 'TY') || !W.owns(O.occupied, 'OCC')) return null;
     const any = !!(S && S.any), walls = !!(S && S.wallM);
     if (walls && !(W.owns(S.wallM, 'WALLM') && W.owns(S.wallK, 'WALLK') && W.owns(S.floorM, 'FLOORM') && W.owns(S.feat, 'FEAT'))) return null;
+    // (round 115) the stair-head rule (`underFlight`), on unless switched off
+    if (W.exports && W.exports.set_stairhead) W.exports.set_stairhead(gm && gm.stair115 === false ? 0 : 1);
+    else if (!(gm && gm.stair115 === false)) return null;      // an old module without the rule: the JavaScript search has it
     // Speed and passability by terrain type: a few dozen entries, refreshed
     // every search because the Forge can add a surface at any time.
     const SP = W.view('SPEED', 256), PA = W.view('PASS', 256);
@@ -35834,7 +35845,10 @@ class Unit {
     // `Structures.resolveLevel`. Doing it from geometry rather than from the
     // path is what keeps a first-person player, a pathed squad and a man
     // shoved sideways by his neighbours all obeying the same rule.
-    const climb = this._routeClimbs();
+    // (round 115) the man you ride climbs a flight by walking onto its treads
+    // or up its axis, not by crossing its cell (`_fpvOnTreads`)
+    const climb = (this.game.fpv && this.game.fpv.unit === this && this.game.stair115 !== false)
+      ? this._fpvOnTreads() : this._routeClimbs();
     if (this.game.structures && this.game.structures.any && !this.garrison) {
       const S = this.game.structures, L0 = this.lvl | 0;
       let L = S.resolveLevel(this.pos.x, this.pos.z, L0, this.pos.y);
@@ -38284,6 +38298,20 @@ class Unit {
    * the moment he had climbed the last. No route (and first person): undefined,
    * the flight's own height, as before.
    */
+  /** (round 115) The man you ride is on a flight's treads if he is within
+   *  STAIR_STEP of them (he walked onto them, up or down), or walking up its
+   *  axis; crossing its cell at floor level he keeps his floor. Undefined off
+   *  a flight. */
+  _fpvOnTreads() {
+    const g = this.game, S = g.structures, L = this.lvl | 0;
+    const gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z), f = S && S.any ? S.featAt(gx, gz, L) : 0;
+    if (!f || (f & 7) === 3) return undefined;
+    if (Math.abs(g.groundYAt(this.pos.x, this.pos.z, L, true) - this.pos.y) <= STAIR_STEP) return true;
+    const d = SHUFFLE_EDGE[(f >> 3) & 3], p = this.path && this.path[0];
+    if (!p) return false;
+    const mx = p.x - this.pos.x, mz = p.z - this.pos.z, ml = hyp(mx, mz) || 1;
+    return (mx * d[0] + mz * d[1]) / ml > 0.6;
+  }
   _routeClimbs() {
     const p = this.path, S = this.game.structures;
     if (!p || !p.length || !S || !S.any || this.def.vehicle || (this.game.fpv && this.game.fpv.unit === this)) return undefined;
@@ -51279,6 +51307,12 @@ class Game {
       const gx = worldToCell(nx), gz = worldToCell(nz);
       if (!inGrid(gx, gz)) return false;
       if (!this._crossOk(u.pos.x, u.pos.z, nx, nz, u.lvl, !u.def.vehicle)) return false;   // a wall in the way (round 115: a door's jambs too)
+      // (round 115) …and not under a flight from its foot, at floor level, as
+      // the search has it (`Structures.underFlight`); on the treads he climbs
+      if (S && !u.def.vehicle && this.stair115 !== false && (gx !== worldToCell(u.pos.x) || gz !== worldToCell(u.pos.z))) {
+        const ox = worldToCell(u.pos.x), oz = worldToCell(u.pos.z), L = u.lvl | 0;
+        if (u.pos.y < S.floorY(ox, oz, L) + STAIR_STEP && S.underFlight(ox, oz, L, gx - ox, gz - oz)) return false;
+      }
       const want = S ? S.resolveLevel(nx, nz, u.lvl, u.pos.y) : 0;
       if (want > 0) return this.pathfinder.passableL(gx, gz, want);
       // (round 113) on foot, through the trees and the scrub (`FOOT_THROUGH`)
@@ -51742,6 +51776,13 @@ class Game {
                            : Math.sin(this.time * 1.35) * 0.007) * K_FIG;        // breathing
       const sway = (walking ? Math.sin(f.bob * 0.5) * 0.03 : Math.sin(this.time * 0.9) * 0.006) * K_FIG;
       ey = u.pos.y + f.eyeH + bob;
+      // (round 115) …and the feet's own jumps (onto a flight's treads, a kerb,
+      // a rubble heap) reach the eye over a few frames, not in one
+      if (this.stair115 !== false) {
+        const fy = u.pos.y;
+        f.footY = f.footY == null || Math.abs(fy - f.footY) > 1.5 ? fy : lerp(f.footY, fy, Math.min(1, (dt || 0.016) * 14));
+        ey += f.footY - fy;
+      }
       // (round 116) OVER A HEDGE BANK, NOT THROUGH IT (`vault116`): the RTS lets a man scramble
       // through the bocage (`FOOT_THROUGH`, HEDGE_FOOT_SLOW) at ground level, and the eye
       // went through the earth with him. Up the bank and down the far side, at a climb's pace.
@@ -58958,6 +58999,20 @@ class Game {
     const per = Math.min(n, Math.max(4, Math.ceil(n * (dt || 0.05) / FALLBACK_S)));
     let c = this._fbCur | 0;
     const now = this.time;
+    // the men on their way to a back window: at it, over the sill and away
+    for (const u of U) {
+      const v = u._vaultTo;
+      if (!v) continue;
+      if (!u.alive || u.downed || now - v.t > 30 || u.explicit) { u._vaultTo = null; continue; }
+      if (worldToCell(u.pos.x) !== v.x || worldToCell(u.pos.z) !== v.z || (u.lvl | 0) !== 0 || (u.path.length && hyp(u.pos.x - cellCenter(v.x), u.pos.z - cellCenter(v.z)) > TILE * 0.3)) continue;
+      const dd = SHUFFLE_EDGE[v.e];
+      u._vaultTo = null; u.path = []; u.state = 'idle';
+      u.pos.x = cellCenter(v.x) + dd[0] * (TILE * 0.5 + MAN_CLEAR); u.pos.z = cellCenter(v.z) + dd[1] * (TILE * 0.5 + MAN_CLEAR);
+      u.pos.y = this.groundYAt(u.pos.x, u.pos.z, 0);
+      this._vaults = (this._vaults || 0) + 1;
+      const wasAI = this._aiOrders; this._aiOrders = true;
+      try { u.orderMove(cellCenter(v.ox), cellCenter(v.oz), false, 'fast', 0); } finally { this._aiOrders = wasAI; }
+    }
     for (let k = 0; k < per; k++) {
       c = c + 1 >= n ? 0 : c + 1;
       const u = U[c];
@@ -59018,6 +59073,29 @@ class Game {
         px = w.x; pz = w.z;
       }
       if (!ex || hyp(ex.x - fgx, ex.z - fgz) < d0) ok = false;
+    }
+    if (!ok && this.vault115 !== false && (u.lvl | 0) === 0) {
+      // (round 115) …OR OUT OF A GROUND-FLOOR WINDOW ON THAT SIDE: a sill at
+      // a metre is climbed. Most houses have one door, on the street; the man
+      // goes out of a back window instead of dying at the front one.
+      // the nearest ground-floor room within 4 cells with a window on the far side
+      let bw = null, bwd = Infinity;
+      for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+        const x = gx + dx, z = gz + dz, dd2 = dx * dx + dz * dz;
+        if (dd2 >= bwd || !S.has(x, z) || S.insideAt(x, z, 0) < 0.5) continue;
+        for (let e = 0; e < 4; e++) {
+          if (S.wallKind(x, z, 0, e) !== window.Structures.K_WINDOW || !S.wallMat(x, z, 0, e)) continue;
+          const dd = SHUFFLE_EDGE[e], ox = x + dd[0], oz = z + dd[1];
+          if (!inGrid(ox, oz) || !this.pathfinder.passable(ox, oz) || roofed(ox, oz) || (S.has(ox, oz) && S.insideAt(ox, oz, 0) >= 0.35)) continue;
+          if (hyp(ox - fgx, oz - fgz) < d0 + 1) continue;
+          bwd = dd2; bw = { x, z, e }; break;
+        }
+      }
+      if (bw) {
+        const wasAI2 = this._aiOrders; this._aiOrders = true;
+        try { if (bw.x === gx && bw.z === gz) { u.path = []; u.state = 'idle'; } else u.orderMove(cellCenter(bw.x), cellCenter(bw.z), false, 'fast', 0); } finally { this._aiOrders = wasAI2; }
+        if (bw.x === gx && bw.z === gz || (u.path.length && !u._pathPartial)) { u._vaultTo = { x: bw.x, z: bw.z, e: bw.e, ox: best.x, oz: best.z, t: this.time }; return true; }
+      }
     }
     if (!ok) { u.path = []; u.state = 'idle'; u._strSpot = key; return false; }
     return true;

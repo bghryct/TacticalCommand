@@ -1267,6 +1267,30 @@
     this.spanLo = lo; this.spanHi = hi;
     return 2;
   };
+  /**
+   * (round 115) NOBODY WALKS UNDER A FLIGHT FROM ITS FOOT. A stair cell is a
+   * node on its own storey, and both searches crossed it level in any
+   * direction — out through its HIGH end at floor height, under the treads,
+   * into the room beneath the landing. A pathed man did it at floor height
+   * (`walkY`'s `flat`); a man in first person walking that route climbed the
+   * flight instead and came out on the landing (Ortona, a real battle). There
+   * is no headroom under the low half of a flight, so at floor level a flight
+   * cell is not crossed across its high end (out of it or into it), and not
+   * diagonally; its foot, its sides and the run between its two cells are as
+   * before. True when the step (x, z, L) + (dx, dz) is one of those.
+   */
+  Structures.prototype.underFlight = function (x, z, L, dx, dz) {
+    if (!this.feat || !this.inb(x, z, L)) return false;
+    var fa = this.feat[this.li(x, z, L)], nx = x + dx, nz = z + dz;
+    var fb = this.inb(nx, nz, L) ? this.feat[this.li(nx, nz, L)] : 0;
+    if ((fa & 7) === F_LADDER) fa = 0;
+    if ((fb & 7) === F_LADDER) fb = 0;
+    if (!fa && !fb) return false;
+    if (dx && dz) return true;
+    if (fa && ((fa >> 5) & 3) !== P_LOW) { var da = EDGE_D[(fa >> 3) & 3]; if (da[0] === dx && da[1] === dz) return true; }
+    if (fb && ((fb >> 5) & 3) !== P_LOW) { var db = EDGE_D[(fb >> 3) & 3]; if (db[0] === -dx && db[1] === -dz) return true; }
+    return false;
+  };
   /** The same question, but between two cells given as a delta. Diagonals need
    *  both orthogonal surfaces open — you cannot slip through a corner. */
   Structures.prototype.canCross = function (gx, gz, L, dx, dz) {
