@@ -2146,6 +2146,14 @@
 
   // ---- fire ---------------------------------------------------------------
   var MAX_FIRES = 200;
+  // (round 115) A TIMBER HOUSE TAKES MINUTES TO GO UP. Every burning piece
+  // reached for the next one every 2.4-5.6 s and burned through in ~30 s, so a
+  // village went from one lit wall to 126 fires in a minute, and a man in a
+  // room was dead within two seconds of its first flame. In the game (the
+  // instance's `game.fire115` not false): spreading x`spread`, burning x`burn`,
+  // and `heatAt` says how far a fire has grown — smoke for its first
+  // `smoke` seconds, then flames over `grow` more.
+  var FIRE_RATE = { spread: 10, burn: 0.25, smoke: 25, grow: 90 };
   /**
    * A wall is ONE surface with two addresses, and fire has to know that. Left
    * un-canonicalised, a burning wall spreads into the cell on its other side,
@@ -2177,7 +2185,7 @@
     var key = this._fireKey(ref);
     for (var i = 0; i < this.fires.length; i++) if (this.fires[i].key === key) return false;
     var c = ref.kind === 'wall' ? this._canonWall(ref.gx, ref.gz, ref.L, ref.e) : ref;
-    this.fires.push({ key: key, kind: ref.kind, gx: c.gx, gz: c.gz, L: c.L, e: c.e || 0, t: 0, spread: 2.2 + Math.random() * 2.5 });
+    this.fires.push({ key: key, kind: ref.kind, gx: c.gx, gz: c.gz, L: c.L, e: c.e || 0, t: 0, spread: (2.2 + Math.random() * 2.5) * this._fireK('spread') });
     return true;
   };
   /** Set light to anything in a cell that will take — the entry point for
@@ -2193,6 +2201,27 @@
   Structures.prototype._unignite = function (ref) {
     var key = this._fireKey(ref);
     for (var i = 0; i < this.fires.length; i++) if (this.fires[i].key === key) { this.fires.splice(i, 1); return; }
+  };
+  /** (round 115) The fire model's pace (FIRE_RATE) in a game that has not
+   *  switched it off; 1 outside a game (the module's own tests). */
+  Structures.prototype._fireK = function (k) {
+    return (this.game && this.game.fire115 !== false) ? FIRE_RATE[k] : 1;
+  };
+  /** (round 115) HOW FAR THE FIRE IN THIS CELL HAS GROWN, 0..1: 0 while it is
+   *  smoke (its first FIRE_RATE.smoke seconds), 1 when it is a room ablaze —
+   *  the oldest piece alight in it or in a wall of it, on storey L. */
+  Structures.prototype.heatAt = function (gx, gz, L) {
+    var best = 0;
+    for (var i = 0; i < this.fires.length; i++) {
+      var f = this.fires[i];
+      if (L !== undefined && f.L !== L) continue;
+      var hit = f.gx === gx && f.gz === gz;
+      if (!hit && f.kind === 'wall') { var d = EDGE_D[f.e]; hit = f.gx + d[0] === gx && f.gz + d[1] === gz; }
+      if (!hit) continue;
+      var h = (f.t - FIRE_RATE.smoke) / FIRE_RATE.grow;
+      if (h > best) best = h > 1 ? 1 : h;
+    }
+    return best;
   };
   /** Is this cell alight? A burning wall is a surface between two rooms, and
    *  it is on fire in BOTH of them — the men on either side are in the heat. */
@@ -2226,7 +2255,7 @@
       // fire is smaller than that. Applied per frame it rounds to zero every
       // time and a timber house burns merrily for ever without losing a plank.
       // Bank it instead and spend it when it is worth a whole unit.
-      f.acc = (f.acc || 0) + m.fire * m.hp * dt / (18 + m.hp * 0.10);
+      f.acc = (f.acc || 0) + m.fire * m.hp * dt / (18 + m.hp * 0.10) * this._fireK('burn');
       var quantum = m.hp / 255;
       if (f.acc >= quantum) {
         var give = f.acc; f.acc = 0;
@@ -2234,7 +2263,7 @@
       }
       f.spread -= dt;
       if (f.spread <= 0) {
-        f.spread = 2.4 + Math.random() * 3.2;
+        f.spread = (2.4 + Math.random() * 3.2) * this._fireK('spread');
         this._spreadFrom(f);
       }
     }
@@ -3236,6 +3265,7 @@
     /** (round 115) a round is tested against a wall where it crosses it
      *  (`_rayCross`); false: at the next sample, as before */
     exactRay: true,
+    FIRE_RATE: FIRE_RATE,    // (round 115) the pace of a house fire (`_fireK`, `heatAt`)
     K_SOLID: K_SOLID, K_DOOR: K_DOOR, K_WINDOW: K_WINDOW, K_RUBBLE: K_RUBBLE, K_ARCH: K_ARCH,
     K_BREACH: K_BREACH, HOLE_COLS: HOLE_COLS, HOLE_ROWS: HOLE_ROWS, HOLE_FALL: HOLE_FALL, EDGE_BLAST: EDGE_BLAST,
     R_FLAT: R_FLAT, R_RIDGE_X: R_RIDGE_X, R_RIDGE_Z: R_RIDGE_Z,
