@@ -358,6 +358,8 @@
     'attribute float iGnd;',     // (round 114) the ground under a flipbook puff
     'uniform vec2 uAtlas;',
     'uniform vec2 uFlip;',       // (frames, on): blend between two frames of a simulated sheet
+    'uniform float uMode;',
+    'varying float vEr;',        // (round 114) how far age has eaten into the coverage
     'varying vec2 vUvF;',
     'varying vec2 vUvB;',
     'varying float vMix;',
@@ -366,6 +368,7 @@
     'varying float vDepth;',
     'void main() {',
     '  vColF = iCol;',
+    '  vEr = uFlip.y > 0.5 ? iUv.y : (uMode > 1.5 ? 1.0 - iCol.a : 0.0);',
     '  vSoft = 1.0;',
     '  if (uFlip.y > 0.5) {',
     '    float f = floor(iUv.x), G = 1.0 / uAtlas.x, f1 = min(f + 1.0, uFlip.x - 1.0);',
@@ -403,6 +406,8 @@
     'uniform float uMode;',    // 0 light (additive), 1 smoke (alpha), 2 fire-in-smoke (premultiplied)
     'uniform float uHeat;',    // how bright heat 1.0 is, linear — tone mapped after
     'uniform float uGlowOnly;', // 1 while PostFX draws the glow source: fire only, no smoke
+    'uniform float uHot;',     // how far up the fire ramp this sheet's hottest texel goes
+    'varying float vEr;',
     'uniform vec2 uFlip;',
     'varying vec2 vUvF;',
     'varying vec2 vUvB;',
@@ -427,7 +432,13 @@
     '  }',
     '  float fog = clamp(1.0 - exp(-uFogDensity * uFogDensity * vDepth * vDepth), 0.0, 1.0);',
     '  if (uEnc > 0.5) {',
-    '    float lit = pow(t.r, 2.2), cov = t.g * vColF.a, heat = t.b * t.b;',
+    // AGE EATS THE THIN PARTS FIRST (round 114). A puff that faded uniformly went
+    // from a shape to a paler copy of that shape, which is what a sticker does.
+    // Taking a threshold off the coverage keeps the dense knots dense while the
+    // edges tear away, for one subtraction.
+    '    float gc = t.g;',
+    '    if (vEr > 0.002) gc = clamp((gc - vEr) / max(0.06, 1.0 - vEr), 0.0, 1.0);',
+    '    float lit = pow(t.r, 2.2), cov = gc * vColF.a, heat = t.b * t.b * uHot;',
     '    vec4 e;',
     '    if (uMode < 0.5) {',
     // light: the particle colour is the flame's, and the hottest part goes white
@@ -528,6 +539,7 @@
         uMode: { value: premul ? 2 : additive ? 0 : 1 },
         uHeat: { value: o.heat || 1 },
         uGlowOnly: { value: 0 },
+        uHot: { value: o.hot || 1 },
         uFogColor: { value: new THREE.Color(0xa9c6dd) },
         uFogDensity: { value: 0.002 },
         uAdditive: { value: additive ? 1 : 0 },
@@ -602,7 +614,8 @@
     this.drag = new Float32Array(C);
     this.grav = new Float32Array(C);
     this.dirx = new Float32Array(C); this.dirz = new Float32Array(C);   // a muzzle flash's bore
-    this.flip = new Uint8Array(C); this.gnd = new Float32Array(C);      // (round 114) drawn from the simulated smoke sheet; the ground under it
+    this.flip = new Uint8Array(C);
+    this.fin = new Float32Array(C); this.gnd = new Float32Array(C);      // (round 114) drawn from the simulated smoke sheet; the ground under it
     this.n = 0;                          // live count; [0, n) is live, compacted
 
     var sh = sheets(), bk = BAKED;
@@ -622,7 +635,7 @@
       this.billowFrames = bk.billow.frames;
     }
     if (sh.lick) {
-      this.batches[5] = new Batch(scene, sh.lick, false, 256, { enc: true, premul: true, grid: bk.lick.grid, heat: bk.lick.heat, frames: bk.lick.frames });
+      this.batches[5] = new Batch(scene, sh.lick, false, 256, { enc: true, premul: true, grid: bk.lick.grid, heat: Math.min(1.6, bk.lick.heat), hot: 0.55, frames: bk.lick.frames });
       this.lickFrames = bk.lick.frames;
     }
     this.boomFrames = bk ? bk.boom.frames : 16;
@@ -670,7 +683,7 @@
         this.alpha[i] = this.alpha[last]; this.kind[i] = this.kind[last]; this.cell[i] = this.cell[last];
         this.stretch[i] = this.stretch[last]; this.drag[i] = this.drag[last]; this.grav[i] = this.grav[last];
         this.dirx[i] = this.dirx[last]; this.dirz[i] = this.dirz[last];
-        this.flip[i] = this.flip[last]; this.gnd[i] = this.gnd[last];
+        this.flip[i] = this.flip[last]; this.fin[i] = this.fin[last]; this.gnd[i] = this.gnd[last];
       }
     },
 
@@ -698,6 +711,7 @@
       this.grav[i] = o.gravity !== undefined ? o.gravity : 0;
       this.dirx[i] = o.dx || 0; this.dirz[i] = o.dz || 0;
       this.flip[i] = o.flip && this.billowFrames && (kind === K.SMOKE || kind === K.DUST || kind === K.TRAIL) ? 1 : 0;
+      this.fin[i] = o.fin || 0.3;
       if (this._fxD) {                  // inside an authored effect: see `K`
         var k = this.K;
         this.px[i] = this._ox + (o.x - this._ox) * k;
@@ -774,7 +788,11 @@
         var cr = this.cr[i], cg = this.cg[i], cb = this.cb[i];
         var cellIdx = this.cell[i];
         if (k === K.SMOKE || k === K.DUST || k === K.TRAIL) {
-          a *= Math.min(1, t * 2.2) * (t > 0.75 ? (1 - t) / 0.25 : 1);   // fade in AND out
+          // (round 114) A simulated puff fades in over seconds, not a share of its
+          // life (a column's puffs live 20 s: it stood a body-length off the fire
+          // while they came up), and fades out late: the erosion does the rest.
+          if (this.flip[i]) a *= Math.min(1, t * 4.5) * Math.min(1, this.maxLife[i] * (1 - t) / this.fin[i]);
+          else a *= Math.min(1, t * 2.2) * (t > 0.75 ? (1 - t) / 0.25 : 1);   // fade in AND out
         } else if (k === K.FIRE) {
           // A CHEMICAL FIRE DOES NOT COOL THROUGH AMBER, and this ramp was
           // applied to every flame particle in the game regardless of the
@@ -814,7 +832,10 @@
           // thins out by itself, so it only fades the last few frames away.
           var nf = this.boomFrames;
           cellIdx = Math.min(nf - 1, Math.floor((1 - t) * nf));
-          a *= this.enc ? (t < 0.1 ? t / 0.1 : 1) : (t > 0.85 ? (1 - t) / 0.15 : 1);
+          a *= this.enc ? 0.88 * (t < 0.55 ? t / 0.55 : 1) : (t > 0.85 ? (1 - t) / 0.15 : 1);
+          // (round 114) `a` under 1 eats the coverage (`vEr`): the thin skirt goes first.
+          // The sheet's later frames are lit paler: held back, or the column ends tan.
+          if (this.enc) { var bg = Math.max(0.3, Math.min(1, t * 1.1)); cr *= bg; cg *= bg; cb *= bg; }
         } else if (k === K.LICK) {
           a *= t < 0.15 ? t / 0.15 : 1;
         } else if (k === K.FBALL) {
@@ -853,7 +874,13 @@
           B.pos[at * 3] = this.px[i]; B.pos[at * 3 + 1] = this.py[i]; B.pos[at * 3 + 2] = this.pz[i];
           B.col[at * 4] = cr; B.col[at * 4 + 1] = cg; B.col[at * 4 + 2] = cb; B.col[at * 4 + 3] = a;
           B.size[at * 3] = sx; B.size[at * 3 + 1] = sy; B.size[at * 3 + 2] = this.rot[i];
-          B.uv[at * 2] = Math.min(B.frames - 1.001, (1 - t) * (B.frames - 1)); B.uv[at * 2 + 1] = 0;
+          if (k === K.LICK) { B.uv[at * 2] = Math.min(B.frames - 1.001, (1 - t) * (B.frames - 1)); B.uv[at * 2 + 1] = 0; }
+          else {
+            // the sheet's first frames are a knot a tenth of the cell across: start
+            // past them or a new puff is a dot. Then age eats the coverage (`vEr`).
+            var ag = 1 - t, er = ag > 0.3 ? (ag - 0.3) / 0.7 : 0;
+            B.uv[at * 2] = Math.min(B.frames - 1.001, (0.2 + ag * 0.8) * (B.frames - 1)); B.uv[at * 2 + 1] = er * er * 0.82;
+          }
           B.gnd[at] = k === K.LICK ? -1e4 : this.gnd[i];
           continue;
         }
@@ -1030,8 +1057,23 @@
           this.spawn(K.FLASH, { x: x, y: o.groundY + p * 0.45, z: z, size: p * 2.4, life: 0.07,
             cell: S.STAR, r: 1, g: 0.95, b: 0.84, a: 0.9, grow: p * 3 });
           this.spawn(K.BOOM, { x: x, y: o.groundY + gs * (0.5 - this.boomGround), z: z, size: gs,
-            life: Math.min(2.6, 1.15 + p * 0.16), grow: p * 0.22, rot: this.rnd(-0.05, 0.05), spin: 0,
-            r: gc.r, g: gc.g, b: gc.b, a: 1, drag: 0 });
+            life: Math.min(3.8, 1.7 + p * 0.22), grow: p * 0.22, rot: this.rnd(-0.05, 0.05), spin: 0,
+            // (round 114) the sheet's lit grey is dark: at the bare tint a column of
+            // earth was a black cut-out. Earth, and lit by the same sun as the field.
+            r: gc.r * 2.5, g: gc.g * 2.3, b: gc.b * 2.05, a: 1, drag: 0 });
+          // …AND WHAT THE COLUMN LEAVES IN THE AIR. The sprite ends in three seconds,
+          // and there was nothing where it had stood. A few big soft puffs up its
+          // height, coming up as it thins, drifting off on the wind.
+          var nc = Math.max(3, Math.round((3 + p * 0.8) * this.quality));
+          for (var ci = 0; ci < nc; ci++) {
+            var ch = crand();
+            this.spawn(K.SMOKE, { flip: 1, fin: 1.3,
+              x: x + this.rnd(-0.2, 0.2) * gs * (0.35 + ch), y: o.groundY + gs * (0.06 + ch * 0.5), z: z + this.rnd(-0.2, 0.2) * gs * (0.35 + ch),
+              vx: this.rnd(-0.3, 0.3), vy: this.rnd(0.15, 0.7), vz: this.rnd(-0.3, 0.3),
+              size: gs * this.rnd(0.26, 0.44) * (1 - ch * 0.25), grow: gs * this.rnd(0.02, 0.05),
+              life: this.rnd(5, 9) + p * 0.9, rot: this.rnd(-0.5, 0.5), spin: this.rnd(-0.08, 0.08),
+              r: gc.r * 0.85, g: gc.g * 0.76, b: gc.b * 0.66, a: this.rnd(0.26, 0.48), drag: 0.5 });
+          }
           return;
         }
         // A FIREBALL — fuel, ammunition, a vehicle going up: orange rolling
@@ -1077,12 +1119,12 @@
             x: x + this.rnd(-0.42, 0.42) * s, y: y + ls * 0.38, z: z + this.rnd(-0.42, 0.42) * s,
             vy: this.rnd(0.1, 0.45) * s, vx: this.rnd(-0.1, 0.1), vz: this.rnd(-0.1, 0.1),
             size: ls, grow: 0.12 * s, life: this.rnd(0.75, 1.3), rot: this.rnd(-0.14, 0.14), spin: this.rnd(-0.06, 0.06),
-            r: 0.16, g: 0.14, b: 0.13, a: this.rnd(0.82, 1), drag: 0.5,
+            r: 0.07, g: 0.055, b: 0.045, a: this.rnd(0.82, 1), drag: 0.5,
           });
         }
         if (crand() < 0.5) {
           this.spawn(K.FIRE, { x: x, y: y + 0.25 * s, z: z, size: this.rnd(1.6, 2.4) * s, life: this.rnd(0.3, 0.55), cell: S.GLOW,
-            r: 1, g: 0.5, b: 0.16, a: 0.3, drag: 0 });
+            r: 1, g: 0.42, b: 0.1, a: 0.22, drag: 0 });
         }
         if (crand() < 0.3 * n) {
           this.spawn(K.EMBER, {
@@ -1137,7 +1179,7 @@
             flip: 1, x: x + this.rnd(-0.7, 0.7) * s, y: y + this.rnd(0.1, 0.9) * s, z: z + this.rnd(-0.7, 0.7) * s,
             vx: this.rnd(-0.35, 0.35), vy: this.rnd(o.dense ? 0.22 : 0.7, o.dense ? 0.7 : 1.6) * s, vz: this.rnd(-0.35, 0.35),
             size: this.rnd(2.0, 3.4) * s, grow: this.rnd(0.35, 0.8) * s,
-            life: this.rnd(o.dense ? 6.5 : 3.0, o.dense ? 13 : 5.5), rot: this.rnd(-0.5, 0.5), spin: this.rnd(-0.08, 0.08),
+            life: this.rnd(o.dense ? 6.5 : 4.0, o.dense ? 13 : 8), rot: this.rnd(-0.5, 0.5), spin: this.rnd(-0.08, 0.08),
             r: bd * 1.04, g: bd, b: bd * 0.95, a: this.rnd(o.dense ? 0.55 : 0.34, o.dense ? 0.78 : 0.56), drag: 0.55,
           });
         }
@@ -1187,7 +1229,7 @@
             vx: Math.cos(da) * dsp, vy: this.rnd(0.15, 0.7) * up, vz: Math.sin(da) * dsp,
             size: this.rnd(1.3, 2.5) * s, grow: this.rnd(0.3, 0.7) * s,
             life: this.rnd(1.5, 3.2) * life, rot: this.rnd(-0.6, 0.6), spin: this.rnd(-0.1, 0.1),
-            r: cr * 0.8, g: cg * 0.8, b: cb * 0.8, a: this.rnd(0.2, 0.36) * (o.a || 1), drag: 2.4,
+            r: cr * 0.66, g: cg * 0.64, b: cb * 0.6, a: this.rnd(0.15, 0.3) * (o.a || 1), drag: 2.4,
           });
         }
         return;
@@ -1297,15 +1339,15 @@
       }
     },
 
-    debris: function (x, y, z, count, color) {
-      var n = Math.max(1, Math.round(count * this.quality));
+    debris: function (x, y, z, count, color, sc) {
+      var n = Math.max(1, Math.round(count * this.quality)), k = sc || 1;
       var c = new THREE.Color(color === undefined ? 0x3a3025 : color);
       for (var i = 0; i < n; i++) {
         var a = crand() * 6.283, sp = this.rnd(1.5, 5.5);
         this.spawn(K.DEBRIS, {
           x: x, y: y, z: z,
           vx: Math.cos(a) * sp, vy: this.rnd(2.5, 8), vz: Math.sin(a) * sp,
-          size: this.rnd(0.09, 0.24), life: this.rnd(0.9, 1.8), spin: this.rnd(-8, 8),
+          size: this.rnd(0.09, 0.24) * (crand() < 0.25 ? 2.6 : 1) * k, life: this.rnd(0.9, 1.8), spin: this.rnd(-8, 8),
           cell: S.CHUNK, r: c.r * 1.4, g: c.g * 1.4, b: c.b * 1.4, a: 1, gravity: 17, drag: 0.1,
         });
       }

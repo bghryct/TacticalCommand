@@ -10,7 +10,13 @@
  * its own requisition and never sees this.
  *
  * For each side:
- *   · the ARMY — the six with squad templates (assets/squads.js);
+ *   · the ARMY it is built on — the seven with squad templates
+ *     (assets/squads.js) — whose presets and batteries it starts from;
+ *   · (round 114) ANY OTHER ARMY OF ITS ALLIANCE beside it. The list holds the
+ *     whole alliance, an army filter narrows it (All by default), and one
+ *     force may draw on all of them: a Sherman beside a T-34 and Tommies. The
+ *     line is `ALLIANCES` below, for both sides alike: nothing crosses between
+ *     the Allies and the Axis. There are no points here, only MAX_SQUADS a row;
  *   · the MAP'S OWN FORCES (what the map deployed, or what the editor put on
  *     the field), or a list of squad templates — the same atoms the campaign
  *     requisitions — by preset or one at a time;
@@ -37,14 +43,43 @@
   var STORE = 'tc_battleSetup';
 
   var NATIONS = [
-    ['us', 'United States'], ['uk', 'Britain'], ['ger', 'Germany'],
-    ['sov', 'Soviet Union'], ['it', 'Italy'], ['fr', 'France'],
+    ['us', 'United States'], ['uk', 'Britain'], ['sov', 'Soviet Union'], ['fr', 'France'],
+    ['ger', 'Germany'], ['it', 'Italy'], ['jp', 'Japan'],
   ];
   var NAT_NAME = {};
   NATIONS.forEach(function (n) { NAT_NAME[n[0]] = n[1]; });
-  var BLOC = { us: 'allied', uk: 'allied', fr: 'allied', ger: 'axis', it: 'axis', sov: 'soviet' };
+  var BLOC = { us: 'allied', uk: 'allied', fr: 'allied', ger: 'axis', it: 'axis', jp: 'axis', sov: 'soviet' };
+  // (round 114) WHO MAY FIGHT IN ONE FORCE. `BLOC` above is whose batteries an
+  // army calls on, and there the Red Army stands alone; here it is an Ally.
+  var ALLIANCES = [
+    ['allied', 'Allies', ['us', 'uk', 'sov', 'fr']],
+    ['axis', 'Axis', ['ger', 'it', 'jp']],
+  ];
+  var ALLIANCE = {};
+  ALLIANCES.forEach(function (a) { a[2].forEach(function (id) { ALLIANCE[id] = a; }); });
+  // the short name on a row of the list and on the army filter
+  var TAG = { us: 'US', uk: 'UK', sov: 'USSR', fr: 'FR', ger: 'GER', it: 'ITA', jp: 'JPN' };
+  // (round 115) AN ARMY THE TEMPLATES NAME THAT THE TABLES ABOVE DO NOT — a
+  // roster added after them — joins the alliance its men fight for (`nationOf`
+  // of its first man) under its own code, rather than dropping off this screen
+  // unseen. The lists are the templates'; these tables only give them names.
+  var armiesSeen = -1;
+  function syncArmies() {
+    var all = TPL(), ids = Object.keys(all);
+    if (ids.length === armiesSeen || !(A && A.nationOf)) return;
+    armiesSeen = ids.length;
+    ids.forEach(function (id) {
+      var t = all[id], nat = t && t.nation;
+      if (!nat || ALLIANCE[nat] || !t.men || !t.men.length) return;
+      var b = A.nationOf(t.men[0]), al = ALLIANCES[b === 'axis' ? 1 : 0], code = String(nat).toUpperCase();
+      al[2].push(nat); ALLIANCE[nat] = al;
+      NAT_NAME[nat] = t.nationName || code; TAG[nat] = code.slice(0, 4);
+      BLOC[nat] = b === 'axis' || b === 'soviet' ? b : 'allied';
+      NATIONS.push([nat, NAT_NAME[nat]]);
+    });
+  }
   // FIRE_SUPPORT marks a battery 'us', 'ger' or 'both'. The Commonwealth and
-  // the French called on the allied list and Italy on the German one; the Red
+  // the French called on the allied list, Italy and Japan on the German one; the Red
   // Army's own — the 120 mm mortar, the guns, the rockets — are the 'both' rows.
   var FS_NATION = { allied: 'us', axis: 'ger', soviet: null };
   // the battalion mortars every side has, as `Game._grantMapSupport` gives them
@@ -83,8 +118,7 @@
   function clampI(v, a, b) { v = Math.round(+v || 0); return v < a ? a : v > b ? b : v; }
 
   /** The army a unit id belongs to, by the prefix every id is spelled with;
-   *  the unprefixed ones (sherman, stug, mg42…) by `nationOf`. Null for an
-   *  army with no squad templates (Japan, a custom faction). */
+   *  the unprefixed ones (sherman, stug, mg42…) by `nationOf`. */
   function armyOf(type) {
     var t = String(type || '');
     if (/^us/.test(t)) return 'us';
@@ -93,7 +127,7 @@
     if (/^sov/.test(t)) return 'sov';
     if (/^fr/.test(t)) return 'fr';
     if (/^it/.test(t)) return 'it';
-    if (/^jp/.test(t)) return null;
+    if (/^jp/.test(t)) return 'jp';
     var n = A && A.nationOf ? A.nationOf(t) : 'allied';
     return n === 'axis' ? 'ger' : n === 'soviet' ? 'sov' : n === 'allied' ? 'us' : null;
   }
@@ -119,6 +153,31 @@
       return (CAT_ORDER[a.cat] - CAT_ORDER[b.cat]) || (hq(a) - hq(b)) || (b.w - a.w) || (a.rp - b.rp) || (a.id < b.id ? -1 : 1);
     });
     return out;
+  }
+  /** (round 114) An army and the others of its alliance, it first. */
+  function comrades(nation) {
+    var al = ALLIANCE[nation];
+    return al ? [nation].concat(al[2].filter(function (a) { return a !== nation; })) : [nation];
+  }
+  /** Can these two armies stand in one force? */
+  function sameSide(a, b) { return !!ALLIANCE[a] && ALLIANCE[a] === ALLIANCE[b]; }
+  /** What a side's list holds: the whole alliance, its lead army's rows first
+   *  in each arm, or the one army `view` names. A view across the line is not
+   *  a view: it gets the alliance. */
+  function rosterOf(nation, view) {
+    if (sameSide(nation, view)) return templatesOf(view);
+    var out = [];
+    comrades(nation).forEach(function (a) { out = out.concat(templatesOf(a)); });
+    return out;
+  }
+  /** Squads of each army in a set of template counts. */
+  function perArmy(counts) {
+    var all = TPL(), o = {};
+    for (var id in (counts || {})) {
+      var t = all[id], n = counts[id] | 0;
+      if (t && n > 0) o[t.nation] = (o[t.nation] || 0) + n;
+    }
+    return o;
   }
   /** The commonest template of an arm — what a preset means by "a rifle
    *  squad". The headquarters is the `_hq` one, not the observer or the aid
@@ -154,7 +213,7 @@
    *  officer of an HQ, the gun of a gun team, the hull of a tank. Each key man
    *  on the field is one of the commonest template he keys, which takes its
    *  bearers out of the pool; what is left of the riflemen is rifle squads. */
-  function approx(units, team, nation) {
+  function approxOne(units, team, nation) {
     var all = TPL(), list = templatesOf(nation), counts = {}, pool = {};
     for (var i = 0; i < units.length; i++) {
       var u = units[i];
@@ -193,6 +252,26 @@
     }
     return counts;
   }
+  /** (round 114) …and the same of a side that mixes armies, as a few maps' do:
+   *  each man goes to the army of the alliance that fields him, the lead army
+   *  first, so a British Firefly on an American map stays when the player
+   *  starts to change that side. */
+  function approx(units, team, nation) {
+    var order = comrades(nation), home = {}, parts = {}, out = {}, i, a, id;
+    for (i = order.length - 1; i >= 0; i--) {   // last write wins: the lead army last
+      templatesOf(order[i]).forEach(function (t) { t.men.forEach(function (m) { home[m] = t.nation; }); });
+    }
+    for (i = 0; i < units.length; i++) {
+      if (units[i].team !== team) continue;
+      a = home[units[i].type] || nation;
+      (parts[a] || (parts[a] = [])).push(units[i]);
+    }
+    for (a in parts) {
+      var c = approxOne(parts[a], team, a);
+      for (id in c) out[id] = (out[id] || 0) + c[id];
+    }
+    return out;
+  }
   /** Squads, men, guns and vehicles in a set of template counts. */
   function counted(counts) {
     var o = { squads: 0, men: 0, guns: 0, vehicles: 0 }, all = TPL();
@@ -215,10 +294,14 @@
     }
     return o;
   }
-  /** The batteries an army called on. */
-  function supportFor(nation) {
-    var FS = (A && A.FIRE_SUPPORT) || {}, own = FS_NATION[BLOC[nation] || 'allied'], out = [];
-    for (var k in FS) { var n = FS[k].nation; if (n === 'both' || (own && n === own)) out.push(k); }
+  /** The batteries an army called on, and (round 114) with `counts`, those of
+   *  every other army with men in the force: a Soviet force with a Sherman in
+   *  it has somebody to ask for the American guns. */
+  function supportFor(nation, counts) {
+    var FS = (A && A.FIRE_SUPPORT) || {}, who = perArmy(counts), own = {}, out = [];
+    who[nation] = 1;
+    for (var a in who) { var o = FS_NATION[BLOC[a] || 'allied']; if (o) own[o] = true; }
+    for (var k in FS) { var n = FS[k].nation; if (n === 'both' || own[n]) out.push(k); }
     return out;
   }
   /** What `_grantMapSupport` would give this army. */
@@ -230,9 +313,9 @@
   }
   /** A side's missions carried over to another army: what it can still call
    *  is kept, and its battalion mortars become the new army's. */
-  function adaptSupport(sup, nation) {
+  function adaptSupport(sup, nation, counts) {
     var ok = {}, out = {};
-    supportFor(nation).forEach(function (k) { ok[k] = true; });
+    supportFor(nation, counts).forEach(function (k) { ok[k] = true; });
     var mort = MORTAR[BLOC[nation] || 'allied'];
     for (var k in sup) {
       var n = sup[k] | 0;
@@ -372,6 +455,7 @@
    *  support is set to the plan's. Returns {team: squads placed}. */
   function applyPlan(plan) {
     var g = this, G = A.grid(), placed = {}, touched = false, T;
+    syncArmies();
     if (g.fpv && g.exitFpv) g.exitFpv();
     var zones = harvestZones(g.mapDef, G), cen = {};
     for (T = 1; T <= 2; T++) {
@@ -381,7 +465,7 @@
     for (T = 1; T <= 2; T++) {
       var s = plan && plan.sides && plan.sides[T];
       if (!s || s.mode !== 'custom') continue;
-      var list = expand(s.counts || {});
+      var list = expand(s.army ? cleanCounts(s.counts, s.army) : (s.counts || {}));   // the line holds however the plan was drawn
       if (!list.length) continue;           // a side is never emptied (the screen will not start one)
       for (var i = g.units.length - 1; i >= 0; i--) if (g.units[i].team === T) g.removeUnit(g.units[i]);
       var spots = layout(list, zones[T], facing(cen[T], cen[T === 1 ? 2 : 1], T), G), n = 0;
@@ -429,18 +513,19 @@
   }
   function loadAll() { try { return JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { return {}; } }
   function saveAll(all) { try { localStorage.setItem(STORE, JSON.stringify(all)); } catch (e) { /* private mode, quota */ } }
-  /** Counts kept to templates of this army that still exist, as integers. */
+  /** Counts kept to templates that still exist, of this army's alliance and no
+   *  other (round 114: of this army, until armies could mix), as integers. */
   function cleanCounts(c, nation) {
     var all = TPL(), out = {};
     for (var id in (c || {})) {
       var n = clampI(c[id], 0, MAX_SQUADS);
-      if (n > 0 && all[id] && all[id].nation === nation) out[id] = n;
+      if (n > 0 && all[id] && sameSide(all[id].nation, nation)) out[id] = n;
     }
     return out;
   }
-  function cleanSupport(c, nation) {
+  function cleanSupport(c, nation, counts) {
     var ok = {}, out = {};
-    supportFor(nation).forEach(function (k) { ok[k] = true; });
+    supportFor(nation, counts).forEach(function (k) { ok[k] = true; });
     for (var k in (c || {})) { var n = clampI(c[k], 0, MAX_MISSIONS); if (n > 0 && ok[k]) out[k] = n; }
     return out;
   }
@@ -454,7 +539,7 @@
     var st = { map: name, edited: edited, sides: {}, support: {}, more: {} };
     for (var T = 1; T <= 2; T++) {
       var army = sideArmy(g.units, T);
-      var side = { team: T, mapArmy: army, army: army || (T === 2 ? 'ger' : 'us'), mode: 'map', counts: {}, preset: 'map' };
+      var side = { team: T, mapArmy: army, army: army || (T === 2 ? 'ger' : 'us'), mode: 'map', counts: {}, preset: 'map', view: 'all' };
       var m = !edited && mem && mem.sides && mem.sides[T];
       if (m && m.mode === 'custom' && NAT_NAME[m.army]) {
         side.mode = 'custom'; side.army = m.army; side.counts = cleanCounts(m.counts, m.army); side.preset = m.preset || null;
@@ -469,7 +554,7 @@
         var have = (g.support && g.support[T]) || {};
         for (var k in have) if (have[k] && have[k].n > 0) sup[k] = have[k].n;
       }
-      st.support[T] = cleanSupport(adaptSupport(sup, side.army), side.army);
+      st.support[T] = cleanSupport(adaptSupport(sup, side.army, side.counts), side.army, side.counts);
     }
     return st;
   }
@@ -507,13 +592,15 @@
     var you = T === g.playerTeam, role = sideRole(g, T);
     var col = g.teamColorCss ? g.teamColorCss(T) : '#888';
     var opts = (s.mapArmy ? '' : '<option value=""' + (s.mode === 'map' ? ' selected' : '') + '>the map’s own</option>')
-      + NATIONS.map(function (n) {
-        return '<option value="' + n[0] + '"' + (n[0] === s.army && (s.mapArmy || s.mode === 'custom') ? ' selected' : '') + '>' + n[1] + '</option>';
+      + ALLIANCES.map(function (al) {
+        return '<optgroup label="' + al[1] + '">' + al[2].map(function (id) {
+          return '<option value="' + id + '"' + (id === s.army && (s.mapArmy || s.mode === 'custom') ? ' selected' : '') + '>' + NAT_NAME[id] + '</option>';
+        }).join('') + '</optgroup>';
       }).join('');
     h += '<div class="bs-side" data-team="' + T + '">';
     h += '<div class="bs-sh"><i class="bs-sw" style="background:' + col + '"></i><b>Side ' + T
       + (you ? ' · you' : ' · enemy') + (role ? ' · ' + role : '') + '</b>'
-      + '<select data-army="' + T + '" title="The army this side fights with">' + opts + '</select></div>';
+      + '<select data-army="' + T + '" title="The army this side is built on: the presets and the batteries are its own. Any army of its alliance can stand beside it, from the list below.">' + opts + '</select></div>';
     h += '<div class="bs-pre"><i data-p="map" class="' + (s.mode === 'map' ? 'on' : '') + '" title="'
       + (st.edited ? 'The men you put on the field in the editor' : 'What this map deploys') + '">'
       + (st.edited ? 'As placed' : 'Map’s forces') + '</i>';
@@ -537,9 +624,20 @@
       var c = counted(s.counts);
       h += '<div class="bs-sum">' + sumLine(c, missions, c.squads) + '</div>';
     }
+    // (round 114) the army filter: narrows the list to one army of the alliance,
+    // and says what each has in the force, including the rows it is hiding
+    var view = sameSide(s.army, s.view) ? s.view : 'all', tagged = view === 'all';
+    var have = s.mode === 'custom' ? perArmy(s.counts) : {}, inAll = 0, al = ALLIANCE[s.army];
+    for (var hv in have) inAll += have[hv];
+    h += '<div class="bs-arm"><span>' + (al ? al[1] : '') + '</span><i data-v="all" class="' + (tagged ? 'on' : '')
+      + '" title="Every army of this alliance">All' + (inAll ? ' ' + inAll : '') + '</i>';
+    if (al) al[2].forEach(function (id) {
+      h += '<i data-v="' + id + '" class="' + (view === id ? 'on' : '') + '" title="' + NAT_NAME[id] + ' only">' + TAG[id] + (have[id] ? ' ' + have[id] : '') + '</i>';
+    });
+    h += '</div>';
     // the templates, by arm
     var byCat = {};
-    templatesOf(s.army).forEach(function (t) { (byCat[t.cat] || (byCat[t.cat] = [])).push(t); });
+    rosterOf(s.army, view).forEach(function (t) { (byCat[t.cat] || (byCat[t.cat] = [])).push(t); });
     h += '<div class="bs-list" data-list="' + T + '">';
     CATS.forEach(function (cat) {
       var ts = byCat[cat[0]];
@@ -552,7 +650,8 @@
         + '</div>';
       vis.forEach(function (t) {
         var n = s.mode === 'custom' ? (s.counts[t.id] | 0) : 0;
-        h += '<div class="bs-row' + (n ? ' has' : '') + '" data-id="' + t.id + '" title="' + esc(t.note || '') + '"><b>' + esc(t.name)
+        h += '<div class="bs-row' + (tagged ? ' tg' : '') + (n ? ' has' : '') + '" data-id="' + t.id + '" title="' + esc(NAT_NAME[t.nation] + (t.note ? '. ' + t.note : ''))
+          + '">' + (tagged ? '<em>' + TAG[t.nation] + '</em>' : '') + '<b>' + esc(t.name)
           + '</b><span class="bs-men">' + menLabel(t) + '</span>' + ctl(n) + '</div>';
       });
     });
@@ -562,7 +661,7 @@
       + ' · <u data-fs="none">none</u></span></h4><div class="bs-fsg">';
     // two to a row: a side's batteries are up to eight, and the squad list
     // above them is what needs the height
-    supportFor(s.army).forEach(function (k) {
+    supportFor(s.army, s.counts).forEach(function (k) {
       var fsd = A.FIRE_SUPPORT[k], n = st.support[T][k] | 0;
       h += '<div class="bs-row' + (n ? ' has' : '') + '" data-fs="' + k + '" title="' + esc((fsd.note || '') + ' (' + fsd.rounds + ' rounds a mission)')
         + '"><b>' + esc(fsd.ic || '') + ' ' + esc(fsd.name) + '</b>' + ctl(n) + '</div>';
@@ -580,7 +679,7 @@
     var others = (g.units || []).some(function (u) { return u.alive && (u.team === 3 || u.team === 4); });
     var h = '<div class="bs-card">';
     h += '<div class="bs-head"><div><div class="bs-op">Battle setup</div><div class="bs-title">' + esc(st.map) + '</div>'
-      + '<div class="bs-sub">Choose what each side fights with, and the fire support it can call.</div></div>'
+      + '<div class="bs-sub">Choose what each side fights with and the fire support it can call. Any armies of one alliance can fight side by side.</div></div>'
       + '<div class="bs-keys">Enter — start the battle<br>Esc — keep the field as it is</div></div>';
     h += '<div class="bs-body">' + order.map(renderSide).join('') + '</div>';
     if (others) h += '<div class="bs-note3">Sides 3 and 4 fight with the map’s own forces.</div>';
@@ -599,10 +698,16 @@
     if (id === 'map') {
       s.mode = 'map'; s.counts = {}; s.preset = 'map';
       if (s.mapArmy && s.mapArmy !== s.army) { s.army = s.mapArmy; st.support[T] = adaptSupport(st.support[T], s.army); }
+      if (!sameSide(s.army, s.view)) s.view = 'all';
       return;
     }
+    // (round 114) with the list narrowed to one army a preset is that army's,
+    // and it leads the force: a preset the list could not show would look like
+    // nothing happened
+    if (id !== 'clear' && sameSide(s.army, s.view)) s.army = s.view;
     s.mode = 'custom'; s.preset = id;
     s.counts = id === 'clear' ? {} : preset(s.army, id);
+    st.support[T] = cleanSupport(adaptSupport(st.support[T], s.army, s.counts), s.army, s.counts);
   }
 
   function onClick(e) {
@@ -616,6 +721,14 @@
     UI.warn = '';
     var p = t.closest('[data-p]');
     if (p) { setPreset(T, p.dataset.p); render(); return; }
+    var fv = t.closest('[data-v]');
+    if (fv) {
+      s.view = fv.dataset.v;
+      render();
+      var fl = document.querySelector('#bsetup [data-list="' + T + '"]');
+      if (fl) fl.scrollTop = 0;     // the old position means nothing on the new list
+      return;
+    }
     var mo = t.closest('[data-more]');
     if (mo) { var key = T + ':' + mo.dataset.more; st.more[key] = !st.more[key]; render(); return; }
     var u = t.closest('u[data-fs]');
@@ -641,6 +754,7 @@
       s.preset = null;
       var id = row.dataset.id, m = clampI((s.counts[id] | 0) + delta, 0, MAX_SQUADS);
       if (m) s.counts[id] = m; else delete s.counts[id];
+      st.support[T] = cleanSupport(st.support[T], s.army, s.counts);   // the last man of the army that could call it
       render();
     }
   }
@@ -651,8 +765,15 @@
     var T = +sel.dataset.army, st = UI.state, s = st.sides[T], army = sel.value;
     UI.warn = '';
     if (!NAT_NAME[army]) { setPreset(T, 'map'); render(); return; }
-    var was = s.preset;
-    s.army = army;
+    var was = s.preset, built = s.mode === 'custom' && was == null && sameSide(army, s.army);
+    s.army = army; s.view = 'all';
+    // (round 114) a force built by hand keeps its squads when the lead changes
+    // within its alliance; across the line they cannot come
+    if (built) {
+      st.support[T] = cleanSupport(adaptSupport(st.support[T], army, s.counts), army, s.counts);
+      render();
+      return;
+    }
     st.support[T] = cleanSupport(adaptSupport(st.support[T], army), army);
     if (army === s.mapArmy && was === 'map') { render(); return; }
     var keep = was && was !== 'map' && was !== 'clear' ? was : 'combined';
@@ -754,6 +875,7 @@
       return false;
     }
     if (UI && UI.open) close();
+    syncArmies();
     g.paused = true;
     var me = UI = { g: g, reason: reason || 'play', then: then || null, open: false, pending: true, warn: '' };
     whenBriefingClosed(function () {
@@ -793,19 +915,27 @@
       '.bs-sh b{font-size:15px;color:#e8dcc4;flex:1;min-width:0}',
       '.bs-sh select{background:#121a22;color:#cfe0ee;border:1px solid #2f4050;border-radius:4px;font:12px ui-serif,Georgia,serif;padding:3px 6px}',
       '.bs-pre{display:flex;flex-wrap:wrap;gap:5px;margin:2px 0 8px}',
-      '.bs-pre i{font:10px/1 ui-monospace,Menlo,monospace;letter-spacing:.5px;font-style:normal;padding:5px 8px;border:1px solid #2f4050;',
+      '.bs-arm{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:6px 2px 5px}',
+      '.bs-arm span{font:9.5px/1 ui-monospace,Menlo,monospace;letter-spacing:1.6px;text-transform:uppercase;color:#8a9dad;margin-right:3px}',
+      '.bs-pre i,.bs-arm i{font:10px/1 ui-monospace,Menlo,monospace;letter-spacing:.5px;font-style:normal;padding:5px 8px;border:1px solid #2f4050;',
       '  border-radius:4px;color:#9fb3c4;cursor:pointer;user-select:none}',
-      '.bs-pre i:hover{border-color:#c8a060;color:#e2c088}',
-      '.bs-pre i.on{border-color:#c8a060;color:#e2c088;background:rgba(200,160,96,.13)}',
+      '.bs-pre i:hover,.bs-arm i:hover{border-color:#c8a060;color:#e2c088}',
+      '.bs-pre i.on,.bs-arm i.on{border-color:#c8a060;color:#e2c088;background:rgba(200,160,96,.13)}',
       '.bs-sum{font:11px/1.4 ui-monospace,Menlo,monospace;color:#c8a060;padding:4px 2px 6px;border-bottom:1px solid #22303d}',
       '.bs-own{font-size:11.5px;color:#93a7b8;font-style:italic;padding:6px 2px 4px}',
       '.bs-list{flex:1;min-height:90px;overflow:auto;font:11px/1.35 ui-monospace,Menlo,monospace;padding-right:4px}',
+      // (round 115) the reinforcement list's dark scrollbar, not the system's white one
+      '.bs-list::-webkit-scrollbar{width:7px}.bs-list::-webkit-scrollbar-thumb{background:#3a4658;border-radius:4px}',
       '.bs-cat{display:flex;justify-content:space-between;align-items:baseline;padding:9px 2px 3px;font-size:9.5px;letter-spacing:1.6px;',
       '  text-transform:uppercase;color:#8a9dad;border-top:1px solid #1d2832}',
       '.bs-cat u,.bs-fs h4 u{text-decoration:none;color:#5f7286;letter-spacing:.4px;text-transform:none;cursor:pointer}',
       '.bs-cat u:hover,.bs-fs h4 u:hover{color:#c8a060}',
       '.bs-row{display:grid;grid-template-columns:minmax(0,1fr) auto 78px;gap:8px;align-items:center;padding:3px 2px;border-bottom:1px solid #161f28}',
-      '.bs-row b{color:#cfe0ee;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.bs-row.tg{grid-template-columns:28px minmax(0,1fr) auto 78px}',
+      '.bs-row em{font-style:normal;font-size:9px;letter-spacing:.3px;color:#7d90a2;white-space:nowrap}',
+      // (round 115) a name too long for its box takes a second line: an ellipsis hid
+      // the battery's own word ("81mm Mortar Batt…") at a 1024 px window
+      '.bs-row b{color:#cfe0ee;font-weight:600;overflow-wrap:break-word;min-width:0}',
       '.bs-row.has b{color:#e2c088}',
       '.bs-men{color:#6f8598;font-size:10px;text-align:right;white-space:nowrap}',
       '.bs-ctl{display:flex;align-items:center;justify-content:flex-end;gap:6px}',
@@ -816,7 +946,7 @@
       '.bs-ctl u.z{color:#4a5a6a}',
       '.bs-fs{margin-top:8px;font:11px/1.35 ui-monospace,Menlo,monospace;flex:none;border-top:1px solid #22303d}',
       '.bs-fsg{display:grid;grid-template-columns:1fr 1fr;column-gap:16px}',
-      '.bs-fsg .bs-row{grid-template-columns:minmax(0,1fr) 78px}',
+      '.bs-fsg .bs-row{grid-template-columns:minmax(0,1fr) 66px}',
       '.bs-fs h4{display:flex;justify-content:space-between;font:10px/1 ui-monospace,Menlo,monospace;letter-spacing:2px;',
       '  text-transform:uppercase;color:#c8a060;margin:6px 0 4px;font-weight:normal}',
       '.bs-note3{font-size:11px;color:#6f8598;font-style:italic;padding:0 22px 10px}',
@@ -836,7 +966,7 @@
   }
 
   /** The planning half alone (the tests). */
-  function use(api) { A = api; return true; }
+  function use(api) { A = api; syncArmies(); return true; }
   function install(api) {
     if (installed) return true;
     use(api);
@@ -853,7 +983,8 @@
     armyOf: armyOf, sideArmy: sideArmy, templatesOf: templatesOf, baseOf: baseOf, preset: preset, approx: approx,
     counted: counted, onField: onField, supportFor: supportFor, defaultSupport: defaultSupport, adaptSupport: adaptSupport,
     harvestZones: harvestZones, fieldZones: fieldZones, facing: facing, expand: expand, layout: layout,
-    PRESETS: PRESETS, NATIONS: NATIONS, STORE: STORE,
+    comrades: comrades, sameSide: sameSide, rosterOf: rosterOf, perArmy: perArmy, cleanCounts: cleanCounts, syncArmies: syncArmies,
+    PRESETS: PRESETS, NATIONS: NATIONS, ALLIANCES: ALLIANCES, STORE: STORE,
     isOpen: function () { return !!(UI && (UI.open || UI.pending)); },
   };
 })();

@@ -473,6 +473,7 @@
   // sprite is drawn inside a padded box so mip generation never bleeds one
   // cell into its neighbour at the levels foliage is actually visible at.
   var ATLAS_COLS = 8, ATLAS_ROWS = 6, ATLAS_CELL = 256, ATLAS_PAD = 10, ATLAS_PAINTED = 8;
+  var FOL_NEAR_GAIN = 0.55;      // (round 115) of the tint's gain, where a texel is a pixel or more
 
   function rngFrom(seed) {
     return function () {
@@ -918,6 +919,7 @@
       sh.uniforms.uAtlas = shared.uAtlas;       // vec2(1/cols, 1/rows)
       sh.uniforms.uHealth = shared.uHealth;     // global scale (burnt fields wilt)
       sh.uniforms.uCam = shared.uCam;           // NOT `cameraPosition` — see below
+      sh.uniforms.uNear = shared.uNear;         // (round 116) the crop parted round a man's eye, see `setNear`
       // CLOUD SHADOW. The field is the largest single surface in any frame and
       // it was the last one still in full sun under a cloud that was shading
       // the ground it grows out of. The game hands its own uniform objects in
@@ -947,6 +949,7 @@
         // Phong, Toon, Standard and anything with an envMap. A Lambert material
         // gets a permanent (0,0,0) — so this carries the eye position instead.
         'uniform vec3  uCam;',
+        'uniform vec4  uNear;',
         'uniform vec4  uCloud;',      // xy drift, z scale, w depth
         'uniform vec2  uCloudBand;',
         'varying vec3  vFolTint;',
@@ -996,6 +999,9 @@
         '  float dCam = distance(uCam, iPos);',
         '  float lod  = 1.0 - smoothstep(uFade.x, uFade.y, dCam);',
         '  transformed.y *= lod * uHealth;',
+        // (round 116) -- parted round the first-person eye: what he is lying or kneeling in is
+        //    pressed down where he is (`setNear`), so he looks out through it, not into a leaf
+        '  if (uNear.w > 0.0) { transformed.y *= mix(0.08, 1.0, smoothstep(uNear.z, uNear.w, distance(iPos.xz, uNear.xy))); }',
         // -- wind: a world-space gust, expressed in instance-local axes ------
         '  float bend = uv.y * uv.y;',
         '  float ph   = iPos.x * 0.28 + iPos.z * 0.21;',
@@ -1038,9 +1044,23 @@
         'varying float vFolSun;',
       ].join('\n'));
 
+      // (round 115) THE 2.35 GAIN IS FOR FAR OFF. It undoes what the mip chain's box filter
+      // darkens into a tuft a few pixels tall; at the top of the chain, near the camera and in
+      // first person, nothing is darkened and it burned the pale kinds white and the crops a
+      // lurid green. Eased off by how many texels a pixel spans: none from the tactical camera.
       sh.fragmentShader = rep(sh.fragmentShader, '#include <map_fragment>', [
         '#include <map_fragment>',
-        'diffuseColor.rgb *= vFolTint;',
+        '#if __VERSION__ >= 300',
+        '  vec2 folT = vUv * vec2(' + (ATLAS_COLS * ATLAS_CELL) + '.0, ' + (ATLAS_ROWS * ATLAS_CELL) + '.0);',
+        '  float folL = max(length(dFdx(folT)), length(dFdy(folT)));',
+        '  diffuseColor.rgb *= vFolTint * mix(' + FOL_NEAR_GAIN.toFixed(3) + ', 1.0, smoothstep(1.0, 5.0, folL));',
+        '#else',
+        '  diffuseColor.rgb *= vFolTint;',
+        '#endif',
+        // …and no leaf is whiter than chalk: a gained albedo past 0.45 (linear) rolls off
+        // instead of burning out, at any distance; the darker kinds are untouched
+        '{ float folY = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));',
+        '  if (folY > 0.45) diffuseColor.rgb *= (0.45 + (folY - 0.45) * 0.15) / folY; }',
         'diffuseColor.a   *= vFolAlpha;',
       ].join('\n'));
 
@@ -1091,7 +1111,7 @@
     // Two materials with the same `onBeforeCompile` source still compile twice
     // unless they share a cache key. One material for the whole field anyway,
     // but be explicit about it.
-    mat.customProgramCacheKey = function () { return 'foliage1' + (shared.oneTapShadow === false ? '' : '|1tap'); };
+    mat.customProgramCacheKey = function () { return 'foliage4' + (shared.oneTapShadow === false ? '' : '|1tap'); };
     return mat;
   }
 
@@ -1136,6 +1156,7 @@
       sh.uniforms.uAtlas = shared.uAtlas;
       sh.uniforms.uHealth = shared.uHealth;
       sh.uniforms.uCam = shared.uCam;
+      sh.uniforms.uNear = shared.uNear;
       var ok = true;
       function rep(src, from, to) {
         if (src.indexOf(from) < 0) { ok = false; return src; }
@@ -1152,6 +1173,7 @@
         'uniform vec2  uAtlas;',
         'uniform float uHealth;',
         'uniform vec3  uCam;',
+        'uniform vec4  uNear;',
       ].join('\n'));
       // The atlas cell, exactly as the colour pass picks it — otherwise the
       // cutout tests the wrong sprite and the shadow is some other plant's.
@@ -1179,6 +1201,9 @@
         '  float dCam = distance(uCam, iPos);',
         '  float lod  = 1.0 - smoothstep(uFade.x, uFade.y, dCam);',
         '  transformed.y *= lod * uHealth;',
+        // (round 116) -- parted round the first-person eye: what he is lying or kneeling in is
+        //    pressed down where he is (`setNear`), so he looks out through it, not into a leaf
+        '  if (uNear.w > 0.0) { transformed.y *= mix(0.08, 1.0, smoothstep(uNear.z, uNear.w, distance(iPos.xz, uNear.xy))); }',
         '  float bend = uv.y * uv.y;',
         '  float ph   = iPos.x * 0.28 + iPos.z * 0.21;',
         '  float g    = sin(uTime * uWind.w + ph) + 0.45 * sin(uTime * uWind.w * 2.7 + ph * 1.9);',
@@ -1189,7 +1214,7 @@
       ].join('\n'));
       if (!ok) _patchOk = false;
     };
-    dm.customProgramCacheKey = function () { return 'foliageDepth1'; };
+    dm.customProgramCacheKey = function () { return 'foliageDepth2'; };
     return dm;
   }
 
@@ -1230,6 +1255,7 @@
       uAtlas:  { value: new THREE.Vector2(1 / ATLAS_COLS, 1 / ATLAS_ROWS) },
       uHealth: { value: 1 },
       uCam:    { value: new THREE.Vector3() },
+      uNear:   { value: new THREE.Vector4(0, 0, 0, 0) },   // (round 116) x, z, r0, r1; r1 0 = off
       // Zeroed depth = no cloud. `setCloud` swaps in the game's own uniform
       // objects so the field, the ground and the men are shaded by ONE number.
       uCloud:     { value: new THREE.Vector4(0, 0, 0.0075, 0) },
@@ -1788,6 +1814,13 @@
      *  and widens for the strategic view), so it tells us where it is. */
     setShadowSpan: function (span, fx, fz) {
       this.shadowSpan = span; this.shadowX = fx; this.shadowZ = fz;
+    },
+    /** (round 116) Press the field down round (x, z): flat inside r0, full height past r1
+     *  (world units); r1 = 0 turns it off. The first-person eye in a crop. Drawing only:
+     *  the sightline already skips a man's own cell (`Game._hasLOSCalc`). */
+    setNear: function (x, z, r0, r1) {
+      var v = this.shared.uNear.value;
+      if (v.x !== x || v.y !== z || v.z !== r0 || v.w !== r1) v.set(x, z, r0, r1);
     },
     /** Is this chunk inside the sun's shadow box, and does it hold anything
      *  worth a shadow? Its own radius is added to the box, so a hedge just

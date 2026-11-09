@@ -628,6 +628,42 @@
                    men: ['itsemovente'],
                    note: 'The one good armoured vehicle Italy built: a 75 mm howitzer in a low casemate on the M13 hull, firing an effective hollow-charge round. Used properly it killed Grants.' },
 
+    // ---------------- Japan (round 114) ----------------
+    // Its men have fought on the maps since the four-team round and it had no
+    // template, so the battle setup could not offer it: "every Axis army" was
+    // two. No campaign's `nationsOf` lists 'jp', and `templatesFor` reads 'us',
+    // 'uk' and 'ger' by name, so no requisition list changes.
+    jp_hq:       { name: 'Chūtai Honbu', nation: 'jp', w: 1, rp: 5, cat: 'command', from: 0, vet: 1,
+                   men: ['jpofficer', 'jprifle', 'jprifle', 'jpeisei'],
+                   note: 'The company commander with his sword, two runners and an aid man. Orders went by runner and by whistle; a radio at this level was a rarity.' },
+    jp_aid:      { name: 'Eiseihei Team', nation: 'jp', w: 1, rp: 5, cat: 'command', from: 0, vet: 1,
+                   men: ['jpeisei', 'jpeisei', 'jpeisei'],
+                   note: 'Stretcher men and medical orderlies, in an army whose doctrine gave them far less to work with than any they faced.' },
+    jp_rifle:    { name: 'Hohei Buntai', nation: 'jp', w: 6, rp: 9, cat: 'rifle', from: 0, vet: 1,
+                   men: ['jprifle', 'jptype99', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle'],
+                   note: 'Thirteen men round one light machine gun, trained to close with the bayonet at ranges other armies would have called too short.' },
+    jp_snlf:     { name: 'Rikusentai Buntai', nation: 'jp', w: 1.4, rp: 12, cat: 'rifle', from: 0, vet: 2,
+                   men: ['jpsnlf', 'jptype99', 'jpsnlf', 'jpsnlf', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle', 'jprifle'],
+                   note: 'The naval landing force: fewer men, better fed, and more automatic weapons than the army squad beside them.' },
+    jp_type92:   { name: 'Type 92 HMG Team', nation: 'jp', w: 2.6, rp: 8, cat: 'mg', from: 0, vet: 1,
+                   men: ['jptype92', 'jprifle', 'jprifle', 'jprifle'],
+                   note: 'A slow, heavy, strip-fed gun that its enemies called the woodpecker for its sound, carried on poles between two men.' },
+    jp_knee:     { name: 'Type 89 Discharger', nation: 'jp', w: 2.4, rp: 6, cat: 'mortar', from: 0, vet: 1,
+                   men: ['jpknee', 'jprifle', 'jprifle', 'jprifle'],
+                   note: 'The so-called knee mortar, fired with its curved base plate on the ground: a light tube at platoon level, and the reason a Japanese platoon could drop shells on you at all.' },
+    jp_lunge:    { name: 'Lunge Mine Team', nation: 'jp', w: 1, rp: 5, cat: 'at', from: 0, vet: 1,
+                   men: ['jplunge', 'jplunge', 'jplunge'],
+                   note: 'A hollow charge on a bamboo pole, thrust at the hull. What an army issues when it has no bazooka, and the man who used it did not expect to walk away.' },
+    jp_type1at:  { name: 'Type 1 47mm', nation: 'jp', w: 2, rp: 8, cat: 'atgun', from: 0, vet: 1,
+                   men: ['jptype1at'],
+                   note: 'The best Japanese anti-tank gun of the war, and there were never enough. It will hole a Sherman from the side at short range.' },
+    jp_chiha:    { name: 'Type 97 Chi-Ha', nation: 'jp', w: 2.4, rp: 12, cat: 'armour', from: 0, vet: 1,
+                   men: ['jpchiha'],
+                   note: 'Built to support infantry against infantry, with a short gun and thin riveted plate. Against anything that shoots back with armour-piercing it is a target.' },
+    jp_shinhoto: { name: 'Shinhoto Chi-Ha', nation: 'jp', w: 1.4, rp: 14, cat: 'armour', from: 0, vet: 1,
+                   men: ['jpshinhoto'],
+                   note: 'The Chi-Ha with a new turret and a long 47 mm gun: the answer to the Stuart that arrived in time to meet the Sherman.' },
+
     // ---------------- France, 1940 — and after ----------------
     // Better tanks than the Wehrmacht and no idea what to do with them. The
     // equipment here is not the reason 1940 went the way it did, and the
@@ -699,6 +735,148 @@
     us_37mm:     { name: '37mm Gun M3', nation: 'us', w: 2.0, rp: 5, cat: 'atgun', from: 0, vet: 1,
                    men: ['us37mm'],
                    note: 'The pre-war anti-tank gun, obsolete against anything with armour by 1942 and kept because its canister round is murder on infantry at short range.' },
+    // >>> round 115 roster (tools/roster_r115.py writes these rows from tools/roster_r115_spec.py: edit the spec, not them)
+    us_m4a3e8:     { name: 'M4A3E8 Sherman', nation: 'us', w: 1, rp: 17, cat: 'armour', from: 99, vet: 1,
+                   men: ['usm4a3e8'], note: 'The 76 mm Sherman on horizontal volute springs and a 23-inch track: the "Easy Eight" of the winter of 1944, with wet stowage, so it burned far less often than the Shermans before it.' },
+    us_m24:        { name: 'M24 Chaffee', nation: 'us', w: 1, rp: 12, cat: 'recon', from: 99, vet: 1,
+                   men: ['usm24'], note: 'A light tank at last with a real gun: the 75 mm of the Sherman in a lighter barrel, on a fast, low, well-sloped hull. First in action in the Ardennes. Its armour is still a light tank\'s.' },
+    us_m36:        { name: 'M36 Jackson', nation: 'us', w: 0.8, rp: 16, cat: 'armour', from: 99, vet: 1,
+                   men: ['usm36'], note: 'The 90 mm on an M10\'s hull in an open turret: the only American tank destroyer that could meet a Panther from the front, from the autumn of 1944. Open on top, like every one of them.' },
+    us_m8hmc:      { name: 'M8 HMC', nation: 'us', w: 0.8, rp: 10, cat: 'armour', from: 0, vet: 1,
+                   men: ['usm8hmc'], note: 'The pack howitzer in an open turret on a Stuart: the assault-gun troop of a cavalry squadron, for the machine gun nest the armoured cars cannot shift.' },
+    us_m3gmc:      { name: 'M3 GMC', nation: 'us', w: 0.6, rp: 9, cat: 'armour', from: 99, vet: 1,
+                   men: ['usm3gmc'], note: 'The French 75 of 1897 on a half-track, behind a shield: the tank destroyer battalions\' gun in Tunisia, and the Marines\' on Saipan. Quick, hard-hitting, and quarter-inch plate.' },
+    us_m15:        { name: 'M15A1 MGMC', nation: 'us', w: 0.5, rp: 9, cat: 'armour', from: 0, vet: 1,
+                   men: ['usm15'], note: 'A 37 mm automatic cannon between two .50s on one mount, built to shoot at aircraft. There were few aircraft by 1944, and it was turned on houses and hedgerows instead.' },
+    us_m3a1sc:     { name: 'M3A1 Scout Car', nation: 'us', w: 1, rp: 6, cat: 'recon', from: 0, vet: 1,
+                   men: ['usm3a1sc'], note: 'The White scout car: an open armoured body on four driven wheels, a .50 and a .30 on the rail round its top, and eight men. Fast on a road and helpless off it.' },
+    us_m20:        { name: 'M20 Utility Car', nation: 'us', w: 0.8, rp: 6, cat: 'recon', from: 0, vet: 1,
+                   men: ['usm20'], note: 'A Greyhound with the turret taken off and a .50 on a ring in its place: the troop leader\'s car, the radio car, the ammunition runner. Six wheels and seventy-five kilometres an hour.' },
+    us_lvta4:      { name: 'LVT(A)-4', nation: 'us', w: 0.6, rp: 12, cat: 'armour', from: 99, vet: 1,
+                   men: ['uslvta4'], note: 'The amtank: a howitzer turret on an amphibian, swimming in ahead of the first wave and fighting up the beach. Its hull is boat plate, and its tracks are its paddles.' },
+    us_t26e4:      { name: 'T26E4 Super Pershing (prototype)', nation: 'us', w: 0.2, rp: 22, cat: 'armour', from: 99, vet: 2,
+                   men: ['ust26e4'], note: 'One Pershing with a 73-calibre 90 mm, sent to the 3rd Armored Division to answer the Tiger II; its crew welded boiler plate over the mantlet. It killed a tank at Grevenbroich in April 1945.' },
+    us_calliope:   { name: 'M4 Calliope (T34)', nation: 'us', w: 0.4, rp: 14, cat: 'arty', from: 8, vet: 1,
+                   men: ['uscalliope'], note: 'Sixty 4.5-inch rockets in a frame over a Sherman\'s turret, laid by the 75 and gone in a few seconds. The tank kept its gun; the frame could be dropped with the crew inside.' },
+    br_matilda:    { name: 'Matilda II', nation: 'uk', w: 1, rp: 13, cat: 'armour', from: 99, vet: 1,
+                   men: ['ukmatilda'], note: 'Seventy-eight millimetres of cast armour that no German anti-tank gun of 1940 could pierce: at Arras it stopped Rommel cold, and in the desert it was the Queen until the 88 came. The 2-pounder fires no high explosive.' },
+    br_valentine:  { name: 'Valentine IX', nation: 'uk', w: 1.2, rp: 11, cat: 'armour', from: 99, vet: 1,
+                   men: ['ukvalentine'], note: 'Vickers\' small infantry tank, the most numerous British tank of the war: reliable, well armoured, slow. The 6-pounder filled the two-man turret so full there was no room for a machine gun.' },
+    br_archer:     { name: 'Archer', nation: 'uk', w: 0.8, rp: 13, cat: 'armour', from: 99, vet: 1,
+                   men: ['ukarcher'], note: 'A 17-pounder on a Valentine, pointing backwards over the engine: reversed into a hide, one shot, and away forwards. Low enough to hide behind a hedge, which was the whole idea.' },
+    br_bishop:     { name: 'Bishop', nation: 'uk', w: 0.5, rp: 11, cat: 'arty', from: 99, vet: 1,
+                   men: ['ukbishop'], note: 'A 25-pounder in a tall steel box on a Valentine. The box held its elevation to fifteen degrees, so it reached barely six kilometres; crews dug ramps to tilt it. The Sexton replaced it gladly.' },
+    br_crusader:   { name: 'Crusader III', nation: 'uk', w: 1.2, rp: 11, cat: 'armour', from: 99, vet: 1,
+                   men: ['ukcrusader'], note: 'Fast, low, handsome and unreliable: the cruiser of the desert. The Mk III\'s 6-pounder could at last fight a Panzer III, and it went into battle at El Alamein; its Liberty engine burned easily.' },
+    br_tetrarch:   { name: 'Tetrarch', nation: 'uk', w: 0.5, rp: 8, cat: 'recon', from: 0, vet: 1,
+                   men: ['uktetrarch'], note: 'The tank that flew: carried to Normandy by Hamilcar glider on the night of D-Day with the 6th Airborne Division\'s reconnaissance regiment. It steered by bending its tracks round four big wheels.' },
+    br_locust:     { name: 'Locust', nation: 'uk', w: 0.4, rp: 8, cat: 'recon', from: 99, vet: 1,
+                   men: ['uklocust'], note: 'The American airborne tank, which only the British took to war: eight crossed the Rhine by glider in Operation Varsity. The Littlejohn adaptor on its 37 mm squeezed the shot to a higher velocity.' },
+    br_comet:      { name: 'Comet I', nation: 'uk', w: 1, rp: 18, cat: 'armour', from: 99, vet: 1,
+                   men: ['ukcomet'], note: 'The best British tank of the war: the Cromwell made strong, with the 77 mm HV, a short 17-pounder that fired its own case. The 11th Armoured Division had it across the Rhine in March 1945.' },
+    br_challenger: { name: 'Challenger', nation: 'uk', w: 0.6, rp: 16, cat: 'armour', from: 6, vet: 1,
+                   men: ['ukchallenger'], note: 'A Cromwell stretched by a road wheel to carry the 17-pounder in a turret like a garden shed: the Cromwell regiments\' answer to the Firefly, two to a troop from the summer of 1944.' },
+    br_centaur:    { name: 'Centaur IV (95 mm)', nation: 'uk', w: 0.5, rp: 14, cat: 'armour', from: 0, vet: 1,
+                   men: ['ukcentaur'], note: 'The Royal Marines Armoured Support Group\'s close-support tank on D-Day: a 95 mm howitzer, meant to fire from its landing craft and then off the beach, a white bearing scale painted round its turret.' },
+    br_churchill3: { name: 'Churchill III', nation: 'uk', w: 0.8, rp: 15, cat: 'armour', from: 99, vet: 1,
+                   men: ['ukchurchill3'], note: 'The first Churchill with a gun worth having, the 6-pounder in a welded turret. At Longstop Hill in April 1943 they climbed slopes the Germans thought no tank could, and took it.' },
+    br_humber:     { name: 'Humber Mk IV', nation: 'uk', w: 1, rp: 7, cat: 'recon', from: 0, vet: 2,
+                   men: ['ukhumber'], note: 'The commonest British armoured car, with the American 37 mm: the divisional reconnaissance regiments\' car, whose orders were to find the enemy and report, not to fight him.' },
+    br_staghound:  { name: 'Staghound', nation: 'uk', w: 0.8, rp: 8, cat: 'recon', from: 0, vet: 2,
+                   men: ['ukstaghound'], note: 'Built by Chevrolet for the British and never used by the Americans: a big, comfortable, reliable armoured car with two engines and an automatic gearbox. The Commonwealth\'s armoured car regiments in Italy and the North-West.' },
+    br_dingo:      { name: 'Daimler Dingo', nation: 'uk', w: 1, rp: 5, cat: 'recon', from: 0, vet: 1,
+                   men: ['ukdingo'], note: 'The two-man scout car, as good as any of its kind: it could reverse as fast as it went forward, which is the first thing a scout needs. A Bren and thirty millimetres of plate in front.' },
+    fr_r35:        { name: 'Renault R35', nation: 'fr', w: 1.6, rp: 7, cat: 'armour', from: 99, vet: 1,
+                   men: ['frr35'], note: 'The infantry\'s tank, nine hundred of them in 1940: forty millimetres of cast armour and the short 37 of the Great War, one man in the turret to command, load and fire it. It kept pace with a walking man, and was meant to.' },
+    fr_h35:        { name: 'Hotchkiss H35', nation: 'fr', w: 1.2, rp: 7, cat: 'armour', from: 99, vet: 1,
+                   men: ['frh35'], note: 'The cavalry\'s light tank before the H39, with the old short 37: good against infantry, useless against a Panzer IV. The light mechanised divisions had it at Hannut.' },
+    fr_fcm36:      { name: 'FCM 36', nation: 'fr', w: 0.8, rp: 8, cat: 'armour', from: 99, vet: 1,
+                   men: ['frfcm36'], note: 'Welded, sloped all over and diesel-powered — the most modern tank in France, and the dearest, so a hundred were built. Both battalions went into the counter-attack at Sedan and did not come back.' },
+    fr_amr35:      { name: 'AMR 35', nation: 'fr', w: 1, rp: 5, cat: 'recon', from: 99, vet: 1,
+                   men: ['framr35'], note: 'The cavalry\'s reconnaissance machine-gun tank: fast, small, thirteen millimetres thick. It carries a 7.5 mm Reibel and nothing that can hurt a tank.' },
+    fr_d2:         { name: 'Char D2', nation: 'fr', w: 0.5, rp: 11, cat: 'armour', from: 99, vet: 1,
+                   men: ['frd2'], note: 'Renault\'s medium infantry tank: fifty built, and de Gaulle commanded them in the 507e RCC before the war. Re-armed with the 47 SA 35 in the B1\'s turret; the 19e BCC fought them at Abbeville.' },
+    fr_panhard:    { name: 'Panhard 178', nation: 'fr', w: 1, rp: 7, cat: 'recon', from: 99, vet: 1,
+                   men: ['frpanhard'], note: 'The best armoured car in the world in 1940: four-wheel drive, a driving position at each end, and a 25 mm that would hole any German light tank. The Germans took every one they could find.' },
+    fr_laffly:     { name: 'Laffly W15 TCC', nation: 'fr', w: 0.5, rp: 8, cat: 'armour', from: 99, vet: 1,
+                   men: ['frlaffly'], note: 'The best French anti-tank gun on the back of a Laffly lorry, facing over the tailboard behind its shield: a "tank hunter" improvised in the spring of 1940, seventy built, all of them in the battle.' },
+    fr_ue:         { name: 'Renault UE', nation: 'fr', w: 0.8, rp: 4, cat: 'transport', from: 99, vet: 1,
+                   men: ['frue'], note: 'The infantry\'s little tracked carrier: five thousand built, towing the 25 mm and carrying the battalion\'s ammunition forward under fire. Two men under two domed hoods, and a bin behind.' },
+    fr_m4a2:       { name: 'M4A2 Sherman (2e DB)', nation: 'fr', w: 1.4, rp: 15, cat: 'armour', from: 99, vet: 2,
+                   men: ['frm4a2'], note: 'Leclerc\'s division: the diesel M4A2, crewed by Frenchmen who had come from Chad, the Levant and Spain, landed at Utah in August 1944 and were in Paris on the 25th. Each tank carries a French name.' },
+    fr_m10:        { name: 'M10 (RBFM)', nation: 'fr', w: 0.8, rp: 14, cat: 'armour', from: 99, vet: 2,
+                   men: ['frm10'], note: 'The Régiment blindé de fusiliers-marins: sailors in tank destroyers, the 2e DB\'s anti-tank regiment. Their M10s were named after storms and ships.' },
+    fr_m8:         { name: 'M8 Greyhound (2e DB)', nation: 'fr', w: 1, rp: 7, cat: 'recon', from: 99, vet: 2,
+                   men: ['frm8'], note: 'The 1er Régiment de marche de spahis marocains: colonial cavalry in American armoured cars, the 2e DB\'s eyes on the road to Paris.' },
+    fr_m5a1:       { name: 'M5A1 Stuart (2e DB)', nation: 'fr', w: 0.8, rp: 8, cat: 'armour', from: 99, vet: 2,
+                   men: ['frm5a1'], note: 'The light tank squadrons of the 2e DB\'s armoured regiments, the 501e RCC and the 12e Cuirassiers among them: fast, reliable, and out-gunned by anything German.' },
+    fr_halftrack:  { name: 'M3 Half-track (RMT)', nation: 'fr', w: 1.2, rp: 8, cat: 'transport', from: 99, vet: 2,
+                   men: ['frhalftrack'], note: 'The Régiment de marche du Tchad\'s half-tracks: the 9th Company, the "Nueve", Spanish Republicans, were the first into Paris on the night of 24 August 1944.' },
+    fr_m8hmc:      { name: 'M8 HMC (2e DB)', nation: 'fr', w: 0.6, rp: 10, cat: 'armour', from: 99, vet: 2,
+                   men: ['frm8hmc'], note: 'The 2e DB\'s assault guns, with the armoured regiments\' headquarters squadrons: the pack howitzer in an open turret on a Stuart.' },
+    br_sherman:    { name: 'Sherman III', nation: 'uk', w: 1.6, rp: 14, cat: 'armour', from: 0, vet: 1,
+                   men: ['uksherman'], note: 'The commonest tank in the British and Commonwealth armoured regiments from El Alamein on: the diesel Sherman III and its sisters, three to a troop with the Firefly. The Guards drove them up Hell\'s Highway.' },
+    br_stuart:     { name: 'Stuart VI', nation: 'uk', w: 1, rp: 8, cat: 'recon', from: 0, vet: 1,
+                   men: ['ukstuart'], note: 'The "Honey" of the desert grown up: the M5A1 in the reconnaissance troops of British armoured regiments, fast and quiet and lightly armed.' },
+    br_m10:        { name: 'M10 3-inch SP', nation: 'uk', w: 0.8, rp: 13, cat: 'armour', from: 0, vet: 1,
+                   men: ['ukm10'], note: 'The Royal Artillery\'s anti-tank regiments took the M10 with its American 3-inch gun before the 17-pounder conversion, the Achilles, replaced it; both served side by side in Normandy.' },
+    br_priest:     { name: 'Priest (105 mm SP)', nation: 'uk', w: 0.6, rp: 13, cat: 'arty', from: 0, vet: 1,
+                   men: ['ukpriest'], note: 'Ninety M7s reached the Eighth Army in time for El Alamein, and it was the British who named it, for its pulpit; the Canadians took the guns out to make the first Kangaroos.' },
+    br_halftrack:  { name: 'M5 Half-track', nation: 'uk', w: 1, rp: 8, cat: 'transport', from: 0, vet: 1,
+                   men: ['ukhalftrack'], note: 'International Harvester\'s M5, the half-track Lend-Lease sent to the British: the motor battalions of the armoured brigades rode to battle in them.' },
+    br_jeep:       { name: 'Jeep (Airborne Recce)', nation: 'uk', w: 1, rp: 4, cat: 'recon', from: 0, vet: 2,
+                   men: ['ukjeep'], note: 'The airborne reconnaissance squadrons\' jeeps, flown in by glider: at Arnhem Major Gough\'s were to rush the bridge ahead of the brigade.' },
+    fr_m7:         { name: 'M7 Priest (French)', nation: 'fr', w: 0.6, rp: 13, cat: 'arty', from: 99, vet: 1,
+                   men: ['frm7'], note: 'The armoured divisions of the new French army — Leclerc\'s 2e DB and the 1st and 5th DB of de Lattre\'s First Army — had their self-propelled 105s from the same American factories.' },
+    fr_jeep:       { name: 'Jeep (2e DB)', nation: 'fr', w: 1, rp: 4, cat: 'recon', from: 99, vet: 1,
+                   men: ['frjeep'], note: 'Leclerc drove into Paris in one, named "Tailly". Every reconnaissance troop and every staff of the 2e DB went about in them.' },
+    fr_truck:      { name: 'GMC CCKW (2e DB)', nation: 'fr', w: 0.8, rp: 5, cat: 'transport', from: 99, vet: 1,
+                   men: ['frtruck'], note: 'The "Jimmy" that carried the Régiment de marche du Tchad\'s infantry and everything the division ate and fired.' },
+    fr_m3a1sc:     { name: 'M3A1 Scout Car (French)', nation: 'fr', w: 0.8, rp: 6, cat: 'recon', from: 99, vet: 1,
+                   men: ['frm3a1sc'], note: 'The White scout car with the French armoured cavalry in Tunisia and Italy, and with the 2e DB\'s spahis; open, fast and thin.' },
+    fr_m20:        { name: 'M20 Utility Car (2e DB)', nation: 'fr', w: 0.6, rp: 6, cat: 'recon', from: 99, vet: 1,
+                   men: ['frm20'], note: 'The command car of the 2e DB\'s spahi squadrons, the Greyhound without its turret and a .50 on a ring.' },
+    br_grant:      { name: 'Grant I', nation: 'uk', w: 1, rp: 13, cat: 'armour', from: 99, vet: 1,
+                   men: ['ukgrant'], note: 'The first British tank with a 75 mm that could fire high explosive, in a sponson low on the hull, and the British turret on top: at Gazala in May 1942 the Afrikakorps met it, and did not enjoy it.' },
+    fr_lorraine:   { name: 'Lorraine 38L VBCP', nation: 'fr', w: 0.6, rp: 6, cat: 'transport', from: 99, vet: 1,
+                   men: ['frlorraine'], note: 'An armoured infantry carrier in 1940, before most armies had one: the light mechanised divisions\' dragons portés rode to battle in an armoured box on the Lorraine supply tractor.' },
+    us_longtom:    { name: '155mm Gun "Long Tom"', nation: 'us', w: 0.4, rp: 16, cat: 'arty', from: 2, vet: 1,
+                   men: ['uslongtom'], note: 'The corps gun: a 43 kg shell to twenty-three kilometres, fourteen men and a tractor to move it. It does not belong anywhere near the front, and it reaches the enemy\'s rear from behind your own.' },
+    us_mortar42:   { name: '4.2-inch Mortar Team', nation: 'us', w: 0.6, rp: 10, cat: 'mortar', from: 0, vet: 1,
+                   men: ['usmortar42'], note: 'The chemical battalions\' rifled mortar, built for gas and firing high explosive and white phosphorus instead: an 11 kg bomb, four kilometres, and the heaviest punch an American infantry regiment could call on.' },
+    br_2pdr:       { name: 'QF 2-pounder', nation: 'uk', w: 0.8, rp: 6, cat: 'atgun', from: 99, vet: 1,
+                   men: ['uk2pdr'], note: 'The British anti-tank gun of 1940-42, standing on its three legs with its wheels off the ground so it turns right round. Good against anything in 1940, and a peashooter by 1942. No high explosive.' },
+    br_55in:       { name: 'BL 5.5-inch Medium Gun', nation: 'uk', w: 0.4, rp: 15, cat: 'arty', from: 0, vet: 1,
+                   men: ['uk55in'], note: 'The medium regiments\' gun from El Alamein to the end: a 45 kg shell to fifteen kilometres, and the two big spring cylinders on its front that make it the easiest gun in the army to recognise.' },
+    fr_75:         { name: 'Canon de 75 mle 1897', nation: 'fr', w: 1, rp: 9, cat: 'arty', from: 99, vet: 1,
+                   men: ['fr75'], note: 'The soixante-quinze: the first field gun with a true recoil system, fifteen rounds a minute in 1897, still the divisional gun in 1940 — and, over open sights with its old armour-piercing shell, an anti-tank gun.' },
+    fr_mortar81:   { name: 'Mortier de 81 Brandt', nation: 'fr', w: 1, rp: 8, cat: 'mortar', from: 99, vet: 1,
+                   men: ['frmortar81'], note: 'Edgar Brandt\'s 81 mm of 1927, the mortar the world copied: the American M1 is a licence-built Brandt. A 3.25 kg bomb to 2.8 km.' },
+    fr_mortar60:   { name: 'Mortier de 60 Brandt', nation: 'fr', w: 1.2, rp: 5, cat: 'mortar', from: 99, vet: 1,
+                   men: ['frmortar60'], note: 'The company\'s light mortar of 1935, and again the American M2 is a Brandt under licence. A 1.3 kg bomb to 1.7 km, carried by two men.' },
+    fr_105:        { name: 'Obusier de 105 M2', nation: 'fr', w: 0.8, rp: 11, cat: 'arty', from: 99, vet: 1,
+                   men: ['fr105'], note: 'The American 105 mm howitzer in the French divisional artillery of 1943-45: the 64e RADB fired it for the 2e DB from Normandy to Berchtesgaden.' },
+    fr_bazooka:    { name: 'Équipe bazooka', nation: 'fr', w: 1.6, rp: 5, cat: 'at', from: 99, vet: 1,
+                   men: ['frbazooka'], note: 'The rearmed French infantry of 1944 carried the American 2.36-inch rocket launcher: two men, a tube, and the only thing a section had against a Panther.' },
+    br_bofors:     { name: 'Bofors 40 mm', nation: 'uk', w: 0.6, rp: 8, cat: 'atgun', from: 0, vet: 1,
+                   men: ['ukbofors'], note: 'The light anti-aircraft regiments\' gun, two rounds a second; with the Luftwaffe gone by the summer of 1944 it was turned on the ground, and in the Netherlands the Bofors "pepperpot" barrage went in front of the infantry.' },
+    fr_155gpf:     { name: 'Canon de 155 GPF', nation: 'fr', w: 0.4, rp: 14, cat: 'arty', from: 99, vet: 1,
+                   men: ['fr155gpf'], note: 'Filloux\'s great gun of 1917, the first with split trails; in 1940 the army corps still had nothing heavier, and the Americans had built it themselves as their M1918.' },
+    fr_105l36:     { name: 'Canon de 105 L mle 1936', nation: 'fr', w: 0.6, rp: 12, cat: 'arty', from: 99, vet: 1,
+                   men: ['fr105l36'], note: 'Schneider\'s long 105, the modern gun of the French corps artillery in 1940: split trails, pneumatic tyres, fifteen kilometres. There were too few of them.' },
+    br_para:       { name: 'Airborne Section', nation: 'uk', w: 1.4, rp: 12, cat: 'rifle', from: 0, vet: 2,
+                   men: ['uksten', 'ukbren', 'ukpara', 'ukpara', 'ukpara', 'ukpara', 'ukpara', 'ukpara', 'ukpara', 'ukpara'], note: 'The Red Berets in their Denison smocks: the 6th Airborne at the Orne bridges, the 1st at Arnhem, where they held the north end of the bridge for four days with what they carried.' },
+    br_canadian:   { name: 'Canadian Rifle Section', nation: 'uk', w: 2, rp: 9, cat: 'rifle', from: 0, vet: 1,
+                   men: ['uksten', 'ukbren', 'ukcanadian', 'ukcanadian', 'ukcanadian', 'ukcanadian', 'ukcanadian', 'ukcanadian', 'ukcanadian', 'ukcanadian'], note: 'Every man a volunteer: the 3rd Canadian Division came ashore on Juno and got further inland on D-Day than anyone, and then fought the 12th SS for Caen.' },
+    br_polish:     { name: 'Polish Rifle Section', nation: 'uk', w: 1.2, rp: 10, cat: 'rifle', from: 9, vet: 2,
+                   men: ['uksten', 'ukbren', 'ukpolish', 'ukpolish', 'ukpolish', 'ukpolish', 'ukpolish', 'ukpolish', 'ukpolish', 'ukpolish'], note: 'An army in exile in British battledress: the 1st Armoured Division corked the Falaise pocket on Hill 262, Sosabowski\'s brigade jumped at Driel, and the 2nd Corps took Monte Cassino.' },
+    fr_alpin:      { name: 'Section de Chasseurs alpins', nation: 'fr', w: 1.2, rp: 10, cat: 'rifle', from: 99, vet: 2,
+                   men: ['frfm2429', 'fralpin', 'fralpin', 'fralpin', 'fralpin', 'fralpin', 'fralpin', 'fralpin', 'fralpin', 'fralpin', 'fralpin'], note: 'The "blue devils" in their great floppy berets: mountain infantry, who took Narvik back from the Germans in May 1940 and in June held the Alps against the Italians without giving a metre.' },
+    fr_legion:     { name: 'Groupe de la Légion étrangère', nation: 'fr', w: 1, rp: 11, cat: 'rifle', from: 99, vet: 2,
+                   men: ['frfm2429', 'frlegion', 'frlegion', 'frlegion', 'frlegion', 'frlegion', 'frlegion', 'frlegion', 'frlegion', 'frlegion', 'frlegion'], note: 'Foreigners in French service, the white képi their badge: the 13e Demi-Brigade at Narvik and Bir Hakeim, the régiments de marche of volunteers who held the Inor wood and the Somme in 1940.' },
+    fr_tirailleur: { name: 'Section de Tirailleurs sénégalais', nation: 'fr', w: 1.4, rp: 9, cat: 'rifle', from: 99, vet: 1,
+                   men: ['frfm2429', 'frtirailleur', 'frtirailleur', 'frtirailleur', 'frtirailleur', 'frtirailleur', 'frtirailleur', 'frtirailleur', 'frtirailleur', 'frtirailleur', 'frtirailleur'], note: 'West African infantry, a hundred thousand of them in France in 1940: they held the Somme hedgehogs and Lyon\'s approaches to the end, and too many who surrendered were shot by their captors.' },
+    // <<< round 115 roster
     // >>> round 108 roster (tools/roster_r108.py writes these rows from tools/roster_r108_spec.py: edit the spec, not them)
     ger_pz1:      { name: 'Panzer I', nation: 'ger', w: 1, rp: 6, cat: 'recon', from: 99, vet: 1,
                    men: ['gerpz1'], note: 'Two machine guns and thirteen millimetres of plate: a training tank, and in 1940 still a third of the panzer regiments. Use it to find things, not to fight them.' },
@@ -827,17 +1005,27 @@
   // squad the company was actually made of.
   for (var tk in TEMPLATES) { TEMPLATES[tk].id = tk; if (TEMPLATES[tk].w === undefined) TEMPLATES[tk].w = 1; }
 
-  /** Every template a side may draw from, in requisition order.
+  /** (round 115) WHO MAY FIGHT BESIDE WHOM — the battle setup's alliances
+   *  (assets/battlesetup.js `ALLIANCES`), here so the reinforcements read the
+   *  same rule: the Americans, the Commonwealth, the Red Army and the French
+   *  are the Allies; the Germans, the Italians and the Japanese the Axis.
+   *  Nothing crosses between them. An army no row names has none. */
+  var ALLIANCE_OF = { us: 'allied', uk: 'allied', sov: 'allied', fr: 'allied', ger: 'axis', it: 'axis', jp: 'axis' };
+  function allianceOf(nation) { return ALLIANCE_OF[nation] || null; }
+
+  /** Every template a side may draw from, in requisition order: EVERY ARMY OF
+   *  ITS ALLIANCE. `nation` is the side's own army; without one, team 2 is the
+   *  Axis and any other team the Allies.
    *
-   *  Team 1 draws from BOTH the American and the Commonwealth lists. The
-   *  campaign runs down the American sector, but Villers-Bocage is a British
-   *  battle and the player is commanding the Allied battlegroup rather than one
-   *  specific regiment — so the 25-pounder and the AVRE are on the list when
-   *  the job calls for them. The German side draws only from its own. */
-  function templatesFor(team) {
-    var out = [], k;
-    if (team === 2) { for (k in TEMPLATES) if (TEMPLATES[k].nation === 'ger') out.push(TEMPLATES[k]); }
-    else { for (k in TEMPLATES) if (TEMPLATES[k].nation === 'us' || TEMPLATES[k].nation === 'uk') out.push(TEMPLATES[k]); }
+   *  It was team 1 = American or British, team 2 = German (the Commonwealth
+   *  had been added for Villers-Bocage, a British battle in an American
+   *  campaign); the French, the Red Army, the Italians and the Japanese were
+   *  on no list while the battle setup already let one force mix its whole
+   *  alliance. The campaign reads its own `nationsOf` (assets/campaign.js),
+   *  which this does not touch. */
+  function templatesFor(team, nation) {
+    var al = (nation && allianceOf(nation)) || (team === 2 ? 'axis' : 'allied'), out = [], k;
+    for (k in TEMPLATES) if (allianceOf(TEMPLATES[k].nation) === al) out.push(TEMPLATES[k]);
     out.sort(function (a, b) { return a.rp - b.rp; });
     return out;
   }
@@ -2584,6 +2772,7 @@
     CC_ORDERS: CC_ORDERS,
     CC_PALETTE_DUP: CC_PALETTE_DUP,
     templatesFor: templatesFor,
+    allianceOf: allianceOf, ALLIANCE_OF: ALLIANCE_OF,
     install: install,
   };
 })();

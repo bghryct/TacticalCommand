@@ -1236,6 +1236,37 @@
     var k = this.wallK[i];
     return k === K_SOLID || k === K_WINDOW;
   };
+  /**
+   * (round 115) THE PART OF AN EDGE A MAN GETS THROUGH. `edgeBlocks` answers
+   * for the whole six metres: a door edge was open along all of it, so a man
+   * shoved against the wall beside a doorway, or driven along it in first
+   * person, went through the brick. 0 = shut (wall, window), 1 = open along
+   * its length (nothing, rubble), 2 = open only between `spanLo` and `spanHi`
+   * (world units along the edge from its start): the doorway, the arch, the
+   * run of blown cells of a breach nearest `along`.
+   */
+  Structures.prototype.moveSpan = function (gx, gz, L, e, along) {
+    if (!this.wallM || !this.inb(gx, gz, L)) return 1;
+    var i = this.li(gx, gz, L) * 4 + e;
+    if (!this.wallM[i]) return 1;
+    var kr = this.wallK[i], k = kr & 7;
+    if (k === K_RUBBLE) return 1;
+    var lo = 1e9, hi = -1e9;
+    if (k === K_DOOR) { lo = T * 0.5 - 0.36 * S; hi = T * 0.5 + 0.36 * S; }
+    else if (k === K_ARCH) { lo = T * 0.16; hi = T * 0.84; }
+    if (kr & K_BREACH) {
+      var h = this.wallHole ? this.wallHole[i] : 0, cw = T / HOLE_COLS, best = -1, bd = 1e9;
+      for (var c = 0; c < HOLE_COLS; c++) if (h & (1 << c)) { var dd = Math.abs((c + 0.5) * cw - along); if (dd < bd) { bd = dd; best = c; } }
+      if (best < 0) return 1;              // flagged with no hole kept: open, as the search has it
+      var c0 = best, c1 = best;
+      while (c0 > 0 && (h & (1 << (c0 - 1)))) c0--;
+      while (c1 < HOLE_COLS - 1 && (h & (1 << (c1 + 1)))) c1++;
+      if (hi < lo || Math.abs((lo + hi) * 0.5 - along) > Math.abs((c0 + c1 + 1) * 0.5 * cw - along)) { lo = c0 * cw; hi = (c1 + 1) * cw; }
+    }
+    if (hi < lo) return 0;
+    this.spanLo = lo; this.spanHi = hi;
+    return 2;
+  };
   /** The same question, but between two cells given as a delta. Diagonals need
    *  both orthogonal surfaces open — you cannot slip through a corner. */
   Structures.prototype.canCross = function (gx, gz, L, dx, dz) {
@@ -1479,6 +1510,19 @@
       var gx = G.worldToCell(x), gz = G.worldToCell(z);
       if (gx !== pgx || gz !== pgz) {
         if (this.has(pgx, pgz) || this.has(gx, gz)) {
+          // (round 115) AT THE CROSSING, NOT AT THE SAMPLE. The sample after a
+          // cell change is up to a third of a cell (2 m) past the wall, and the
+          // opening was tested there: a round leaving a window at 20 degrees
+          // was judged by a point 0.7 m along the wall from where it went
+          // through, so a man firing from a window put more than half his
+          // rounds into the masonry beside it (78 of 146 in four Ortona
+          // houses). `_rayCross` finds where the segment meets each surface it
+          // crosses, in the order it meets them. `Structures.exactRay = false`
+          // is the old test.
+          if (window.Structures.exactRay !== false) {
+            var hx = this._rayCross(pgx, pgz, gx, gz, x0, y0, z0, dx, dy, dz);
+            if (hx) return hx;
+          } else {
           var ddx = gx - pgx, ddz = gz - pgz;
           var e = -1;
           if (ddx > 0) e = 1; else if (ddx < 0) e = 3; else if (ddz > 0) e = 2; else if (ddz < 0) e = 0;
@@ -1491,6 +1535,7 @@
             var h1 = this._rayWall(pgx, pgz, this._levelAt(this.wallBase(pgx, pgz, e1), y), e1, x, y, z)
                   || this._rayWall(pgx, pgz, this._levelAt(this.wallBase(pgx, pgz, e2), y), e2, x, y, z);
             if (h1) return h1;
+          }
           }
         }
       }
@@ -1512,9 +1557,132 @@
           }
         }
       }
+      // (round 115) …AND THE ATTIC UNDER THE SLOPES. A round flying over the
+      // eaves of a pitched roof went through the roof as if it were air: the
+      // eaves' plane was the only surface tested. The sightline is stopped
+      // there (`sightCross`), so the round is too.
+      if (window.Structures.exactRay !== false && this.has(gx, gz) && this.wallM) {
+        var atop = this.topLevel(gx, gz), ai = this.li(gx, gz, atop), arm = this.roofM[ai];
+        if (arm) {
+          var ary = this.floorY(gx, gz, atop) + FLOOR_H;
+          if (y > ary) {
+            var ash = this.roofK[ai] & 7, ark = this.roofK[ai] >> 3;
+            if (y < ary + (ash === R_FLAT ? 0.24 * S : (ark + 0.5) * riseOf(MATS[arm]))) return { kind: 'roof', gx: gx, gz: gz, L: atop, mat: arm, x: x, y: y, z: z };
+          }
+        }
+      }
       pgx = gx; pgz = gz; py = y;
     }
     return null;
+  };
+  /**
+   * (round 115) WHERE A SEGMENT CROSSES THE SURFACES BETWEEN TWO CELLS — the
+   * one between two neighbours, or both of a diagonal step in the order the
+   * segment meets them (the second on the cell it passed through). `t` runs
+   * along (x0, y0, z0) + (dx, dy, dz) * t. Returns the piece struck at the
+   * crossing point, or null.
+   */
+  Structures.prototype._crossT = function (gx, gz, e, x0, z0, dx, dz) {
+    if (e === 1 || e === 3) { var xb = G.cellCenter(gx) + (e === 1 ? T : -T) * 0.5; return dx ? (xb - x0) / dx : 0; }
+    var zb = G.cellCenter(gz) + (e === 2 ? T : -T) * 0.5; return dz ? (zb - z0) / dz : 0;
+  };
+  Structures.prototype._rayCross = function (pgx, pgz, gx, gz, x0, y0, z0, dx, dy, dz) {
+    var sx = gx - pgx, sz = gz - pgz;
+    if (sx && sz) {
+      var ex = sx > 0 ? 1 : 3, ez = sz > 0 ? 2 : 0;
+      var tx = this._crossT(pgx, pgz, ex, x0, z0, dx, dz), tz = this._crossT(pgx, pgz, ez, x0, z0, dx, dz);
+      if (tx <= tz) return this._rayCross1(pgx, pgz, ex, tx, x0, y0, z0, dx, dy, dz) || this._rayCross1(pgx + sx, pgz, ez, tz, x0, y0, z0, dx, dy, dz);
+      return this._rayCross1(pgx, pgz, ez, tz, x0, y0, z0, dx, dy, dz) || this._rayCross1(pgx, pgz + sz, ex, tx, x0, y0, z0, dx, dy, dz);
+    }
+    var e = sx > 0 ? 1 : sx < 0 ? 3 : sz > 0 ? 2 : 0;
+    return this._rayCross1(pgx, pgz, e, this._crossT(pgx, pgz, e, x0, z0, dx, dz), x0, y0, z0, dx, dy, dz);
+  };
+  Structures.prototype._rayCross1 = function (gx, gz, e, t, x0, y0, z0, dx, dy, dz) {
+    var xc = x0 + dx * t, yc = y0 + dy * t, zc = z0 + dz * t;
+    return this._rayWall(gx, gz, this._levelAt(this.wallBase(gx, gz, e), yc), e, xc, yc, zc);
+  };
+  /** `_rayWall`'s answer as a yes/no, allocating nothing — for sightlines. */
+  Structures.prototype._wallStops = function (gx, gz, L, e, x, y, z) {
+    if (!this.inb(gx, gz, L)) return false;
+    var i = this.li(gx, gz, L) * 4 + e;
+    if (!this.wallM[i]) return false;
+    var k = this.wallK[i] & 7;
+    var fw = this.wallBase(gx, gz, e) + L * FLOOR_H;
+    if (this.wallHole && this.wallHole[i] && k !== K_RUBBLE
+        && (this.wallHole[i] & (1 << this._holeBit(gx, gz, e, fw, x, y, z)))) return false;
+    if (k === K_RUBBLE) return y <= fw + 0.62 * S;
+    if (k === K_DOOR) return !(y < fw + 1.55 * S && this._nearEdgeCentre(gx, gz, e, x, z, 0.36 * S));
+    if (k === K_WINDOW) return !(y > fw + 0.78 * S && y < fw + 1.62 * S
+      && (pairs() ? this._nearPair(gx, gz, e, x, z, 0.41 * S) : this._nearEdgeCentre(gx, gz, e, x, z, 0.41 * S)));
+    if (k === K_ARCH) return !(y < fw + FLOOR_H - 0.32 * S);
+    return true;
+  };
+  /**
+   * (round 115) A SIGHTLINE STOPS WHERE A ROUND WOULD. `sightStep` let a line
+   * through any window, door or breach EDGE at any height and anywhere along
+   * its six metres, so a man saw through a house wherever both its fronts had
+   * a window: of street pairs either side of a building whose sightline it
+   * passed, a round along the same line struck a wall in 52-69% (Village,
+   * Ortona, Nijmegen, Berlin, Saint-Lo) — men saw, and shot at, what no round
+   * could reach. Here every surface is tested where the line CROSSES it, by
+   * the opening a round uses (`_wallStops`), EXCEPT the walls of the two
+   * cells the line starts and ends in (`oa`, `ob`, cell indices): a man at a
+   * window looks out of it, and is seen in it, as before — he is at his
+   * opening, and `Projectiles._windowFire` puts his fire through it. And a
+   * roof is a roof: the line that crosses the eaves' plane inside a roofed
+   * column, or passes through the attic under its slopes, is stopped. The
+   * same arguments as `sightStep`, plus the line (a + d t) and the two cells.
+   */
+  Structures.prototype.sightCross = function (gx0, gz0, gx1, gz1, y, prevY, ax, ay, az, dx, dy, dz, oa, ob) {
+    if (!this.any) return false;
+    var h0 = this.has(gx0, gz0), h1 = this.has(gx1, gz1);
+    if (!h0 && !h1) return false;
+    var sx = gx1 - gx0, sz = gz1 - gz0;
+    if (sx || sz) {
+      if (sx && sz) {
+        var ex = sx > 0 ? 1 : 3, ez = sz > 0 ? 2 : 0;
+        var tx = this._crossT(gx0, gz0, ex, ax, az, dx, dz), tz = this._crossT(gx0, gz0, ez, ax, az, dx, dz);
+        if (tx <= tz) {
+          if (this._sightCross1(gx0, gz0, ex, tx, ax, ay, az, dx, dy, dz, oa, ob)) return true;
+          if (this._sightCross1(gx1, gz0, ez, tz, ax, ay, az, dx, dy, dz, oa, ob)) return true;
+        } else {
+          if (this._sightCross1(gx0, gz0, ez, tz, ax, ay, az, dx, dy, dz, oa, ob)) return true;
+          if (this._sightCross1(gx0, gz1, ex, tx, ax, ay, az, dx, dy, dz, oa, ob)) return true;
+        }
+      } else {
+        var e = sx > 0 ? 1 : sx < 0 ? 3 : sz > 0 ? 2 : 0;
+        if (this._sightCross1(gx0, gz0, e, this._crossT(gx0, gz0, e, ax, az, dx, dz), ax, ay, az, dx, dy, dz, oa, ob)) return true;
+      }
+    }
+    if (h1) {
+      if (prevY !== undefined && prevY !== y) {
+        var La = this.levelOf(gx1, gz1, prevY), Lb = this.levelOf(gx1, gz1, y);
+        if (La !== Lb && this.floorMat(gx1, gz1, Math.max(La, Lb))) return true;
+      }
+      // the roof, and the attic under it (not the end cells': a man is not
+      // in his own roof, and the street next to a house is not under it)
+      var ci1 = gz1 * G.GRID + gx1;
+      if (ci1 !== oa && ci1 !== ob && this.wallM) {
+        var top = this.topLevel(gx1, gz1), ri = this.li(gx1, gz1, top), rm = this.roofM[ri];
+        if (rm) {
+          var ry = this.floorY(gx1, gz1, top) + FLOOR_H;
+          if (prevY !== undefined && (prevY - ry) * (y - ry) < 0) return true;
+          var sh = this.roofK[ri] & 7, rk = this.roofK[ri] >> 3;
+          var rt = sh === R_FLAT ? 0.24 * S : (rk + 0.5) * riseOf(MATS[rm]);
+          if (y > ry && y < ry + rt) return true;
+        }
+      }
+    }
+    return false;
+  };
+  Structures.prototype._sightCross1 = function (gx, gz, e, t, ax, ay, az, dx, dy, dz, oa, ob) {
+    var yc = ay + dy * t;
+    var L = this._levelAt(this.wallBase(gx, gz, e), yc);
+    if (!this.inb(gx, gz, L) || !this.wallM) return false;
+    if (!this.wallM[this.li(gx, gz, L) * 4 + e]) return false;
+    var d = EDGE_D[e], c0 = gz * G.GRID + gx, c1 = (gz + d[1]) * G.GRID + gx + d[0];
+    if (c0 === oa || c1 === oa || c0 === ob || c1 === ob) return this._sightEdge(gx, gz, L, e, yc);
+    return this._wallStops(gx, gz, L, e, ax + dx * t, yc, az + dz * t);
   };
   Structures.prototype._rayWall = function (gx, gz, L, e, x, y, z) {
     if (!this.inb(gx, gz, L)) return null;
@@ -3065,6 +3233,9 @@
     /** A map's big plots built as blocks of houses (`_buildBlock`): false, and
      *  a reload, gives the one building per plot back. */
     blocks: true,
+    /** (round 115) a round is tested against a wall where it crosses it
+     *  (`_rayCross`); false: at the next sample, as before */
+    exactRay: true,
     K_SOLID: K_SOLID, K_DOOR: K_DOOR, K_WINDOW: K_WINDOW, K_RUBBLE: K_RUBBLE, K_ARCH: K_ARCH,
     K_BREACH: K_BREACH, HOLE_COLS: HOLE_COLS, HOLE_ROWS: HOLE_ROWS, HOLE_FALL: HOLE_FALL, EDGE_BLAST: EDGE_BLAST,
     R_FLAT: R_FLAT, R_RIDGE_X: R_RIDGE_X, R_RIDGE_Z: R_RIDGE_Z,

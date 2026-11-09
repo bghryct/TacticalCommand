@@ -354,6 +354,27 @@
       us_sherman76: 5, us_jumbo: 9, br_croc: 6, br_avre: 6, us_m12: 7,
       ger_tiger: 3, ger_panther: 4, ger_kt: 8, ger_jagd: 7, ger_ss: 0, ger_fj: 0,
       ger_stg: 5, ger_222: 0, ger_pak43: 5, ger_brummbar: 6,
+      // >>> round 115 roster (tools/roster_r115.py writes these rows from tools/roster_r115_spec.py: edit the spec, not them)
+      us_m8hmc: 0,
+      us_m15: 0,
+      us_m20: 0,
+      br_archer: 3,
+      br_challenger: 0,
+      br_humber: 0,
+      br_staghound: 0,
+      br_dingo: 0,
+      br_sherman: 0,
+      br_stuart: 0,
+      br_m10: 0,
+      br_halftrack: 0,
+      br_jeep: 0,
+      us_longtom: 2,
+      us_mortar42: 0,
+      br_55in: 0,
+      br_bofors: 0,
+      br_para: 0,
+      br_polish: 7,
+      // <<< round 115 roster
     },
     startForce: {
       1: [{ name: '1st Parachute Platoon', squads: ['us_hq', 'us_para', 'us_para', 'us_60mm', 'us_bazooka'] }],
@@ -692,6 +713,36 @@
       us_m3lee: 0, us_37mm: 0, us_sherman: 2, us_sherman76: 8, us_zippo: 9,
       br_churchill: 3, br_firefly: 7, br_17pdr: 5, br_croc: 8, br_kangaroo: 10,
       br_avre: 8, us_priest: 3, br_sexton: 5, us_jumbo: 11,
+      // >>> round 115 roster (tools/roster_r115.py writes these rows from tools/roster_r115_spec.py: edit the spec, not them)
+      us_m4a3e8: 13,
+      us_m24: 13,
+      us_m36: 12,
+      us_m8hmc: 7,
+      us_m3gmc: 5,
+      us_m15: 7,
+      us_m3a1sc: 5,
+      us_m20: 9,
+      br_matilda: 0,
+      br_valentine: 4,
+      br_archer: 12,
+      br_bishop: 4,
+      br_crusader: 3,
+      br_churchill3: 6,
+      br_humber: 7,
+      br_staghound: 9,
+      br_dingo: 0,
+      br_sherman: 4,
+      br_stuart: 5,
+      br_m10: 7,
+      br_priest: 4,
+      br_halftrack: 7,
+      br_grant: 2,
+      us_longtom: 7,
+      us_mortar42: 7,
+      br_2pdr: 0,
+      br_55in: 4,
+      br_bofors: 0,
+      // <<< round 115 roster
       // >>> round 108 roster (tools/roster_r108.py writes these rows from tools/roster_r108_spec.py: edit the spec, not them)
       ger_pz1: 0,
       ger_pzjg1: 0,
@@ -810,6 +861,29 @@
       ger_stg: 99, ger_volks: 99, ger_ss: 99, ger_fj: 5, ger_ost: 99,
       ger_faust: 99, ger_schreck: 99, ger_puma: 99, ger_wirbel: 99, ger_marder: 99,
       ger_flak38: 3, ger_wespe: 99, ger_goliath: 99, ger_sniper2: 99, ger_stummel: 99,
+      // >>> round 115 roster (tools/roster_r115.py writes these rows from tools/roster_r115_spec.py: edit the spec, not them)
+      br_matilda: 5,
+      br_dingo: 0,
+      fr_r35: 0,
+      fr_h35: 0,
+      fr_fcm36: 2,
+      fr_amr35: 0,
+      fr_d2: 6,
+      fr_panhard: 0,
+      fr_laffly: 2,
+      fr_ue: 0,
+      fr_lorraine: 0,
+      br_2pdr: 0,
+      fr_75: 0,
+      fr_mortar81: 0,
+      fr_mortar60: 0,
+      br_bofors: 0,
+      fr_155gpf: 0,
+      fr_105l36: 0,
+      fr_alpin: 8,
+      fr_legion: 7,
+      fr_tirailleur: 0,
+      // <<< round 115 roster
       // >>> round 108 roster (tools/roster_r108.py writes these rows from tools/roster_r108_spec.py: edit the spec, not them)
       ger_pz1: 0,
       ger_pzjg1: 0,
@@ -1497,8 +1571,13 @@
       if (brief.situation) txt += sect('Situation', brief.situation);
       if (brief.mission) txt += sect('Mission', brief.mission);
       if (brief.intel) txt += sect('Intelligence', brief.intel);
+      // (round 116) how this battle is won: seven objectives, the score, the map's own mission
+      var rule = this.vp116Rule ? this.vp116Rule(map) : '';
+      if (rule) txt += sect('Victory', rule);
       txt += sect('Conditions', cap(brief.weather || 'clear') + ' · H-hour '
-        + hhmm(brief.hour == null ? 480 : brief.hour) + ' · ' + (brief.clock || 20) + ' minutes');
+        + hhmm(brief.hour == null ? 480 : brief.hour) + ' · '
+        // (round 116) the clock this battle will actually run (a briefed clock is tripled in a skirmish)
+        + (this.vp116 !== false && this.battleDuration > 0 ? Math.round(this.battleDuration / 60) : (brief.clock || 20)) + ' minutes');
       if (brief.history) txt += sect('What happened', brief.history, 'br-hist');
       el.querySelector('#brText').innerHTML = txt;
 
@@ -1545,6 +1624,8 @@
       if (brief.situation) txt += sect('Situation', brief.situation);
       txt += sect('Mission', (b.objective || '') + (brief.mission ? ' ' + brief.mission : ''));
       if (brief.intel) txt += sect('Intelligence', brief.intel);
+      var rule116 = this.vp116Rule ? this.vp116Rule(map) : '';   // (round 116)
+      if (rule116) txt += sect('Victory', rule116);
       // "up to N squads may take the field" was the deploy cap talking, and
       // the cap is gone: everything you own goes in. What the number MEANS is
       // the frontage this ground held, which is worth telling you and is not

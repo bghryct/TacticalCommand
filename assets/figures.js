@@ -847,6 +847,14 @@
     officerHead: 'feldmutze', capC: 0x8a7a4b,
   };
   KITS.jpsnlf = K(KITS.jp, { tunic: 0x5c6040, trousers: 0x585c3e, collar: 0x5c6040, legC: 0x585c3e });
+  // >>> round 115 roster (tools/roster_r115.py writes these rows from tools/roster_r115_spec.py: edit the spec, not them)
+  KITS.ukpara = K(KITS.uk, { jacket: 'smock', skirt: 0.16, flare: 0.012, camo: 'oak', tunic: 0x7d7556, collar: 0x7d7556, head: 'fj', helm: 0x4f523b, scrim: true, pack: 'none', legs: 'anklets' });
+  KITS.ukcan = K(KITS.uk, { tunic: 0x5f5a3a, collar: 0x5f5a3a, trousers: 0x5d5838 });
+  KITS.ukpol = K(KITS.uk, { tunic: 0x6a5a3c, collar: 0x6a5a3c, helm: 0x55523a });
+  KITS.fralpin = K(KITS.fr, { head: 'beret', helm: 0x1f2433, tunic: 0x3c4150, collar: 0x3c4150, trousers: 0x40434e, legs: 'puttees', legC: 0x3a3d48 });
+  KITS.frlegion = K(KITS.fr, { head: 'kepi', helm: 0xe8e4d8, capC: 0xe8e4d8 });
+  KITS.frsen = K(KITS.fr, { skin: 0x5a3a26, tunic: 0x7a6a44, collar: 0x7a6a44 });
+  // <<< round 115 roster
   F.KITS = KITS;
 
   const CREW = { web: 'none', pack: 'none', legs: 'none', scrim: false, officerMark: null, helmCamo: null, helmMark: null, breastPockets: false, skirtPockets: false, mapPocket: false, skirt: 0.03, flare: 0 };
@@ -869,6 +877,14 @@
     bazooka: 'us', fiftycal: 'us', sniper: 'us',
     panzerfaust: 'ger', mg42: 'ger', schreck: 'ger', mg34: 'ger',
     maxim: 'sov',
+    // >>> round 115 roster (tools/roster_r115.py writes these rows from tools/roster_r115_spec.py: edit the spec, not them)
+    ukpara: 'ukpara',
+    ukcanadian: 'ukcan',
+    ukpolish: 'ukpol',
+    fralpin: 'fralpin',
+    frlegion: 'frlegion',
+    frtirailleur: 'frsen',
+    // <<< round 115 roster
   };
   const PREFIX = [['us', 'us'], ['uk', 'uk'], ['ger', 'ger'], ['sov', 'sov'], ['fr', 'fr'], ['it', 'it'], ['jp', 'jp']];
   F.kitKey = function (type) {

@@ -362,9 +362,13 @@
      *  that was. `b` is the unit at the far end, if there is one. Reads only. */
     P.ccSight = function (a, tx, tz, b) {
       var vh = this._vehLOS !== false;
-      var ax = a.pos.x, az = a.pos.z, ay = a.pos.y + ((vh && a.def && a.def.eyeH) || 1.3 * this._losPostureF(a));
-      var by = b ? b.pos.y + ((vh && b.def && b.def.markH) || 1.0 * this._losPostureF(b, true))
-        : this.terrain.heightAt(tx, tz) + 1.0;
+      // (round 115) the game's own eye and chest heights (`EYE_H`, `MARK_H`, at
+      // life size and the army's stature): the line was drawn from 1.3 u — a
+      // diorama eye, 5 m up at true scale — and looked over every wall
+      var EH = A.EYE_H || 1.3, MH = A.MARK_H || 1.0;
+      var ax = a.pos.x, az = a.pos.z, ay = a.pos.y + ((vh && a.def && a.def.eyeH) || EH * this._losPostureF(a) * (a._eyeStat ? a._eyeStat() : 1));
+      var by = b ? b.pos.y + ((vh && b.def && b.def.markH) || MH * this._losPostureF(b, true) * (b._eyeStat ? b._eyeStat() : 1))
+        : this.terrain.heightAt(tx, tz) + MH;
       var dx = tx - ax, dz = tz - az, d = Math.hypot(dx, dz);
       var out = { state: 'clear', obsc: null, block: null, d: d };
       if (d < 0.6) return out;
@@ -377,12 +381,16 @@
       var fogB = (this.fogBanks && this.fogBanks.banks.length) ? this.fogBanks : null, fogStep = fogB ? d / steps : 0, fogSum = 0;
       var str = (this.structures && this.structures.any) ? this.structures : null;
       var pgx = acx, pgz = acz, pyy = ay;
+      // (round 115) walls where the line crosses them, as `_hasLOSCalc` does
+      var SX = str && str.sightCross && this.sight115 !== false, G = A.GRID ? A.GRID() : 0;
+      var oa = SX ? acz * G + acx : -1, ob = SX ? bcz * G + bcx : -1, ddy = by - ay;
+      var wall = function (p0, p1, q0, q1, yy, py) { return SX ? str.sightCross(p0, p1, q0, q1, yy, py, ax, ay, az, dx, ddy, dz, oa, ob) : str.sightStep(p0, p1, q0, q1, yy, py); };
       var obsc = function (t) { if (out.obsc === null) out.obsc = d * t; };
       var block = function (t) { out.block = d * t; out.state = 'blocked'; return out; };
       for (var i = 1; i < steps; i++) {
         var t = i / steps, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t;
         var gx = w2c(x), gz = w2c(z);
-        if (str && str.sightStep(pgx, pgz, gx, gz, y, pyy)) return block(t);
+        if (str && wall(pgx, pgz, gx, gz, y, pyy)) return block(t);
         pgx = gx; pgz = gz; pyy = y;
         if (this.terrain.heightAt(x, z) > y) return block(t);
         if ((gx === acx && gz === acz) || (gx === bcx && gz === bcz) || (gx === agx && gz === agz) || (gx === bgx && gz === bgz)) continue;
@@ -402,7 +410,7 @@
           }
         }
       }
-      if (str && (pgx !== bcx || pgz !== bcz) && str.sightStep(pgx, pgz, bcx, bcz, by, pyy)) return block(1);
+      if (str && (pgx !== bcx || pgz !== bcz) && wall(pgx, pgz, bcx, bcz, by, pyy)) return block(1);
       // Smoke is one integral over the whole line (`SmokeField.occlusion`),
       // so where it starts is found from the clouds themselves.
       if (window.RTT && this.smoke && this.smoke.clouds.length) {
