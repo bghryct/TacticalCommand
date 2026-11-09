@@ -3597,6 +3597,7 @@ const HE_STRIKE_K = 3;
 // hole — and the range inside which it fades to certainty.
 const PRESENT = { up: 0.4, low: 0.25, prone: 0.12, dug: 0.05, win: 0.07 };   // win: at a window in a room (round 115)
 const PRESENT_NEAR = 8;
+const PRESENT_NEAR_WIN = 3;   // (round 115) …for a man at a window: 12 m
 // WHERE A ROUND THAT FINDS HIM FINDS HIM (`Unit._woundLoc`, round 106), by
 // the same four postures: shares of [head, trunk, arm, leg]. The old roll gave
 // every man one body — eight in a hundred in the head whether he was standing
@@ -26567,6 +26568,10 @@ const FRAG_WALL_MASONRY = 0.08;
 // count against a way out (`_fleeFire`).
 const STACK_R = 16, STACK_OFF = 0.36, STACK_STEP = 0.24, STACK_GAP = 1.2, NADE_ROOM_WAIT = 2.2, STACK_MAX = 25, STACK_ARRIVE = 0.3;
 const FLEE_FOE_R = 10;
+// (round 115) giving up a house (`Game._houseFallBack`): enemies known within
+// FALLBACK_R (u) at FALLBACK_ODDS to one against his side's men round him;
+// every man looked at every FALLBACK_S s; not sent back in for FALLBACK_HOLD s
+const FALLBACK_R = 22, FALLBACK_ODDS = 2.5, FALLBACK_S = 1.0, FALLBACK_HOLD = 45;
 // (round 115) how far a man's middle keeps off a wall: half his width (0.28 m)
 // and half the wall's thickness, in world units (`Game._wallClamp`)
 const MAN_CLEAR = 0.28 / METERS_PER_UNIT + 0.18 * K_BLD * 0.5;
@@ -31052,7 +31057,11 @@ class Projectiles {
           // (round 116) …and if all the firer could see of him was his head over his cover, a
           // head is what there is to hit (`PRESENT.win`): he was 'up' and dead the moment he looked
           if (p.headOnly) pf = Math.min(pf, PRESENT.win);
-          pf = pf + (1 - pf) * Math.exp(-d / PRESENT_NEAR);
+          // (round 115) a man in a window frame is a small target until he is
+          // close: the fade to certainty is PRESENT_NEAR_WIN for him, not the
+          // 32 m that made him a 28% shot at fifty metres
+          const pnear = (game.cover115 !== false && victim._postureClass() === 'win') ? PRESENT_NEAR_WIN : PRESENT_NEAR;
+          pf = pf + (1 - pf) * Math.exp(-d / pnear);
           if (p.sniper) pf = Math.sqrt(pf);        // he waits for the head, and he gets it
           if (Math.random() >= pf) victim = null;
         }
@@ -53522,7 +53531,7 @@ class Game {
       // firing from the street in front of the house he has been told to hold
       // is in the wrong place whatever he is firing at, and
       // `_aiOccupyStructure` drops his target as it orders him.
-      if (!want && !u.path.length) want = u;
+      if (!want && !u.path.length && !(this.time - (u._fellBackT || -1e9) < FALLBACK_HOLD)) want = u;
     }
     if (want && this._aiOccupyStructure(want, t.x, t.z, r + 8)) inside++;
     return inside > 0;
@@ -58926,6 +58935,92 @@ class Game {
       u.orderMove(s.tx, s.tz, false, 'fast', s.L);
       u._strSpot = s.key; u._pendingCover = true;
     }
+  }
+  /**
+   * (round 115) A HOUSE THAT CANNOT BE HELD IS LEFT, BY THE FAR SIDE. Three men
+   * at the windows of a house with twelve coming at them died in it to the
+   * last man, every time (9 of 9 over three Ortona houses): nothing in a room
+   * ever asked whether the room was worth dying in. Close Combat's men give up
+   * a position they are losing and fall back to the next; here a man in a room
+   * who is losing it — enemies known within FALLBACK_R at FALLBACK_ODDS to one
+   * against the men of his side in the house, and himself hit or under heavy
+   * fire — gives up his window and runs out of the house on the side away from
+   * them (the way out `_fleeFire` finds), and is not sent back into it for
+   * FALLBACK_HOLD seconds (`_squadHoldsBuilding`). Not the man you are riding,
+   * not a man under your explicit order. A slice of the army a step.
+   * `game.fallback115 = false`.
+   */
+  _houseFallBack(dt) {
+    const S = this.structures;
+    if (this.fallback115 === false || !S || !S.any || this.mode !== 'play') return;
+    const U = this.units, n = U.length;
+    if (!n) return;
+    const per = Math.min(n, Math.max(4, Math.ceil(n * (dt || 0.05) / FALLBACK_S)));
+    let c = this._fbCur | 0;
+    const now = this.time;
+    for (let k = 0; k < per; k++) {
+      c = c + 1 >= n ? 0 : c + 1;
+      const u = U[c];
+      if (!u.alive || u.downed || u.def.vehicle || u.def.towed || u.embarkedIn || u.explicit || (this.fpv && this.fpv.unit === u)) continue;
+      if (!u._inRoom() || (u.path && u.path.length)) continue;
+      const hurt = u.hp < u.maxHp * 0.8 || (u.suppression || 0) > 0.35 || u.suppState === 'Pinned';
+      if (!hurt) continue;
+      // the enemy known round the house, against his own side in it
+      const ix = this._knownIndex(u.team), R2 = FALLBACK_R * FALLBACK_R;
+      let foes = 0, fx = 0, fz = 0;
+      for (let i = 0; i < ix.n; i++) {
+        if (now - ix.t[i] > 20) continue;
+        const dx = ix.x[i] - u.pos.x, dz = ix.z[i] - u.pos.z;
+        if (dx * dx + dz * dz <= R2) { foes++; fx += ix.x[i]; fz += ix.z[i]; }
+      }
+      if (foes < 3) continue;
+      let mates = 0;
+      for (const o of U) {
+        if (!o.alive || o.downed || o.team !== u.team || o.def.vehicle) continue;
+        if (Math.abs(o.pos.x - u.pos.x) < TILE * 3 && Math.abs(o.pos.z - u.pos.z) < TILE * 3) mates++;
+      }
+      if (foes < FALLBACK_ODDS * mates) continue;
+      fx /= foes; fz /= foes;
+      if (this._fallOut(u, fx, fz)) { u._fellBackT = now; this._fellBack = (this._fellBack || 0) + 1; }
+    }
+    this._fbCur = c;
+  }
+  /** Out of the house, away from (fx, fz): the nearest open cell (no roof, not
+   *  a room) within 10 cells that is further from the enemy than he is. */
+  _fallOut(u, fx, fz) {
+    const S = this.structures, gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z);
+    const fgx = worldToCell(fx), fgz = worldToCell(fz), d0 = hyp(gx - fgx, gz - fgz);
+    const roofed = (x, z) => !!(S.floorMat(x, z, 1) || S.roofMat(x, z, 0) || S.roofMat(x, z, S.topLevel(x, z)));
+    let best = null, bd = Infinity;
+    for (let dz = -10; dz <= 10; dz++) for (let dx = -10; dx <= 10; dx++) {
+      const x = gx + dx, z = gz + dz;
+      if (!inGrid(x, z) || !this.pathfinder.passable(x, z)) continue;
+      if (S.has(x, z) && (roofed(x, z) || S.insideAt(x, z, 0) >= 0.35)) continue;
+      const fd = hyp(x - fgx, z - fgz);
+      if (fd < d0 + 2) continue;                       // the far side, not the street he is shot from
+      const sc = dx * dx + dz * dz - fd * 0.5;
+      if (sc < bd) { bd = sc; best = { x, z }; }
+    }
+    if (!best) return false;
+    const wasAI = this._aiOrders, key = u._strSpot; this._aiOrders = true;
+    u._strSpot = null; u.hold = false;
+    try { u.orderMove(cellCenter(best.x), cellCenter(best.z), false, 'fast', 0); } finally { this._aiOrders = wasAI; }
+    let ok = !!u.path.length && !u._pathPartial;
+    // …AND OUT OF A DOOR ON THAT SIDE: where the route first leaves the
+    // roofed house must be further from them than he is — a house whose only
+    // door faces the enemy is held, not left into his fire
+    if (ok) {
+      let px = u.pos.x, pz = u.pos.z, ex = null;
+      for (const w of u.path) {
+        const m = Math.max(1, Math.ceil(hyp(w.x - px, w.z - pz) / (TILE * 0.25)));
+        for (let i = 1; i <= m && !ex; i++) { const x = worldToCell(px + (w.x - px) * i / m), z = worldToCell(pz + (w.z - pz) * i / m); if (!roofed(x, z)) ex = { x, z }; }
+        if (ex) break;
+        px = w.x; pz = w.z;
+      }
+      if (!ex || hyp(ex.x - fgx, ex.z - fgz) < d0) ok = false;
+    }
+    if (!ok) { u.path = []; u.state = 'idle'; u._strSpot = key; return false; }
+    return true;
   }
   /** (round 115) A hostile man in a room within two cells of (ix, iz). */
   _roomFoe(team, ix, iz) {
@@ -70268,6 +70363,7 @@ class Game {
     this._keepPlayerSections();                  // (round 110) the player's sections draw in their stragglers
     this._windowShuffle(dt);                     // (round 110) …and men in a house go to the side the enemy is on
     this._stackTick(dt);                         // (round 115) …and men going into a fight go in at a door, one at a time
+    this._houseFallBack(dt);                     // (round 115) …and a house that cannot be held is left by the far side
     this._ammoTrain(dt);                         // …and bombs come forward for the tubes
     // Everything in this block is the COMMANDER deciding, not the player — see
     // `Unit._byAI`. A queued order of yours executing elsewhere in the same
