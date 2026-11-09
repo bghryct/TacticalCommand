@@ -37685,7 +37685,7 @@ class Unit {
       }
 
       // Rifle infantry lob a grenade when the enemy is in the sweet spot
-      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive) {
+      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive && !(this._stack && this.game.room115 !== false)) {
         const gDef = this.def.grenade;
         const gd = dist2(this.pos, this.target.pos);
         // Not with one of ours inside the burst. A grenade is the shortest
@@ -54498,7 +54498,7 @@ class Game {
         // throwing at a position, not at a man — so the danger test has to be
         // made against the point he actually throws at.
         const gtx = t.x + rand(-2, 2), gtz = t.z + rand(-2, 2);
-        if ((u._assault || t.kind === 'assault') && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
+        if ((u._assault || t.kind === 'assault') && !(u._stack && this.room115 !== false) && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
             && !u._friendlyNearPoint(gtx, gtz, u._grenadeDanger(g), u._leadFor('grenade'))) {
           if (u._throwGrenade(gtx, gtz)) continue;
         }
@@ -54529,7 +54529,7 @@ class Game {
           if (u._friendlyNearPoint(e.pos.x, e.pos.z, u._grenadeDanger(g), u._leadFor('grenade'))) continue;
           bd = d; best = e;
         }
-        if (best && u._throwGrenade(best.pos.x, best.pos.z)) continue;
+        if (best && !(u._stack && this.room115 !== false) && u._throwGrenade(best.pos.x, best.pos.z)) continue;
       }
 
       // ---- THE PANZERFAUST, AND THE BAZOOKA ------------------------------
@@ -58881,10 +58881,14 @@ class Game {
    * The claim (`_strSpot`) is kept throughout, so nothing else moves him.
    * `game.stack115 = false`.
    */
-  _entryPlan(u, key, tx, tz, L, mode) {
+  _entryPlan(u, key, tx, tz, L, mode, skip) {
     const S = this.structures;
     if (this.stack115 === false || !S || !S.any || !u.path || !u.path.length || u.def.vehicle || u.def.towed) return false;
-    if (u._inRoom()) return false;                       // already inside
+    // (round 115) ROOM BY ROOM: inside, the next door on his route into a room
+    // the enemy holds is stacked on too (`room115`); from the street, the
+    // first door into the house, as before
+    const inner = this.room115 !== false && (!!skip || u._inRoom());
+    if (u._inRoom() && !inner) return false;             // already inside
     // where his route goes in: march the legs on the ground floor
     let px = u.pos.x, pz = u.pos.z, door = null;
     let pgx = worldToCell(px), pgz = worldToCell(pz);
@@ -58893,28 +58897,32 @@ class Game {
     // is "in" by the roof or floor over it — an alley between two houses has
     // walls round it and sky over it)
     const roofed = (x, z) => !!(S.floorMat(x, z, 1) || S.roofMat(x, z, 0) || S.roofMat(x, z, S.topLevel(x, z)));
+    let lv = u.lvl | 0;
     for (const w of u.path) {
       const n = Math.max(1, Math.ceil(hyp(w.x - px, w.z - pz) / (TILE * 0.25)));
       for (let i = 1; i <= n && !door; i++) {
         const gx = worldToCell(px + (w.x - px) * i / n), gz = worldToCell(pz + (w.z - pz) * i / n);
         if (gx === pgx && gz === pgz) continue;
-        if (Math.abs(gx - pgx) + Math.abs(gz - pgz) === 1 && S.has(gx, gz) && roofed(gx, gz) && !roofed(pgx, pgz) && S.insideAt(gx, gz, 0) >= 0.5) {
-          door = { ox: pgx, oz: pgz, ix: gx, iz: gz };
+        if (Math.abs(gx - pgx) + Math.abs(gz - pgz) === 1 && S.has(gx, gz) && S.insideAt(gx, gz, lv) >= (inner ? 0.5 : 0.35)) {
+          const se = gx > pgx ? 1 : gx < pgx ? 3 : gz > pgz ? 2 : 0;
+          const isSkip = skip && skip.ox === pgx && skip.oz === pgz && skip.e === se;
+          if (!isSkip && !inner && lv === 0 && roofed(gx, gz) && !roofed(pgx, pgz)) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: 0 };
+          else if (!isSkip && inner && S.insideAt(pgx, pgz, lv) >= 0.5 && S.moveSpan(pgx, pgz, lv, se, TILE * 0.5) === 2 && this._roomFoe(u.team, gx, gz)) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: lv };
         }
         pgx = gx; pgz = gz;
       }
-      if (door || (w.lvl | 0) !== 0) break;
-      px = w.x; pz = w.z;
+      if (door || (!inner && (w.lvl | 0) !== 0)) break;
+      px = w.x; pz = w.z; lv = w.lvl | 0;
     }
     if (!door) return false;
     const sx = door.ix - door.ox, sz = door.iz - door.oz, e = sx > 0 ? 1 : sx < 0 ? 3 : sz > 0 ? 2 : 0;
-    if (S.moveSpan(door.ox, door.oz, 0, e, TILE * 0.5) !== 2) return false;   // no doorway: an open side
+    if (S.moveSpan(door.ox, door.oz, door.L, e, TILE * 0.5) !== 2) return false;   // no doorway: an open side
     const dwx = cellCenter(door.ix), dwz = cellCenter(door.iz);
-    const foe = this._knownFoeAt(u.team, dwx, dwz, STACK_R, 30);
+    const foe = inner ? true : this._knownFoeAt(u.team, dwx, dwz, STACK_R, 30);
     if (!foe) return false;                              // nobody near: walk in
     const Q = this._doorQs || (this._doorQs = new Map()), qk = (door.oz * GRID + door.ox) * 4 + e;
     let q = Q.get(qk);
-    if (!q || this.time - q.made > 120) { q = { n: 0, last: -99, nadeT: 0, made: this.time, ix: door.ix, iz: door.iz, ox: door.ox, oz: door.oz, e }; Q.set(qk, q); }
+    if (!q || this.time - q.made > 120) { q = { n: 0, last: -99, nadeT: 0, made: this.time, ix: door.ix, iz: door.iz, ox: door.ox, oz: door.oz, e, L: door.L }; Q.set(qk, q); }
     // beside the doorway, against the wall, out of the line through it
     const side = (q.n & 1) ? 1 : -1, rank = q.n >> 1;
     q.n++;
@@ -58924,7 +58932,11 @@ class Game {
     const wx = horiz ? ocx - H + along : ocx + d[0] * (H - MAN_CLEAR * 1.3);
     const wz = horiz ? ocz + d[1] * (H - MAN_CLEAR * 1.3) : ocz - H + along;
     const wasExp = u.explicit;
-    u.orderMove(wx, wz, false, mode === 'sneak' ? 'sneak' : 'fast', 0);
+    u.orderMove(wx, wz, false, mode === 'sneak' ? 'sneak' : 'fast', door.L);
+    // (round 115) already in the cell by the door: straight to the wall beside it
+    if (!u.path.length && worldToCell(u.pos.x) === worldToCell(wx) && worldToCell(u.pos.z) === worldToCell(wz)) {
+      u.path = [{ x: wx, z: wz, lvl: door.L }]; u.pathIdx = 0; u.state = 'move';
+    }
     if (!u.path.length || u._pathPartial) {             // no way to the wall: go straight in
       u.orderMove(tx, tz, false, mode, L); u._strSpot = key; u.explicit = wasExp; return false;
     }
@@ -58966,6 +58978,12 @@ class Game {
           for (const o of set) { const os = o._stack; if (os && os.q === q && os.at >= 0 && o.nades > 0 && o.def.grenade && (!th || o === u)) th = o; }
           if (th && th._throwGrenade(cellCenter(q.ix), cellCenter(q.iz))) { q.nadeT = now; q.last = now; this._stackNades = (this._stackNades || 0) + 1; continue; }
           if (th && th.grenadeCd > 0 && waited < STACK_MAX * 0.4) continue;   // his arm is still coming back
+          // (round 115) no grenade in the stack: smoke into the doorway, and in under it
+          if (this.room115 !== false && !th) {
+            let sm = null;
+            for (const o of set) { const os = o._stack; if (os && os.q === q && os.at >= 0 && o.smokeAmmo > 0) { sm = o; break; } }
+            if (sm) { this.projectiles.fireSmoke(sm, cellCenter(q.ix), cellCenter(q.iz)); if (sm.smokeAmmo !== Infinity) sm.smokeAmmo--; q.nadeT = now; q.last = now; this._stackSmokes = (this._stackSmokes || 0) + 1; continue; }
+          }
           q.nadeT = -1;                                 // nobody has one: in without one
         }
         if (q.nadeT > 0 && now - q.nadeT < NADE_ROOM_WAIT) continue;
@@ -58975,6 +58993,8 @@ class Game {
       u.posture = 'normal';
       u.orderMove(s.tx, s.tz, false, 'fast', s.L);
       u._strSpot = s.key; u._pendingCover = true;
+      // (round 115) …and the next room the enemy holds on his way: stack again at its door
+      if (this.room115 !== false) { this._roomsCleared = (this._roomsCleared || 0) + 1; this._entryPlan(u, s.key, s.tx, s.tz, s.L, 'fast', q); }
     }
   }
   /**
