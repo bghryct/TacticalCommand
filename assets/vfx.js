@@ -1138,8 +1138,10 @@
             // An HE burst is a flash you see from the next field, a hot orange
             // core inside the dirt for the first half second, and a pale skirt of
             // dust running out along the ground: three things, nine particles.
-            this.spawn(K.FLASH, { x: x, y: o.groundY + p * 0.6, z: z, size: p * 4.2, life: 0.13,
-              cell: S.GLOW, r: 1, g: 0.8, b: 0.5, a: 0.9, grow: p * 6 });
+            // from a first-person eye a flash four bursts wide is the whole field gone white: half the size, dimmer
+            var fpv = typeof window !== 'undefined' && window.game && window.game.fpv;
+            this.spawn(K.FLASH, { x: x, y: o.groundY + p * 0.6, z: z, size: p * (fpv ? 2.0 : 4.2), life: fpv ? 0.09 : 0.13,
+              cell: S.GLOW, r: 1, g: 0.8, b: 0.5, a: fpv ? 0.5 : 0.9, grow: p * (fpv ? 2 : 6) });
             this.spawn(this.fbFrames ? K.FBALL : K.BOOM, { x: x, y: o.groundY + p * 0.55, z: z, size: p * 1.7,
               life: Math.min(1.1, 0.42 + p * 0.09), grow: p * 1.3, vy: 1.6, spin: this.rnd(-0.2, 0.2),
               r: 0.3, g: 0.28, b: 0.26, a: 1, drag: 0.3 });

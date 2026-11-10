@@ -1569,6 +1569,10 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/battlesetup.js"></script>
 <script src="assets/ui117.js"></script>
 <script src="assets/editfps118.js"></script>
+<!-- (round 118) the trench kit, built in Blender (tools/blender/trench_kit.py), and its layer along smooth runs:
+     `game.trenchKit118`, default OFF. Drawing only; the simulation keeps its trench cells. -->
+<script src="assets/trenchkit118.pack.js"></script>
+<script src="assets/trenchkit118.js"></script>
 <script>
 'use strict';
 /* ============================================================================
@@ -3604,6 +3608,27 @@ const HE_STRIKE_K = 3;
 const PRESENT = { up: 0.4, low: 0.25, prone: 0.12, dug: 0.05, win: 0.07 };   // win: at a window in a room (round 115)
 const PRESENT_NEAR = 8;
 const PRESENT_NEAR_WIN = 3;   // (round 115) …for a man at a window: 12 m
+// (round 118) THE PLAYER'S ROUND MEETS THE MAN AS DRAWN (`game.hitbox118`, default on; `Unit._bodyHit118`).
+// The owner: "when you aim at a specific body part and the aim is correct … the bullet actually hits".
+// Measured down the real first-person path (Village, a Kar 98k laid exactly on the drawn part, 176
+// shots at six parts, 25/100/300 m, standing/kneeling/prone/walking): 44 hit anything and 11 the part
+// aimed at; 0 of 48 headshots hit. Four faults stacked: the sight ray stopped on a sphere round his
+// middle, so on a head it ran on to the ground behind and the round, zeroed out there, crossed the
+// head 5-11 cm high at 25 m and 47 cm at 100; `rangeSpread` read the AI's acquisition range (80 m)
+// as the rifle's, so past 27 m the player's cone was 4.4 times itself; a round that found the 1.4 m
+// cylinder was then thrown away 33-95% of the time (`_presentedFrac`); and the part was a roll of
+// `WOUND_SHARE`. The player's rounds now meet capsules on the drawn rig, the sight stops on them,
+// the hit is the hit and the part is the part. The computer's fire keeps all of it (calibrated).
+// Capsule radii, metres on the figure (the head's takes the helmet); `HIT118_REACH` the reach round a
+// man inside which his figure is tested (a man lying down is 1.8 m long); `HIT118_ON` how far a
+// round laid on his surface is carried on through him on its arrival frame.
+const BODY118 = { head: 0.125, neck: 0.06, trunk: 0.16, arm: 0.065, fore: 0.055, thigh: 0.085, shin: 0.062 };   // sleeves on the arms
+const HIT118_REACH = 0.62, HIT118_ON = 0.6;
+// …and SIGHTED, THE WEAPON'S OWN GROUP: the cone (radius, rad) of a still, aimed shot — about 3 MOA for
+// a service rifle and its ammunition (the acceptance targets: 4-5 inches at 100 yards) — and the real
+// effective range past which it opens (`rangeSpread118`). From the hip the cone is unchanged.
+const FPV_MECH118 = { rifle: 0.0008, scope: 0.0005, auto: 0.0025, mg: 0.002, pistol: 0.005 };
+const FPV_EFF118 = { rifle: 400, scope: 600, smg: 150, auto: 300, mg: 600, pistol: 40 };   // metres
 // WHERE A ROUND THAT FINDS HIM FINDS HIM (`Unit._woundLoc`, round 106), by
 // the same four postures: shares of [head, trunk, arm, leg]. The old roll gave
 // every man one body — eight in a hundred in the head whether he was standing
@@ -8254,6 +8279,16 @@ const NADE_OF_ARMY = { us: 'mk2', ger: 'm24', uk: 'no36', sov: 'rgd33', fr: 'f1f
 const NADE_READY = 3.2;
 /** A thrown grenade leaves the hand at this elevation, not a mortar's. */
 const NADE_ANGLE = 38;
+// (round 118) HOLD G TO WIND UP (`game.nadeAim118`, default on; `Game._nadeSolve118`). The owner: "an
+// idea where your grenade will actually land with a hold g for longer to increase range and an arc and
+// target indicator". The round-104 arc drew a throw at the crosshair, and the grenade then landed up
+// to a unit (4 m) off it each way (`fireGrenade`'s scatter); the hand it drew from was the diorama's,
+// 1.4 m right of the eye. Now the throw is the arc: from his hand, along where he looks lifted
+// NADE_LIFT118, at a speed that grows over NADE_WIND118 s of holding from a lob (NADE_LOB118 of his
+// reach) to the speed that reaches his whole reach at 45 degrees (less lying down), swept in fine
+// steps against what the flight is swept against; release throws that flight (no scatter), and it
+// tests nothing for its first NADE_GRACE118 s, as the arc does not. The fuse burns from the press.
+const NADE_WIND118 = 1.0, NADE_LOB118 = 0.18, NADE_LIFT118 = 0.21, NADE_GRACE118 = 0.1;
 
 /** WHAT EACH MAN CARRIED. `arm` is his weapon (a key of RTT_ARMS), `load`
  *  the rounds for it he goes into battle with — the first-line load from the
@@ -9010,6 +9045,23 @@ const BALLISTICS = {
   penFloor: 0.5,       // …never below half muzzle penetration
 };
 /** Dispersion multiplier for a shot of length `d` from `def`'s weapon. */
+/** (round 118) The player's weapon at range (`game.hitbox118`): the group opens past the weapon's REAL
+ *  effective range (`FPV_EFF118`), not past a third of the AI's acquisition range, which is 27 m for a
+ *  rifleman. The same growth as `rangeSpread`, out to two and a half times it. */
+function fpvClass118(u) {
+  const A = u && u._arms ? u._arms() : null, k = u && u.def ? u.def.kind : '';
+  if (!A) return k === 'sniper' ? 'scope' : k === 'hmg' || k === 'apc' ? 'mg' : 'rifle';
+  if (A.pistol || u.onSide) return 'pistol';
+  if (A.sight === 'scope') return 'scope';
+  if (A.act === 'auto' || A.act === 'select') return A.feed === 'belt' || A.feed === 'pan' || A.feed === 'strip' || A.feed === 'fixed' ? 'mg' : (A.mv || 0) < 500 ? 'smg' : 'auto';
+  return 'rifle';
+}
+function rangeSpread118(u, d) {
+  const eff = (FPV_EFF118[fpvClass118(u)] || 300) / METERS_PER_UNIT, max = eff * 2.5;
+  if (d <= eff) return 1;
+  const over = Math.min(1, (d - eff) / (max - eff));
+  return 1 + Math.pow(over, BALLISTICS.spreadPow) * BALLISTICS.spreadGrowth;
+}
 function rangeSpread(def, d) {
   const max = def.rng || 60;
   const eff = max * (BALLISTICS.effFrac[def.kind] != null ? BALLISTICS.effFrac[def.kind] : BALLISTICS.effFrac._default);
@@ -21161,6 +21213,7 @@ const OBS_DEF = {
   house:  { hp: 300, height: 3.4, color: 0x8a7a5a, garrison: 4, floors: 2, masonry: 'brick' },
   tower:  { hp: 320, height: 5.5, color: 0x77756e, masonry: 'stone' },
   fence:  { hp: 40,  height: 1.1, color: 0x6a5638 },
+  fencedown: { hp: 20, height: 0.15, color: 0x6a5638, seethrough: true, passthrough: 0.95 },   // (round 118, `destroy118`) a fence lying flat
   menhir: { hp: 150, height: 2.6, color: 0x6e6a62 },
   crate:  { hp: 25,  height: 0.8, color: 0x8a6a42 },
   barrel: { hp: 30,  height: 1.0, color: 0x7a4a2a, explosive: true, aoe: 4.2, dmg: 50 },
@@ -21318,6 +21371,7 @@ const FOOT_THROUGH = {
   hay: 0.12, haystack: 0.5, grave: 0.18, rock: 0.16, menhir: 0.22, well: 0.32, statue: 0.42,
   crate: 0.24, barrel: 0.16, oildrum: 0.16, supplies: 0.28, ammocrates: 0.28, logstack: 0.42,
   cart: 0.5, wreckedcar: 0.5, campfire: 0.12, rubble: 0, hedgehog: 0.22, dragonteeth: 0.2,
+  fencedown: 0,   // (round 118) walked over
 };
 
 /**
@@ -21499,6 +21553,7 @@ const OBS_VEHICLE = {
   // Timber and foliage: a shove, and you feel the tank lean into it.
   deadtree: { w: 18 }, tree: { w: 26 }, pine: { w: 26 }, oak: { w: 34 },
   cart: { w: 14 }, logstack: { w: 26, r: 0.10 }, log: { w: 30, r: 0.05 },   // (round 118) a felled trunk: armour grinds over it
+  fencedown: { w: 1 },   // (round 118) anything drives over a flattened fence
   // THE BOCAGE BANK IS NOT A HEDGE.
   //
   // It is an earth wall a thousand years old with a hedge growing out of the
@@ -24076,8 +24131,11 @@ class Obstacles {
    *  through to meet the next. It was two sticks on two dowels. */
   _fenceVariant(i) {
     this._fenceGeos = this._fenceGeos || [];
-    if (this._fenceGeos[i]) return this._fenceGeos[i];
-    { const pg = this._packed113('fence', i); if (pg) return (this._fenceGeos[i] = pg); }
+    // (round 118, `game.props118`) the fence at true scale: a post every two metres, not one a cell
+    // (tools/blender/doodads.py `fence118`); its own cache slots, so `false` before a load is the old fence
+    const v118 = !(window.game && window.game.props118 === false) && window.PROP_PACK && window.PROP_PACK.fence118 ? 3 : 0;
+    if (this._fenceGeos[i + v118]) return this._fenceGeos[i + v118];
+    { const pg = this._packed113(v118 ? 'fence118' : 'fence', i); if (pg) return (this._fenceGeos[i + v118] = pg); }
     const r = mulberry32(3907 + i * 23), K = this._kit(), W = K.WOOD;
     const WOOD = [0.38, 0.32, 0.24], L = TILE / 2;
     // A LINE prop keeps its length (`PROP_LINE_X`): one post a 6 m piece, built
@@ -25419,12 +25477,19 @@ class Obstacles {
    *  doodads ride up/down with the ground instead of floating or being buried). */
   refreshHeights() {
     // Sculpting moves the ground under the scenery, so the batch is stale.
+    if (window.TrenchKit118) TrenchKit118.unbake();   // (round 118)
     if (this.batcher.active) this.batcher.unbake(this.list);
     for (const o of this.list) { o.mesh.position.y = this.terrain.height(o.gx, o.gz) * HSCALE; o.mesh.updateMatrix(); }
   }
   /** Collapse the static scenery into instanced draw calls. Call once the map
    *  has stopped changing — `setMode('play')` does. */
-  bakeProps() { this._rebakeDebt = 0; this._rebakeT = 8; this._orientHedges(); if (trenchCurve118On()) this._curveTrenches118(); return this.batcher.bake(this.list, this.fires); }
+  bakeProps() {
+    this._rebakeDebt = 0; this._rebakeT = 8; this._orientHedges(); if (trenchCurve118On()) this._curveTrenches118();
+    if (window.TrenchKit118) TrenchKit118.prepare(this);   // (round 118) `trenchKit118`: the old pieces kept out of the batch
+    const r118 = this.batcher.bake(this.list, this.fires);
+    if (window.TrenchKit118) TrenchKit118.build(this);     // ...and the kit laid along the runs
+    return r118;
+  }
   /** (round 118) `trenchCurve118`: each trench piece turned to the line through its neighbours and drawn toward them. */
   _curveTrenches118() {
     const isT = (x, z) => { const p = inGrid(x, z) ? this.at(x, z) : null; return !!p && (p.type === 'trench' || p.type === 'trenchseg'); };
@@ -25450,7 +25515,7 @@ class Obstacles {
       o.mesh.updateMatrix(); o._line = null;
     }
   }
-  unbakeProps() { this._rebakeDebt = 0; this.batcher.unbake(this.list); }
+  unbakeProps() { this._rebakeDebt = 0; if (window.TrenchKit118) TrenchKit118.unbake(); this.batcher.unbake(this.list); }
   /** Shelling knocks props out of the batch one at a time (see `damage`), so a
    *  long fight drifts back toward a draw call per tree. Once enough have
    *  dropped out, fold the scenery back together — a damaged tree is still a
@@ -25473,7 +25538,9 @@ class Obstacles {
       // line: a row of short banks side by side. A bank as deep as its cell
       // (the diorama's) hid it; one a third as deep (true scale) did not.
       this._orientHedges();
+      if (window.TrenchKit118) TrenchKit118.prepare(this);   // (round 118)
       this.batcher.bake(this.list, this.fires);
+      if (window.TrenchKit118) TrenchKit118.build(this);
       return;
     }
     if (!this.batcher.active) return;
@@ -26071,6 +26138,9 @@ class Obstacles {
       const m = new THREE.Mesh(this._fortVariant('pillbox'), this.mat.hedge);
       m.scale.set(1.0, 1.2, 1.0); m.castShadow = true; m.receiveShadow = true; group.add(m);
       group.rotation.y = rng() * Math.PI * 2;
+    } else if (type === 'fencedown') {
+      // (round 118, `destroy118`) nothing of its own: the flattened fence's mesh is re-hung under it by `fellFence`
+      group.rotation.y = rot || 0;
     } else if (type === 'log') {
       // (round 118) A FELLED TREE'S CELLS (`fellTree`, `game.treeFall118`): a trunk length lying along `rot`,
       // and at the base cell (`_logBase`) the stump. The crown is the tree's own mesh, re-hung under the base
@@ -26388,6 +26458,25 @@ class Obstacles {
     (this.falling || (this.falling = [])).push({ g, base, t: 0, T: 1.4 + lenU * 0.3, yaw, fx, fz, lenU, cx, cz, y: G.position.y });
     return base;
   }
+  /** (round 118, `game.destroy118`) A FENCE KNOCKED FLAT: it hinges at its posts' feet along its own line and lies on
+   *  the side away from the burst or the tank (the side is battle data, on the sim stream); afterwards a `fencedown`
+   *  cell — walked over, driven over, hiding nothing — carrying the fence's own mesh, batched with the rest. */
+  fellFence(o, from) {
+    const gx = o.gx, gz = o.gz, cx = cellCenter(gx), cz = cellCenter(gz), a = o.mesh.rotation.y;
+    const nx = Math.sin(a), nz = Math.cos(a);                     // the line's normal (the fence lies along local X)
+    let s = from ? Math.sign((cx - from.x) * nx + (cz - from.z) * nz) : 0;
+    if (!s) s = rand(0, 1) < 0.5 ? -1 : 1;
+    const g = o.mesh;
+    this.remove(gx, gz);
+    const base = this.add(gx, gz, 'fencedown', a);
+    if (!base) return null;
+    base._noBatch = true;
+    const G = base.mesh, k = 1 / (G.scale.x || 1);
+    G.add(g); g.position.set((g.position.x - G.position.x) * k, 0, (g.position.z - G.position.z) * k);
+    g.scale.multiplyScalar(k); g.rotation.set(0, 0, 0, 'YXZ'); g.updateMatrix();
+    (this.falling || (this.falling = [])).push({ g, base, t: 0, T: 0.7, yaw: a, sgn: s, fx: nx * s, fz: nz * s, lenU: TILE * 0.5, cx, cz, y: G.position.y, col: 0x6a5638, leaves: 0 });
+    return base;
+  }
   /** The picture of the fall: from `_loop`, never the sim. An accelerating tip to 90 degrees with a short settle. */
   _updateFalls(dt) {
     const F = this.falling; if (!F || !F.length) return;
@@ -26396,8 +26485,8 @@ class Obstacles {
       if (!f.g.parent) { F.splice(i, 1); continue; }    // the map went
       f.t += dt;
       const s = Math.min(1, f.t / f.T), e = Math.min(1, s * s * (2.3 - 1.3 * s));
-      f.g.rotation.x = Math.PI / 2 * e; f.g.updateMatrix();
-      if (this.game && this.game._treeFallFx && s < 1 && vrandom() < 0.6) this.game._treeFallFx(f, e);
+      f.g.rotation.x = (f.sgn || 1) * Math.PI / 2 * e; f.g.updateMatrix();
+      if (this.game && this.game._treeFallFx && s < 1 && f.leaves !== 0 && vrandom() < 0.6) this.game._treeFallFx(f, e);
       if (s >= 1) {
         // a tree down is a draw call until the next rebake (`maybeRebake` folds at 60 debt): count it as six
         F.splice(i, 1); f.base._noBatch = false; this._rebakeDebt = (this._rebakeDebt || 0) + 6;
@@ -26449,6 +26538,11 @@ class Obstacles {
     if (o.hp <= 0) {
       const y = this.terrain.height(gx, gz) * HSCALE;
       const def = OBS_DEF[o.type];
+      if (o.type === 'fence' && window.game && window.game.destroy118) {      // (round 118) a fence goes down flat, away from what hit it
+        this.effects.debris(cellCenter(gx), y + 0.5 * K_FX, cellCenter(gz), 4, def.color);
+        this.fellFence(o, from);
+        return true;
+      }
       if (TREE_FALL_M[o.type] && window.game && window.game.treeFall118) {   // (round 118) a tree falls, it does not vanish
         this.effects.debris(cellCenter(gx), y + 1 * K_FX, cellCenter(gz), 5, def.color);
         this.fellTree(o, from);
@@ -26467,6 +26561,7 @@ class Obstacles {
   }
 
   clear() {
+    if (window.TrenchKit118) TrenchKit118.unbake();   // (round 118)
     if (this.batcher) this.batcher.unbake(this.list);
     for (const o of this.list) { if (o.mesh.parent) o.mesh.parent.remove(o.mesh); o._bakedFrom = null; }
     this.list = []; this._byCell.clear(); this.occupied.fill(0); this._lineSimReady = false;
@@ -29629,7 +29724,7 @@ class Effects {
     // second: the frame read as blown exposure. In first person it reaches a third as far, falls off with the
     // square, is capped, and is gone in half the time; the burst's own fireball carries the light you see.
     const G = typeof game !== 'undefined' ? game : null;
-    if (G && G.fpvExpo118 && G.fpv) { l.intensity = Math.min(l.intensity, 6); l.distance *= 0.35; l.decay = 2; life *= 0.55; }
+    if (G && G.fpvExpo118 && G.fpv) { l.intensity = Math.min(l.intensity, 3); l.distance *= 0.25; l.decay = 2; life *= 0.45; }
     else l.decay = 1;
     this.lights.push({ light: l, life, maxLife: life,
                        peak: l.intensity, power: pw, curve: 3 });
@@ -30236,7 +30331,10 @@ class Projectiles {
     // what keeps the long sightline (see `_fpvAimPoint`) from turning every
     // rifleman into a sniper: you can reach, and mostly you will miss, and the
     // rounds going past will still put their heads down.
-    const err = opts.player
+    // (round 118) the player's round: a disc across the line, the drawn gap its edge (`_cone118`)
+    const geo118 = !!opts.player && this.game.hitbox118 !== false;
+    const err = geo118 ? d * (opts.spread || 0.004) * rangeSpread118(shooter, d)
+      : opts.player
       ? d * (opts.spread || 0.004) * rand(0.15, 1) * rangeSpread(shooter.def, d)
       : d * (opts.spread || 0.018) * COMBAT.accuracyMul * rand(0.4, 1.4)
         * (1 + (shooter.suppression || 0) * 1.6) * (shooter._shellShocked && shooter._shellShocked() ? 2.6 : 1)
@@ -30253,7 +30351,8 @@ class Projectiles {
     // metres, not only by the ones that would have hit. The player's cone is
     // real milliradians and was always laid on the real man.
     const errHit = opts.player ? err : err * K_FIG;
-    e.x += rand(-errHit, errHit); e.z += rand(-errHit, errHit); e.y += rand(-errHit, errHit) * 0.45;
+    if (geo118) this._cone118(s, e, err);
+    else { e.x += rand(-errHit, errHit); e.z += rand(-errHit, errHit); e.y += rand(-errHit, errHit) * 0.45; }
     this._nearMiss(s, e);                     // supersonic crack past the camera
     // …and the men it goes past get down. A machine gun's job is this, not kills.
     // Calibrated against the doctrinal expectation: one MG should have a
@@ -30266,8 +30365,16 @@ class Projectiles {
     // weapon's range, where the dispersion is so wide the rounds are not on the
     // position at all. That last part is not a defect: it is why a base of fire
     // has to close to effective range, and `_squadFire` now does.
-    this._beatenZone(s, e, shooter, opts.heavy ? 0.17 : opts.mg ? 0.105 : 0.085, err);
+    // (round 118) …the player's round puts heads down when its crack ARRIVES (`update`, `bz118`): laid
+    // here, the man it was aimed at was suppressed at the trigger and his drawn figure ducked under it
+    // before it got there (measured: his head 1.52 -> 1.17 m in the 0.13 s to 100 m)
+    const bzK = opts.heavy ? 0.17 : opts.mg ? 0.105 : 0.085;
+    if (!geo118) this._beatenZone(s, e, shooter, bzK, err);
     const sol = flatShot(d, muzzleOf(shooter.def, opts)) || { speed: mps(400), apex: 0 };
+    // (round 118) …and down the sight line itself: zeroed at whatever was behind the crosshair, the round
+    // rose over the line on the way (24 cm at 100 m with the ground 460 m off, a man led on the move
+    // missed high). The player's sights are zeroed at every range; the time of flight is the round's.
+    if (geo118) sol.apex = 0;
     const mesh = this._bulletMesh(shooter, opts, sol.speed);
     mesh.position.copy(s);
     this.game.scene.add(mesh);
@@ -30282,6 +30389,8 @@ class Projectiles {
       dmg: opts.dmg, shooter, grace: 0.05, heavy: opts.heavy, sniper: opts.sniper, ap: opts.ap, pen: opts.pen,
       winTarget: winAt,
       headOnly,                 // (round 116) all that shows of him is his head: see the hit's chance
+      geo118,                   // (round 118) the player's: it meets men as drawn (`Unit._bodyHit118`)
+      bz118: geo118 ? { k: bzK, err } : null,   // …and its beaten zone, laid when it arrives
     });
   }
   /**
@@ -30373,6 +30482,19 @@ class Projectiles {
     return null;
   }
 
+  /** (round 118) The player's dispersion (`game.hitbox118`): a point in the disc of radius R square
+   *  across the line s->e, evenly — the crosshair's gap is the disc's edge (`_fpvCross116`). The old
+   *  spread was a square in world x and z (along the line as much as across it) and a 0.45 one in y. */
+  _cone118(s, e, R) {
+    if (!(R > 0)) return;
+    let fx = e.x - s.x, fy = e.y - s.y, fz = e.z - s.z;
+    const fl = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1; fx /= fl; fy /= fl; fz /= fl;
+    let rx = -fz, rz = fx; const rl = Math.sqrt(rx * rx + rz * rz) || 1; rx /= rl; rz /= rl;   // across, level
+    const ux = -fy * rz, uy = rz * fx - rx * fz, uz = fy * rx;                               // across, up (r x f)
+    const rr = R * Math.sqrt(Math.random()), a = Math.random() * 6.283185307179586;
+    const c = Math.cos(a) * rr, sn = Math.sin(a) * rr;
+    e.x += rx * c + ux * sn; e.y += uy * sn; e.z += rz * c + uz * sn;
+  }
   /**
    * BEAM — instant hitscan plus a drawn line (FORGE_PLAN §2.2).
    *
@@ -30631,7 +30753,7 @@ class Projectiles {
   }
 
   /** Hand grenade: pineapple or stielhandgranate, tumbling in flight. */
-  fireGrenade(shooter, tx, tz, gDef, cook, from, tight) {
+  fireGrenade(shooter, tx, tz, gDef, cook, from, tight, fl118) {
     // `from`: the player's throwing hand in first person (`Game._fpvHand`)
     const s = from ? from.clone() : shooter.pos.clone(); if (!from) s.y += shooter.def.size * 1.1;
     // (round 117) `tight`: a grenade put through a doorway from beside it lands
@@ -30640,8 +30762,9 @@ class Projectiles {
     // throw across the street put three in four of them against the wall beside
     // the door, at the feet of the men who threw them (same draws, scaled)
     const sc = tight ? clamp(hyp(tx - s.x, tz - s.z) * 0.12, 0.04, 1) : 1;
-    const e = new THREE.Vector3(tx + rand(-1, 1) * sc, 0, tz + rand(-1, 1) * sc);
-    e.y = this.game.terrain.heightAt(e.x, e.z);
+    // (round 118) `fl118`: the player's wound-up throw (`Game._nadeSolve118`) — that point, that flight
+    const e = fl118 ? fl118.e.clone() : new THREE.Vector3(tx + rand(-1, 1) * sc, 0, tz + rand(-1, 1) * sc);
+    if (!fl118) e.y = this.game.terrain.heightAt(e.x, e.z);
     const d = s.distanceTo(e);
     const mesh = this._grenadeMesh(gDef);
     mesh.position.copy(s);
@@ -30655,7 +30778,8 @@ class Projectiles {
       // third seconds — the range a man is allowed to throw at is a real one
       // now (RTT_NADE), and the seven-second fallback below is for weapons
       // that never were.
-      ...(lobShot(d, mps(21), gDef.fuse != null || gDef.impact ? NADE_ANGLE : 42) || { speed: mps(15), apex: d * 0.42 }),
+      ...(fl118 ? { speed: d / Math.max(0.05, fl118.T), apex: G_WORLD * fl118.T * fl118.T / 8, time: fl118.T, theta: 0 }
+        : (lobShot(d, mps(21), gDef.fuse != null || gDef.impact ? NADE_ANGLE : 42) || { speed: mps(15), apex: d * 0.42 })),
       // THE FUSE (round 101): what is left of it when it leaves his hand. A
       // time fuse that outlasts the flight leaves the grenade lying fizzing
       // where it lands (`nadeLie`); one cooked too long bursts in the air; an
@@ -30663,7 +30787,7 @@ class Projectiles {
       // as every grenade used to.
       fuse: gDef.fuse ? Math.max(0.12, gDef.fuse - (cook || 0)) : 0, impactFuse: !!gDef.impact, age: 0,
       // the tumble is a picture (`_flightFx`), so its rate is the cosmetic stream's
-      dmg: gDef.dmg, aoe: gDef.aoe, shooter, grace: 0.2, spin: vrand(6, 11),
+      dmg: gDef.dmg, aoe: gDef.aoe, shooter, grace: fl118 ? Math.min(0.9, NADE_GRACE118 / Math.max(0.05, fl118.T)) : 0.2, spin: vrand(6, 11),
       // The bursting charge, for the burst's LOOK (`Game.explode`) as much as
       // for what it does to a wall. A Mills bomb is sixty grammes of Baratol
       // and a Stielhandgranate a hundred and sixty-five of TNT — a thick-cased
@@ -30955,11 +31079,14 @@ class Projectiles {
           // the SPARK cell (a bright head tapering into its tail) stretched along the flight: a comet in the army's
           // colour, and a wider dim halo of the same under it. The baked GLOW cell's heat sits in a small core, so
           // stretched it was a hairline; the old mesh was a 0.055 u box and read because it skipped the tone map.
-          const w = 0.22, cx = pos.x + nx / nl * L * 0.5, cy = pos.y + ny / nl * L * 0.5, cz = pos.z + nz / nl * L * 0.5;
+          // THE BAKED LIGHT CELLS CARRY THEIR HEAT IN A SMALL CORE (GLOW: B mean 30/255, SPARK 8/255): a quad 0.2 u
+          // wide drew a hairline a twentieth of that, invisible at any range (measured in r118fx/cap/fx5). The quad
+          // is drawn wide and the hot core of it is the tracer; the halo wider and dim. Both move with the round.
+          const w = 0.6, cx = pos.x + nx / nl * L * 0.5, cy = pos.y + ny / nl * L * 0.5, cz = pos.z + nz / nl * L * 0.5;
           V.spawn(VFX.KIND.STREAK, { x: cx, y: cy, z: cz, vx: nx / nl * spd, vy: ny / nl * spd, vz: nz / nl * spd, size: w, stretch: L / w,
-            rot: 0, life: 0.08, cell: VFX.CELL.SPARK, r: c.r * 1.3 + 0.3, g: c.g * 1.3 + 0.3, b: c.b * 1.3 + 0.3, a: burn, gravity: 0, drag: 0, keepV: true });
-          V.spawn(VFX.KIND.STREAK, { x: cx, y: cy, z: cz, vx: nx / nl * spd, vy: ny / nl * spd, vz: nz / nl * spd, size: w * 2.8, stretch: L / (w * 2.8),
-            rot: 0, life: 0.08, cell: VFX.CELL.SPARK, r: c.r, g: c.g, b: c.b, a: 0.4 * burn, gravity: 0, drag: 0, keepV: true });
+            rot: 0, life: 0.08, cell: VFX.CELL.GLOW, r: c.r * 1.15 + 0.2, g: c.g * 1.15 + 0.2, b: c.b * 1.15 + 0.2, a: burn, gravity: 0, drag: 0, keepV: true });
+          V.spawn(VFX.KIND.STREAK, { x: cx, y: cy, z: cz, vx: nx / nl * spd, vy: ny / nl * spd, vz: nz / nl * spd, size: w * 2.4, stretch: L / (w * 2.4),
+            rot: 0, life: 0.08, cell: VFX.CELL.GLOW, r: c.r, g: c.g, b: c.b, a: 0.45 * burn, gravity: 0, drag: 0, keepV: true });
         }
       } else if (p.tracer) {
         // The element burns out on the way, and it GUTTERS while it does —
@@ -31289,7 +31416,7 @@ class Projectiles {
         if (!impact) {
           const ax = prevPos.x, az = prevPos.z, sdx = pos.x - ax, sdz = pos.z - az;
           const segLen2 = sdx * sdx + sdz * sdz;
-          let bestT = Infinity, bestU = null, bestHit = null, bx = 0, by = 0, bz = 0;
+          let bestT = Infinity, bestU = null, bestHit = null, bx = 0, by = 0, bz = 0, gU = null, gLoc = null, gPart = null;
           const cands = this._segCands(ax, az, pos.x, pos.z, SEG_CANDS);
           for (let ci = 0; ci < cands.length; ci++) {
             const u = cands[ci];
@@ -31315,6 +31442,18 @@ class Projectiles {
               bestT = ht; bestU = u; bestHit = h; bx = h.x; by = h.y; bz = h.z;
               continue;
             }
+            // (round 118) THE PLAYER'S ROUND MEETS HIM AS DRAWN (`game.hitbox118`): his figure's
+            // capsules, carried HIT118_ON on through him on the arrival frame (the sight stops on
+            // his surface, `_fpvAimPoint`), the first part it enters; no cylinder, no roll
+            if (p.geo118 && u.rig && u.rig.hips) {
+              if ((cx - u.pos.x) ** 2 + (cz - u.pos.z) ** 2 > HIT118_REACH * HIT118_REACH) continue;
+              const k = done ? 1 + HIT118_ON / (hyp3(pos.x - prevPos.x, pos.y - prevPos.y, pos.z - prevPos.z) || 1) : 1;
+              const h = u._bodyHit118(prevPos.x, prevPos.y, prevPos.z,
+                prevPos.x + (pos.x - prevPos.x) * k, prevPos.y + (pos.y - prevPos.y) * k, prevPos.z + (pos.z - prevPos.z) * k);
+              if (!h || h.t * k >= bestT) continue;
+              bestT = h.t * k; bestU = u; bestHit = null; bx = h.x; by = h.y; bz = h.z; gU = u; gLoc = h.loc; gPart = h.part;
+              continue;
+            }
             const r = u.def.size * 0.5 + 0.15 * K_FIG;
             if ((cx - u.pos.x) ** 2 + (cz - u.pos.z) ** 2 > r * r) continue;
             const cy = lerp(prevPos.y, pos.y, tt);
@@ -31323,7 +31462,7 @@ class Projectiles {
             if (tt >= bestT) continue;
             bestT = tt; bestU = u; bestHit = null; bx = cx; by = cy; bz = cz;
           }
-          if (bestU) { impact = 'unit'; p.hitUnit = bestU; p.hitPart = bestHit; pos.set(bx, by, bz); }
+          if (bestU) { impact = 'unit'; p.hitUnit = bestU; p.hitPart = bestHit; pos.set(bx, by, bz); p.loc118 = bestU === gU ? gLoc : null; p.part118 = bestU === gU ? gPart : null; }
         }
       }
       // Nothing solid on the way in: the round arrives where it was aimed —
@@ -31440,6 +31579,7 @@ class Projectiles {
           for (const u of victim ? NO_UNITS : game.units) {
             if (!u.alive || u === p.shooter || u.embarkedIn) continue;
             if (endBody) {
+              if (p.geo118 && u.rig && u.rig.hips) continue;   // (round 118) the sweep met him as drawn
               const r = u.def.size * 0.5 + 0.15 * K_FIG, dy = pos.y - u.pos.y;
               if ((pos.x - u.pos.x) ** 2 + (pos.z - u.pos.z) ** 2 > r * r || dy < -0.2 * K_FIG || dy > u.def.size * 1.6) continue;
               victim = u; break;
@@ -31452,7 +31592,7 @@ class Projectiles {
         // whatever he is doing — so a man flat in a hole took the same fire as
         // one standing in the road. A round that finds the cylinder but not the
         // man in it is a near miss: dirt by his head, and nothing else.
-        if (victim && isBullet && !victim.def.vehicle && game._presented !== false) {
+        if (victim && isBullet && !victim.def.vehicle && game._presented !== false && !(p.loc118 && victim === p.hitUnit)) {
           const d = hyp(victim.pos.x - p.s.x, victim.pos.z - p.s.z);
           let pf = victim._presentedFrac();
           // (round 116) …and if all the firer could see of him was his head over his cover, a
@@ -31481,6 +31621,7 @@ class Projectiles {
           const ho = isBullet
             ? { bullet: !p.ap, ap: p.ap, pen: p.pen, dir: p.ap ? { x: p.e.x - p.s.x, z: p.e.z - p.s.z } : undefined,
                 from: p.s, heavy: p.heavy, sniper: p.sniper, hitPart: p.hitPart || null,
+                loc118: (p.loc118 && victim === p.hitUnit) ? p.loc118 : null, part118: p.part118 || null,   // (round 118) where it struck him
                 impactAt: { x: pos.x, y: pos.y, z: pos.z }, shotDir: { x: p.e.x - p.s.x, z: p.e.z - p.s.z } }
             : { from: p.s };
           victim.takeDamage(p.dmg, p.shooter, ho);
@@ -31519,6 +31660,7 @@ class Projectiles {
           if (game.fxTracer118 && p.tracer && p.mesh.userData.tcol && game.effects.vfx) this._tracerSkip(p, pos);   // (round 118) off hard ground
         }
       }
+      if (p.bz118) { this._beatenZone(p.s, p.e, p.shooter, p.bz118.k, p.bz118.err); p.bz118 = null; }   // (round 118) the crack arrives
       game.scene.remove(p.mesh);
       this.list.splice(i, 1);
     }
@@ -42167,9 +42309,9 @@ class Unit {
         // `game._woundModel = false` is the old flat roll, for an A/B.
         const wm = this.game._woundModel !== false;
         let loc;
-        if (wm) loc = this._woundLoc(opts);
+        if (wm) loc = (opts.loc118 && this.game.hitbox118 !== false) ? opts.loc118 : this._woundLoc(opts);   // (round 118) the player's: where it struck
         else { const r = Math.random(); loc = r < 0.08 ? 'head' : r < 0.53 ? 'torso' : r < 0.70 ? 'arm' : 'leg'; }
-        if (wm && loc === 'head' && Math.random() < HELMET_SAVE) {
+        if (wm && loc === 'head' && (!opts.loc118 || opts.part118 === 'helmet') && Math.random() < HELMET_SAVE) {
           loc = 'helmet';
           dmg *= 0.2;
           this.applySuppression(0.7);
@@ -45665,6 +45807,63 @@ class Unit {
     return (this._wReg = reg);
   }
 
+  /** (round 118) WHERE A ROUND MEETS THE MAN AS DRAWN (`game.hitbox118`): the segment (a)->(b) against
+   *  his figure as capsules on the rig's own joints, at the size it is drawn (the thigh is the scale):
+   *  head (with the helmet) and neck, trunk, upper arms and forearms, thighs and shins. The first part
+   *  it enters: { t (0-1 along the segment), x, y, z, loc ('head'|'torso'|'arm'|'leg'), part }, or
+   *  null. A picture-free reading of the pose engine's joints; the player's rounds only. */
+  _bodyHit118(ax, ay, az, bx, by, bz) {
+    const r = this.rig;
+    if (!r || !r.hips || !r.head || !r.neck || !r.kneeL || !r.legL) return null;
+    if (this.mesh) this.mesh.updateMatrixWorld(true);
+    const J = Unit._b118 || (Unit._b118 = Array.from({ length: 17 }, () => new THREE.Vector3()));
+    const at = (k, i) => r[k].getWorldPosition(J[i]);
+    const hips = at('hips', 0), neck = at('neck', 1), head = at('head', 2);
+    const lL = at('legL', 3), kL = at('kneeL', 4), lR = at('legR', 5), kR = at('kneeR', 6);
+    const aL = r.ankleL ? at('ankleL', 7) : null, aR = r.ankleR ? at('ankleR', 8) : null;
+    const sL = r.armL ? at('armL', 9) : null, eL = r.elbowL ? at('elbowL', 10) : null, hL = r.handL ? at('handL', 11) : null;
+    const sR = r.armR ? at('armR', 12) : null, eR = r.elbowR ? at('elbowR', 13) : null, hR = r.handR ? at('handR', 14) : null;
+    const m = lL.distanceTo(kL) / 0.326;            // world units a metre on this figure (his thigh)
+    if (!(m > 0)) return null;
+    // the skull: up the neck from the head joint, the helmet in its radius
+    const hc = J[15].copy(head).sub(neck); const hl = hc.length() || 1;
+    hc.multiplyScalar(0.07 * m / hl).add(head);
+    const dx = bx - ax, dy = by - ay, dz = bz - az, L2 = dx * dx + dy * dy + dz * dz, L = Math.sqrt(L2) || 1e-9;
+    let best = null;
+    const cap = (p, q, rad, loc, part) => {
+      if (!p || !q) return;
+      // closest points of the segment and the capsule's axis (Ericson 5.1.9)
+      const ux = q.x - p.x, uy = q.y - p.y, uz = q.z - p.z, wx = ax - p.x, wy = ay - p.y, wz = az - p.z;
+      const a = L2, e = ux * ux + uy * uy + uz * uz, f = ux * wx + uy * wy + uz * wz, c = dx * wx + dy * wy + dz * wz;
+      let s, t;
+      if (e < 1e-12) { t = 0; s = clamp(-c / a, 0, 1); }
+      else {
+        const bb = dx * ux + dy * uy + dz * uz, den = a * e - bb * bb;
+        s = den > 1e-12 ? clamp((bb * f - c * e) / den, 0, 1) : 0;
+        t = (bb * s + f) / e;
+        if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((bb - c) / a, 0, 1); }
+      }
+      const px = ax + dx * s - (p.x + ux * t), py = ay + dy * s - (p.y + uy * t), pz = az + dz * s - (p.z + uz * t);
+      const R = rad * m, d2 = px * px + py * py + pz * pz;
+      if (d2 > R * R) return;
+      const sIn = Math.max(0, s - Math.sqrt(R * R - d2) / L);
+      if (best && sIn >= best.t) return;
+      best = { t: sIn, x: ax + dx * sIn, y: ay + dy * sIn, z: az + dz * sIn, loc, part };
+    };
+    cap(hc, hc, BODY118.head, 'head', 'head');
+    cap(neck, head, BODY118.neck, 'head', 'neck');
+    cap(hips, neck, BODY118.trunk, 'torso', 'trunk');
+    cap(sL, eL, BODY118.arm, 'arm', 'upperArm'); cap(eL, hL, BODY118.fore, 'arm', 'foreArm');
+    cap(sR, eR, BODY118.arm, 'arm', 'upperArm'); cap(eR, hR, BODY118.fore, 'arm', 'foreArm');
+    cap(lL, kL, BODY118.thigh, 'leg', 'thigh'); cap(kL, aL, BODY118.shin, 'leg', 'shin');
+    cap(lR, kR, BODY118.thigh, 'leg', 'thigh'); cap(kR, aR, BODY118.shin, 'leg', 'shin');
+    // a strike on the crown of the helmet (above the brim) is the helmet's to turn (HELMET_SAVE)
+    if (best && best.part === 'head') {
+      const ux = hc.x - neck.x, uy = hc.y - neck.y, uz = hc.z - neck.z, ul = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1;
+      if (((best.x - hc.x) * ux + (best.y - hc.y) * uy + (best.z - hc.z) * uz) / ul > 0.35 * BODY118.head * m) best.part = 'helmet';
+    }
+    return best;
+  }
   /** Where on the drawn man a part faces a round coming along (dx, dz):
    *  the world position of the best-facing vertex of that part. */
   _skinPoint(loc, dx, dz) {
@@ -50823,6 +51022,21 @@ class Game {
         hitUnit = v; hitT = tt;
         continue;
       }
+      // (round 118) …AND ON A MAN, ON THE PART UNDER THE CROSSHAIR (`game.hitbox118`): the sphere
+      // round his middle let a sight on his head run on to the ground behind him, and the round,
+      // zeroed out there, crossed his head high (`BODY118`)
+      if (this.hitbox118 !== false && v.rig && v.rig.hips) {
+        const qx = v.pos.x - eye.x, qy = v.pos.y + 0.2 * K_FIG - eye.y, qz = v.pos.z - eye.z;
+        const al = qx * dir.x + qy * dir.y + qz * dir.z;
+        if (al <= 1.2 - HIT118_REACH || al - HIT118_REACH >= hitT) continue;
+        if (qx * qx + qy * qy + qz * qz - al * al > (HIT118_REACH + 0.3 * K_FIG) ** 2) continue;
+        const h = v._bodyHit118(eye.x, eye.y, eye.z, eye.x + dir.x * hitT, eye.y + dir.y * hitT, eye.z + dir.z * hitT);
+        if (!h) continue;
+        const tt = h.t * hitT;
+        if (tt <= 1.2 || tt >= hitT) continue;
+        hitUnit = v; hitT = tt;
+        continue;
+      }
       const cx = v.pos.x - eye.x, cy = (v.pos.y + v.def.size * 0.6) - eye.y, cz = v.pos.z - eye.z;
       const along = cx * dir.x + cy * dir.y + cz * dir.z;
       if (along <= 1.2 || along >= hitT) continue;
@@ -51265,6 +51479,7 @@ class Game {
   fpvGrenadeRelease() {
     const f = this.fpv; if (!f || f.cook == null) return;
     const u = f.unit, g = u.def.grenade;
+    const T118 = (this.nadeAim118 !== false && f.mode === 'foot' && g && u.nades > 0) ? this._nadeSolve118() : null;   // (round 118) the flight the arc drew
     const cook = g && g.fuse ? f.cook : 0;
     f.cook = null;
     if (!g || !(u.nades > 0)) return;
@@ -51273,7 +51488,8 @@ class Game {
     let tx = aim.x, tz = aim.z;
     const dx = tx - u.pos.x, dz = tz - u.pos.z, dd = hyp(dx, dz);
     if (dd > reach && dd > 0) { tx = u.pos.x + dx * reach / dd; tz = u.pos.z + dz * reach / dd; }
-    this.projectiles.fireGrenade(u, tx, tz, g, cook, this._fpvHand());
+    if (T118) this.projectiles.fireGrenade(u, T118.e.x, T118.e.z, g, cook, T118.s, false, T118);
+    else this.projectiles.fireGrenade(u, tx, tz, g, cook, this._fpvHand());
     if (u.nades !== Infinity) u.nades--;
     u.grenadeCd = NADE_READY * 0.5; u._throwT = 0.55; u.attackPlayT = 0.35;
     if (this._throwArc) this._throwArc.group.visible = false;
@@ -51299,6 +51515,7 @@ class Game {
       return;
     }
     if (!A) A = this._throwArc = this._makeThrowArc();
+    if (this.nadeAim118 !== false) { this._drawThrow118(A, f, u, g); return; }
     // the eye is still swinging in from the map view: nothing to draw from yet
     if (this.camera.position.distanceTo(u.pos) > (u.def.size || 1.2) * 2.5 + 1) { A.group.visible = false; f._throwM = null; return; }
     const reach = u._throwReach();
@@ -51356,15 +51573,103 @@ class Game {
     A.group.visible = true;
     f._throwM = Math.round(hyp(end.x - u.pos.x, end.z - u.pos.z) * WORLD_M);
   }
+  /** (round 118) THE THROW HE IS WINDING UP (`game.nadeAim118`; constants at NADE_WIND118): the hand, the
+   *  launch (where he looks, lifted), the speed from how long G has been held, and the flight swept in
+   *  1/120 s steps against the ground, buildings, hedges and walls, low lines and men — the tests
+   *  `Projectiles.update` makes of a grenade — to the first it meets. Returns { s, e, T, at(t), kind,
+   *  lie, burstT, w, reach }: `e` where it strikes, `T` the time to it, `lie` where it comes to rest. */
+  _nadeSolve118() {
+    const f = this.fpv, u = f.unit, g = u.def.grenade;
+    const reach = u._throwReach();
+    const w = clamp((f.cook || 0) / NADE_WIND118, 0, 1);
+    const v = Math.sqrt(G_WORLD * reach) * Math.sqrt(NADE_LOB118 + (1 - NADE_LOB118) * w);
+    const s = this._fpvHand(K_FIG);
+    const el = clamp(f.pitch + NADE_LIFT118, -0.5, 1.25);
+    const vh = v * Math.cos(el), vy = v * Math.sin(el), dx = Math.sin(f.yaw), dz = Math.cos(f.yaw);
+    const at = (t, o) => (o || new THREE.Vector3()).set(s.x + dx * vh * t, s.y + vy * t - 0.5 * G_WORLD * t * t, s.z + dz * vh * t);
+    const T = this.terrain, S = this.structures && this.structures.any ? this.structures : null, OB = this.obstacles;
+    const near = this.units.filter(q => q.alive && q !== u && !q.embarkedIn && hyp(q.pos.x - u.pos.x, q.pos.z - u.pos.z) < reach * 1.6 + 3);
+    const DT = 1 / 120, p0 = new THREE.Vector3(), p1 = new THREE.Vector3();
+    let kind = 'end', e = null, tHit = 0;
+    at(0, p0);
+    for (let i = 1; i <= 1200 && !e; i++) {
+      const t = i * DT; at(t, p1);
+      if (t > NADE_GRACE118) {
+        // ground: the first step under it, then halved to the crossing
+        if (p1.y <= T.heightAt(p1.x, p1.z) + 0.06) {
+          let a = t - DT, b = t;
+          for (let k = 0; k < 14; k++) { const m = (a + b) / 2, q = at(m); if (q.y <= T.heightAt(q.x, q.z) + 0.06) b = m; else a = m; }
+          tHit = b; e = at(b); kind = 'ground'; break;
+        }
+        // a building (asked only where a cell round the step holds one, as the flight's sweep asks)
+        let built = false;
+        if (S) { const cx = worldToCell(p1.x), cz = worldToCell(p1.z); for (let oz = -1; oz <= 1 && !built; oz++) for (let ox = -1; ox <= 1; ox++) if (S.has(cx + ox, cz + oz)) { built = true; break; } }
+        const sh = built ? S.raySegment(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z) : null;
+        if (sh) {
+          const L = p0.distanceTo(p1) || 1, fr = clamp(Math.sqrt((sh.x - p0.x) ** 2 + (sh.y - p0.y) ** 2 + (sh.z - p0.z) ** 2) / L, 0, 1);
+          tHit = t - DT + DT * fr; e = at(tHit); kind = 'structure'; break;
+        }
+        // a hedge, a wall, a tree, a low line (`line116`: only where it crosses it below its top)
+        const gx = worldToCell(p1.x), gz = worldToCell(p1.z), o = OB.at(gx, gz);
+        if (o) {
+          const isLine = this.line116 !== false && OB.occupied[gz * GRID + gx] >= 4;
+          if (isLine ? OB.lineBlocks(o, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z) : p1.y < OB.floorAt(o, gx, gz, p1.x, p1.z) + o.height) { tHit = t; e = p1.clone(); kind = 'obstacle'; break; }
+        }
+        // a man or a vehicle in the way (the flight's own body tests)
+        for (const q of near) {
+          if (q.def.vehicle && this._vehBoxes !== false) {
+            const h = vehSegHit(q, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z);
+            if (h) { tHit = t - DT + DT * h.t; e = at(tHit); kind = 'unit'; break; }
+            continue;
+          }
+          const r = q.def.size * 0.5 + 0.15 * K_FIG, ddy = p1.y - q.pos.y;
+          if ((p1.x - q.pos.x) ** 2 + (p1.z - q.pos.z) ** 2 <= r * r && ddy >= -0.2 * K_FIG && ddy <= q.def.size * 1.6) { tHit = t; e = p1.clone(); kind = 'unit'; break; }
+        }
+        if (e) break;
+      }
+      p0.copy(p1);
+    }
+    if (!e) { tHit = 1200 * DT; e = at(tHit); }
+    const left = g && g.fuse ? Math.max(0.12, g.fuse - (f.cook || 0)) : Infinity;
+    const burstT = g && g.fuse && left < tHit ? left : -1;
+    const lie = g && g.impact ? e.clone() : new THREE.Vector3(e.x, T.heightAt(e.x, e.z) + 0.06, e.z);
+    return { s, e, T: Math.max(0.05, tHit), at, kind, lie, burstT, w, reach };
+  }
+  /** (round 118) The wound-up throw, drawn: the arc, a small ring where it will come to rest, the lethal
+   *  radius round that, the reach round him, and a star where it bursts if the fuse runs out first. */
+  _drawThrow118(A, f, u, g) {
+    const Q = this._nadeSolve118(), N = A.n, P = A.dots.geometry.attributes.position;
+    const endT = Q.burstT > 0 ? Q.burstT : Q.T, tmp = new THREE.Vector3();
+    for (let i = 0; i < N; i++) { Q.at(endT * (0.12 + 0.88 * (i + 1) / N), tmp); P.setXYZ(i, tmp.x, tmp.y, tmp.z); }
+    A.dotMat.size = 5 * this.renderer.getPixelRatio();
+    P.needsUpdate = true;
+    A.dots.geometry.computeBoundingSphere();
+    const end = Q.burstT > 0 ? Q.at(Q.burstT) : Q.lie;
+    const gy = this.terrain.heightAt(end.x, end.z);
+    A.ring.position.set(end.x, (Q.burstT > 0 ? gy : end.y) + 0.02, end.z);
+    A.ring.scale.setScalar(g.aoe || 3);
+    A.fill.position.copy(A.ring.position); A.fill.scale.setScalar(g.aoe || 3);
+    if (A.mark) { A.mark.position.set(end.x, end.y + 0.03, end.z); A.mark.visible = !(Q.burstT > 0); }
+    A.reach.position.set(u.pos.x, this.terrain.heightAt(u.pos.x, u.pos.z) + 0.05, u.pos.z);
+    A.reach.scale.setScalar(Q.reach);
+    A.burst.visible = Q.burstT > 0;
+    if (Q.burstT > 0) A.burst.position.copy(end);
+    // white winding up, warm at full reach
+    A.dotMat.color.setHex(Q.w >= 1 ? 0xffc060 : 0xf4f1e4);
+    A.group.visible = true;
+    f._throwM = Math.round(hyp(end.x - u.pos.x, end.z - u.pos.z) * WORLD_M);
+    f._throw118 = Q;
+  }
   /** The throwing hand in first person: right of the eye and a little ahead
    *  and below it. The grenade leaves from here, so its arc is seen from
    *  beside it rather than end on (where every throw is a vertical line). */
-  _fpvHand() {
+  _fpvHand(k) {
     const cam = this.camera;
     const r = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
     const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion); fw.y = 0;
     if (fw.lengthSq() < 1e-6) fw.set(0, 0, 1); fw.normalize();
-    return cam.position.clone().addScaledVector(r, 0.36).addScaledVector(fw, 0.3).add(new THREE.Vector3(0, -0.14, 0));
+    const sc = k || 1;   // (round 118) the diorama's offsets (1.4 m right of the eye at true scale) times K_FIG
+    return cam.position.clone().addScaledVector(r, 0.36 * sc).addScaledVector(fw, 0.3 * sc).add(new THREE.Vector3(0, -0.14 * sc, 0));
   }
   _makeThrowArc() {
     const group = new THREE.Group(); group.name = 'throwArc';
@@ -51390,8 +51695,26 @@ class Game {
     burst.scale.setScalar(0.55);
     for (const o of [ring, fill, reach, burst]) o.renderOrder = 40;
     group.add(dots, ring, fill, reach, burst);
+    // (round 118) READABLE AT ANY RANGE, IN FOG AND IN THE CROP (`game.nadeAim118`): the arc and the burst
+    // were depth-tested (under the grass and the maize), fogged and tone-mapped, and where it lands was
+    // only the lethal ring, a hair-thin ellipse on the ground at thirty metres. Now the arc and a landing
+    // pin — a ring the same size on screen at any range, drawn over everything — and the rings unfogged.
+    let mark = null;
+    if (this.nadeAim118 !== false) {
+      for (const m of [dotMat, burst.material]) { m.depthTest = false; m.fog = false; m.toneMapped = false; }
+      for (const m of [ring.material, fill.material, reach.material]) { m.fog = false; m.toneMapped = false; }
+      const pc = document.createElement('canvas'); pc.width = pc.height = 64;
+      const px = pc.getContext('2d');
+      px.lineWidth = 9; px.strokeStyle = 'rgba(0,0,0,0.55)'; px.beginPath(); px.arc(32, 32, 22, 0, 6.2832); px.stroke();
+      px.lineWidth = 4.5; px.strokeStyle = '#fff4c8'; px.beginPath(); px.arc(32, 32, 22, 0, 6.2832); px.stroke();
+      px.fillStyle = 'rgba(0,0,0,0.55)'; px.beginPath(); px.arc(32, 32, 6, 0, 6.2832); px.fill();
+      px.fillStyle = '#fff4c8'; px.beginPath(); px.arc(32, 32, 3.5, 0, 6.2832); px.fill();
+      mark = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(pc), transparent: true, depthWrite: false, depthTest: false,
+        fog: false, toneMapped: false, sizeAttenuation: false }));
+      mark.scale.setScalar(0.05); mark.renderOrder = 42; group.add(mark);
+    }
     this.scene.add(group);
-    return { group, dots, dotMat, ring, fill, reach, burst, n };
+    return { group, dots, dotMat, ring, fill, reach, burst, n, mark };
   }
 
   /** The first-person drill's clocks: a cooked grenade's fuse, the bolt's
@@ -52227,6 +52550,13 @@ class Game {
     // pointless once the crosshair told the truth (FPV_HIP; a bipod MG less so)
     const hip = f.mode === 'foot' && !f.ads
       ? (SA ? (SA.pistol || u.onSide ? FPV_HIP.pistol : SA.act === 'auto' || SA.act === 'select' ? FPV_HIP.auto : FPV_HIP.rifle) : kind === 'hmg' ? FPV_HIP.mg : 1) : 1;
+    // (round 118) ON THE SIGHTS, THE WEAPON'S OWN GROUP (`game.hitbox118`): a bolt rifle's 3.5 mrad was
+    // 35 cm at 100 m before the range grew it; held still it is about 3 MOA (`FPV_MECH118`). The hold —
+    // sway, breath, kick — is already the weapon's angle, drawn in the sights (`aim116`).
+    if (this.hitbox118 !== false && f.mode === 'foot' && f.ads) {
+      const c = fpvClass118(u);
+      return (FPV_MECH118[c === 'smg' ? 'auto' : c] || base) * steady;
+    }
     return base * steady * hip;
   }
   /** The crosshair on the weapon's line, its gap the cone at the range it is on
@@ -52238,7 +52568,7 @@ class Game {
     const x = -fp * Math.tan(oy), y = -fp * Math.tan(op) / Math.cos(oy);
     if (el) el.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
     f.crossX = x; f.crossY = y;
-    const cone = this._fpvCone116(u, f) * rangeSpread(u.def, this._fpvAimD116 || 30);
+    const cone = this._fpvCone116(u, f) * (this.hitbox118 !== false ? rangeSpread118(u, this._fpvAimD116 || 30) : rangeSpread(u.def, this._fpvAimD116 || 30));
     return Math.max(2, fp * Math.tan(cone));
   }
   /** What his body is doing to his aim, for the stance line. */
@@ -69322,7 +69652,7 @@ class Game {
       const d = f.lenU * k / 3, x = f.cx + f.fx * d, z = f.cz + f.fz * d;
       this.effects.dust(x, this.terrain.heightAt(x, z) + 0.15 * K_FX, z, 2, { scale: 0.7, color: { r: 0.5, g: 0.42, b: 0.3 }, throw: 0.6, rise: 0.5 });
     }
-    this.effects.debris(f.cx + f.fx * f.lenU * 0.8, f.y + 0.3, f.cz + f.fz * f.lenU * 0.8, 8, 0x3b5a2a, 0.8);
+    this.effects.debris(f.cx + f.fx * f.lenU * 0.8, f.y + 0.3, f.cz + f.fz * f.lenU * 0.8, f.leaves === 0 ? 3 : 8, f.col || 0x3b5a2a, 0.8);
   }
   _fireFx(f, camD) {
     const near = camD < 70 ? 1 : 0.45;
@@ -72786,9 +73116,9 @@ Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 1
 Game.prototype.destroy118 = false;
 // (round 118, second effects pass) the pool evicts by visibility, a burst's flash stays local to a first-person eye,
 // tracers are instanced streaks by the belt mix
-Game.prototype.fxPool118 = false;
-Game.prototype.fpvExpo118 = false;
-Game.prototype.fxTracer118 = false;
+Game.prototype.fxPool118 = true;      // ON: no worse on Ponyri x13 and Hedgerow Hell x13 (handoff, round 118 effects second pass)
+Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
+Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 const TRACER_EVERY = { axis: 4, allied: 5, soviet: 5, british: 4 };   // MG42/34 one in 3-5, Browning one in 5, Bren/Vickers one in 4
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);
