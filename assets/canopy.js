@@ -464,6 +464,10 @@
   // direct light that reached it is a small part of THAT, not of the sky
   // (in haze a face lit at a grazing angle had more sun than sky, and read as
   // shade by a sun/sky ratio: the fence went to driftwood)
+  // …and a face in shade is never lit past this share of the full sun: in the
+  // game's fog the sky is brighter, and x3.6 of it made Village's posts paler
+  // in shade than in sun (r118near s7 B_fence_wi_fog). Clear days never reach it.
+  C.nearCap = { value: 0.35 };
   C.nearSun = { get value() { var s = root.game && root.game.sun; return s ? s.intensity * (0.2126 * s.color.r + 0.7152 * s.color.g + 0.0722 * s.color.b) : 1; } };
 
   C.hedgerow = function (mat, opts) {
@@ -512,7 +516,7 @@
       function rep(src, from, to) { if (src.indexOf(from) < 0) { ok = false; return src; } return src.replace(from, to); }
       sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.uWind; sh.uniforms.uHgSway = { value: o.sway };
       sh.uniforms.uHgSnow = C.snow; sh.uniforms.uHgStoneGamma = C.stoneGamma;
-      sh.uniforms.uHgNear = C.near; sh.uniforms.uHgNearSky = C.nearSky; sh.uniforms.uHgNearSun = C.nearSun;
+      sh.uniforms.uHgNear = C.near; sh.uniforms.uHgNearSky = C.nearSky; sh.uniforms.uHgNearSun = C.nearSun; sh.uniforms.uHgNearCap = C.nearCap;
       sh.vertexShader = rep(sh.vertexShader, '#include <common>',
         '#include <common>\n' + HEAD + 'attribute vec3 hedgeRim;\nattribute vec2 hedgeUP;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;');
       // `vHgPH`: one number per PROP, from where it stands — a wood is a range of
@@ -544,7 +548,7 @@
         '#include <project_vertex>\nvHgVP = -mvPosition.xyz;');
 
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
-        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nuniform float uHgNear;\nuniform vec4 uHgNearSky;\nuniform float uHgNearSun;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
+        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nuniform float uHgNear;\nuniform vec4 uHgNearSky;\nuniform float uHgNearSun;\nuniform float uHgNearCap;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
         '\nfloat hgBlade(float u, float n, float o){ float b = u * n + o; float h = 0.42 + 0.58 * fract(sin(floor(b) * 12.9898 + o) * 43758.5453); return h * pow(1.0 - abs(fract(b) - 0.5) * 2.0, 0.55); }');
       sh.fragmentShader = rep(sh.fragmentShader, '#include <clipping_planes_fragment>', [
         '#include <clipping_planes_fragment>',
@@ -647,7 +651,9 @@
           '\t\tfloat hgShd = 1.0 - smoothstep(0.06, 0.30, hgSunR);',
           '\t\tfloat hgNr = 1.0 - smoothstep(uHgNearSky.z, uHgNearSky.w, hgD);',
           '\t\tfloat hgSk = vHgK.x > 1.5 && vHgK.x < 2.5 ? 1.0 + (uHgNearSky.y - 1.0) * 0.5 : (vHgK.x > 0.5 && vHgK.x < 1.5 ? uHgNearSky.y : uHgNearSky.x);',
-          '\t\treflectedLight.indirectDiffuse *= 1.0 + (hgSk - 1.0) * hgShd * hgNr * uHgNear;',
+          '\t\tfloat hgInE = dot(reflectedLight.indirectDiffuse, hgLw) / max(dot(diffuseColor.rgb, hgLw), 1e-5);',
+          '\t\tfloat hgMul = 1.0 + (hgSk - 1.0) * hgShd * hgNr * uHgNear;',
+          '\t\treflectedLight.indirectDiffuse *= min(hgMul, max(1.0, uHgNearCap * uHgNearSun / max(hgInE, 1e-5)));',
           '\t}',
         ].join('\n'));
       }

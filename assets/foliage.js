@@ -955,6 +955,7 @@
         'varying vec3  vFolTint;',
         'varying float vFolAlpha;',
         'varying float vFolSun;',
+        'varying float vFolD;',       // (round 118) the instance's distance from the eye, for `Canopy.near`
         // PER INSTANCE, NOT PER FRAGMENT. A cloud shadow varies over a hundred
         // and thirty world units and a blade of grass is a tenth of one, so
         // there is nothing to gain from evaluating the noise per pixel — and
@@ -1013,13 +1014,14 @@
         '  float elev = clamp((uCam.y - iPos.y) / max(dCam, 0.001), 0.0, 1.0);',
         '  vFolAlpha = 1.0 - aFlags.z * elev * uv.y;',
         '  vFolTint  = aTint;',
+        '  vFolD     = dCam;',
         '  if (uCloud.w <= 0.001) { vFolSun = 1.0; } else {',
         '    vec2 cp = iPos.xz * uCloud.z + uCloud.xy;',
         '    float cn = folNoise(cp) * 0.62 + folNoise(cp * 2.17 + 11.3) * 0.38;',
         '    vFolSun = 1.0 - uCloud.w * smoothstep(uCloudBand.x, uCloudBand.y, cn);',
         '  }',
         '#else',
-        '  vFolAlpha = 1.0; vFolTint = aTint; vFolSun = 1.0;',
+        '  vFolAlpha = 1.0; vFolTint = aTint; vFolSun = 1.0; vFolD = 0.0;',
         '#endif',
       ].join('\n'));
 
@@ -1106,12 +1108,39 @@
         ].join('\n')).replace('* getShadowMask();', '* folShadowMask();');
       }
 
+      // (round 118, `game.fpvNear118`) THE SKY A PLANT IN SHADE LOST. The same
+      // fault as the props (assets/canopy.js `C.near`): Lambert multiplies the
+      // sun, the sky fill and the bounce by the SUN's shadow mask, so a fern in
+      // a pine's shadow or a reed in a hedge's kept only ambient + hemisphere
+      // and read as a black card a metre from the eye. Given back where the
+      // sun does not reach, near the eye, by the props' own weights; the
+      // blades' factor (half way to the leaves'). Off, the branch is skipped.
+      var folDL = /reflectedLight\.directDiffuse \*= BRDF_Diffuse_Lambert\( diffuseColor\.rgb \) \* (getShadowMask|folShadowMask)\(\);/;
+      var CN = window.Canopy;
+      if (CN && CN.near && CN.nearSky && CN.nearSun && folDL.test(sh.fragmentShader)) {
+        sh.uniforms.uFolNear = CN.near; sh.uniforms.uFolNearSky = CN.nearSky; sh.uniforms.uFolNearSun = CN.nearSun; sh.uniforms.uFolNearCap = CN.nearCap || { value: 0.35 };
+        sh.fragmentShader = sh.fragmentShader.replace('varying float vFolSun;',
+          'varying float vFolSun;\nvarying float vFolD;\nuniform float uFolNear;\nuniform vec4 uFolNearSky;\nuniform float uFolNearSun;\nuniform float uFolNearCap;');
+        sh.fragmentShader = sh.fragmentShader.replace(folDL, function (m) { return m + [
+          '',
+          '\tif (uFolNear > 0.0) {',
+          '\t\tvec3 folLw = vec3(0.2126, 0.7152, 0.0722);',
+          '\t\tfloat folSunR = dot(reflectedLight.directDiffuse, folLw) / max(dot(diffuseColor.rgb, folLw) * uFolNearSun, 1e-5);',
+          '\t\tfloat folShd = 1.0 - smoothstep(0.06, 0.30, folSunR);',
+          '\t\tfloat folNr = 1.0 - smoothstep(uFolNearSky.z, uFolNearSky.w, vFolD);',
+          '\t\tfloat folInE = dot(reflectedLight.indirectDiffuse, folLw) / max(dot(diffuseColor.rgb, folLw), 1e-5);',
+          '\t\tfloat folMul = 1.0 + (uFolNearSky.y - 1.0) * 0.5 * folShd * folNr * uFolNear;',
+          '\t\treflectedLight.indirectDiffuse *= min(folMul, max(1.0, uFolNearCap * uFolNearSun / max(folInE, 1e-5)));',
+          '\t}',
+        ].join('\n'); });
+      }
+
       if (!ok) _patchOk = false;
     };
     // Two materials with the same `onBeforeCompile` source still compile twice
     // unless they share a cache key. One material for the whole field anyway,
     // but be explicit about it.
-    mat.customProgramCacheKey = function () { return 'foliage4' + (shared.oneTapShadow === false ? '' : '|1tap'); };
+    mat.customProgramCacheKey = function () { return 'foliage4' + (shared.oneTapShadow === false ? '' : '|1tap') + (window.Canopy && window.Canopy.near ? '|near118' : ''); };
     return mat;
   }
 

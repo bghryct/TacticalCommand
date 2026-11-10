@@ -23,7 +23,7 @@
 (function () {
   'use strict';
   const S = { group: null, hidden: [], mat: null, stats: null };
-  const SECT = 4, UNDER = 2.2;   // UNDER: the bounce in the cut (vertex colour, below the ground)
+  const SECT = 4, UNDER = 1.4;   // UNDER: the bounce in the cut (vertex colour, below the ground); near the eye `Canopy.near` lifts the shade
 
   // DEFAULT OFF (round 118, main's review of the Sedan and Kotelnikovo captures): the bags read as white eggs scattered
   // on the berm, the spoil ends as plank ramps with stretched streaks, and the berm as a flat slab with hard ends. The
@@ -68,7 +68,12 @@
     // THE PLACE'S GROUND. The sheet's spoil is Normandy's: fresh loam grassing over. On sand, stone, ash and snow it is
     // recoloured to the map's commonest ground (`Obstacles._spoilPal`), its texture kept (the texel's own light and
     // dark times the ground's colour), and snow lies on whatever faces up, by the canopy's own snow (`Canopy.snow`).
-    S.u = S.u || { uSnowTK: (window.Canopy && Canopy.snow) || { value: 0 }, uSpoilTK: { value: new T.Color(1, 1, 1) }, uSpoilMixTK: { value: 0 } };
+    S.u = S.u || { uSnowTK: (window.Canopy && Canopy.snow) || { value: 0 }, uSpoilTK: { value: new T.Color(1, 1, 1) }, uSpoilMixTK: { value: 0 },
+      // (round 118) THE SKY IN THE SHADE NEAR THE EYE, as the first-person agent gave the props (assets/canopy.js `C.near`,
+      // `game.fpvNear118`; .claude/wip118/near/NOTES.md): the face the sun does not reach keeps only ambient + hemisphere,
+      // and the grade's toe crushes that to black (the timber of a trench wall in first person). Same uniforms, same switch.
+      uNearTK: (window.Canopy && Canopy.near) || { value: 0 }, uNearSunTK: (window.Canopy && Canopy.nearSun) || { value: 1 },
+      uNearSkyTK: (window.Canopy && Canopy.nearSky) || { value: [3.6, 5.0, 12.0, 36.0] } };
     M.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, S.u);
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vUpTK;\nattribute float fade;\nvarying float vFadeTK;\nvarying vec2 vWTK;')
@@ -78,19 +83,27 @@
       // world-space noise, so its edge is ragged and still, not a straight outline (it was a slab with corners)
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 varying float vUpTK; varying float vFadeTK; varying vec2 vWTK;
-uniform float uSnowTK; uniform vec3 uSpoilTK; uniform float uSpoilMixTK;
+uniform float uSnowTK; uniform vec3 uSpoilTK; uniform float uSpoilMixTK; uniform float uNearTK; uniform float uNearSunTK; uniform vec4 uNearSkyTK;
 float hTK(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hTK(i), hTK(i + vec2(1.0, 0.0)), f.x), mix(hTK(i + vec2(0.0, 1.0)), hTK(i + vec2(1.0, 1.0)), f.x), f.y); }`)
         .replace('void main() {', feet ? `void main() {
   if (vFadeTK < 0.999) { float n = 0.62 * nTK(vWTK * 2.2) + 0.38 * nTK(vWTK * 6.1); if (n > vFadeTK * 1.15 - 0.08) discard; }` : 'void main() {')
+        .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+  if (uNearTK > 0.0) {   // the share of the sun this face got, against the sun's own luminance: shade below ~0.06-0.30
+    vec3 lwTK = vec3(0.2126, 0.7152, 0.0722);
+    float sunRTK = dot(reflectedLight.directDiffuse, lwTK) / max(dot(diffuseColor.rgb, lwTK) * uNearSunTK, 1e-5);
+    float shdTK = 1.0 - smoothstep(0.06, 0.30, sunRTK);
+    float nrTK = 1.0 - smoothstep(uNearSkyTK.z, uNearSkyTK.w, length(vViewPosition));
+    reflectedLight.indirectDiffuse *= 1.0 + (uNearSkyTK.x - 1.0) * shdTK * nrTK * uNearTK;
+  }`)
         .replace('#include <map_fragment>', `#include <map_fragment>
   { float sp = step(${(K.bands.spoil[0]).toFixed(4)}, vUv.y) * step(vUv.y, ${(K.bands.spoil[1]).toFixed(4)});
     float l = dot(diffuseColor.rgb, vec3(0.30, 0.59, 0.11));
     diffuseColor.rgb = mix(diffuseColor.rgb, l * uSpoilTK, sp * uSpoilMixTK);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.58, 0.60, 0.64), smoothstep(0.45, 0.85, vUpTK) * uSnowTK * 0.8); }`);
     };
-    M.customProgramCacheKey = () => 'trenchKit118-ground-v4' + (feet ? '-feet' : '');
+    M.customProgramCacheKey = () => 'trenchKit118-ground-v5' + (feet ? '-feet' : '');
     return M;
   }
 
@@ -259,10 +272,15 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     // the field's colour under a point, against the sheet's turf (~0.20, 0.26, 0.10): only on turf maps
     const SP0 = K.bands.spoil[0], SP1 = K.bands.spoil[1];
     const tcol = terr && terr.mesh && terr.mesh.geometry && terr.mesh.geometry.attributes.color;
-    const turfTint = tcol && (!obs._spoilPal || obs._spoilPal() === 'turf') ? (x, z) => {
+    // (every ground, not only turf: on snow the berm's foot stood out bright against the field's own snow at 26 m;
+    // there the tint may only darken). REF: what the kit's foot is drawn as on that ground.
+    const gpal = obs._spoilPal ? obs._spoilPal() : 'turf';
+    const REF = { turf: [0.20, 0.26, 0.10], snow: [0.56, 0.58, 0.62], sand: [0.52, 0.45, 0.31], stone: [0.36, 0.35, 0.33], ash: [0.20, 0.19, 0.18] }[gpal] || [0.20, 0.26, 0.10];
+    const hiT = gpal === 'snow' ? 1.0 : 2.2;
+    const turfTint = tcol ? (x, z) => {
       const gx = Math.max(0, Math.min(GRID - 1, Math.round((x + HALF - TILE / 2) / TILE))), gz = Math.max(0, Math.min(GRID - 1, Math.round((z + HALF - TILE / 2) / TILE)));
       const a = tcol.array, i = (gz * GRID + gx) * 3;
-      return [Math.min(2.2, Math.max(0.3, a[i] / 0.20)), Math.min(2.2, Math.max(0.3, a[i + 1] / 0.26)), Math.min(2.2, Math.max(0.3, a[i + 2] / 0.10))];
+      return [Math.min(hiT, Math.max(0.3, a[i] / REF[0])), Math.min(hiT, Math.max(0.3, a[i + 1] / REF[1])), Math.min(hiT, Math.max(0.3, a[i + 2] / REF[2]))];
     } : null;
     const fr = { x: 0, z: 0, tx: 0, tz: 0, nx: 0, nz: 0 };
     // emit one piece through a mapping fn(x, y, z) -> [wx, wy, wz] and nfn(nx, ny, nz) -> world normal

@@ -68468,6 +68468,11 @@ class Game {
     const arc = new THREE.Mesh(this._vpRingGeo(vp, vp.r - 1.2, vp.r - 0.7, -Math.PI / 2, 0.02),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
     arc.renderOrder = 5; arc.visible = false;
+    // (round 118, `fpvNear118`) THE BANK YOU COULD SEE THROUGH. The ring takes the sim's height, a hedge bank's
+    // top included, and lies 0.14 over it, so at the eye it crossed the face of a bank as a translucent band
+    // (r118near s13: hiding it took 94% of the band away). In first person the objective is the top bar's letter.
+    ring.onBeforeRender = () => { ring.material.opacity = this.fpv && this.fpvNear118 ? 0 : 0.24; };
+    arc.onBeforeRender = () => { arc.material.opacity = this.fpv && this.fpvNear118 ? 0 : 0.6; };
     grp.add(ring, arc);
     this.scene.add(grp);
     vp._grp = grp; vp._ring = ring; vp._arc = arc; vp._flag = null;
