@@ -70914,6 +70914,8 @@ class Game {
       // 448-cell maps a company deploying into a 9x7 box was a mortar target,
       // and the formation code then had to untangle it.
       list = this._atEstablishment(list);
+      // (round 118) the generic 'sniper' on a German or a Soviet side is that army's own (`_sniperOf118`)
+      if (this.sniperKit118 !== false && list.indexOf('sniper') >= 0) { const own = this._sniperOf118(list); if (own) list = list.map(t => t === 'sniper' ? own : t); }
       // …but the ground must still be ONE piece of it. `organiseSquads` grows a
       // section outward from a man and stops when the next nearest is more than
       // a section frontage (`SECTION_SPAN`, 34 u) away — the rule that stops
@@ -71231,6 +71233,22 @@ class Game {
    *  tanks burned is not the same victory against twice the tanks. */
   _forceN(n) { return Math.max(1, Math.round(n * (this._forceScale || 1))); }
 
+  /** (round 118, `game.sniperKit118`) THE GENERIC SNIPER IS AN AMERICAN — US kit (figures.js `BY_TYPE`), the
+   *  Springfield (`RTT_ARMS`) — and forty-odd maps list him on a German or a Soviet side, where he fought in an
+   *  American uniform. Of a deploy list whose other men are mostly German he is the Scharfschütze, mostly Soviet
+   *  the Snayper; any other side (the Americans, the British, the Italians and Japanese, who have no sniper of
+   *  their own) keeps him. */
+  _sniperOf118(list) {
+    let ger = 0, sov = 0, other = 0;
+    for (const t of list) {
+      if (t === 'sniper') continue;
+      const n = nationOf(t);
+      if (n === 'soviet') sov++;
+      else if (n === 'axis' && !t.startsWith('it') && !t.startsWith('jp')) ger++;
+      else other++;
+    }
+    return ger > sov && ger > other ? 'gersniper' : sov > ger && sov > other ? 'sovsniper' : null;
+  }
   _atEstablishment(list) {
     const rifles = [];
     // THE AID MAN IS AN ATTACHMENT, NOT A RIFLEMAN. He is `kind: 'rifle'` so
@@ -73153,7 +73171,8 @@ cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);   // (round 118) a felled t
 // (round 118) THE EFFECTS SWITCHES — each OFF is the round-114 picture exactly. Read by
 // `VFX.burst`/`fire`/`strike` (assets/vfx.js), `Projectiles` (the ground strike) and `_smokeBank`.
 Game.prototype.snipers118 = true;     // (round 118) a sniper pair each side on Village and in the platoon/company presets
-Game.prototype.setupMem118 = true;    // (round 118) the battle setup forgets a force remembered for a map whose own forces changed
+Game.prototype.setupMem118 = true;
+Game.prototype.sniperKit118 = true;   // (round 118) the generic (American) sniper on a German or Soviet side is that army's own    // (round 118) the battle setup forgets a force remembered for a map whose own forces changed
 Game.prototype.fxBlast118 = true;     // HE: flash, hot core and a dust skirt on the baked ground burst (ON: better in every capture, no frame cost)
 Game.prototype.fxFire118 = true;      // fires: taller tongues, a wider glow (ON: better in the captures, no extra particles)
 Game.prototype.fxImpact118 = false;   // bullets into the ground: a puff in the colour of the surface
