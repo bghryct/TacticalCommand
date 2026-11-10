@@ -1570,7 +1570,7 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/ui117.js"></script>
 <script src="assets/editfps118.js"></script>
 <!-- (round 118) the trench kit, built in Blender (tools/blender/trench_kit.py), and its layer along smooth runs:
-     `game.trenchKit118`, default ON (false: the old pieces). Drawing only; the simulation keeps its trench cells. -->
+     `game.trenchKit118`, default OFF. Drawing only; the simulation keeps its trench cells. -->
 <script src="assets/trenchkit118.pack.js"></script>
 <script src="assets/trenchkit118.js"></script>
 <script>
@@ -17524,6 +17524,12 @@ const MAPS = [
       deploy(gx(0.32), gx(0.14), 2, ['gerofficer', 'gersani', 'germp40', 'mg42', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'mg42']);
       deploy(gx(0.52), gx(0.12), 2, ['germp40', 'mg42', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'pak75', 'panzerfaust']);
       deploy(gx(0.70), gx(0.14), 2, ['germp40', 'mg42', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'gergren', 'germortar', 'stug']);
+      // (round 118, `game.snipers118`) the owner: "Village has none". A sniper pair each side — the shot and
+      // his observer — behind the company headquarters, as the companies of 1944 kept theirs.
+      if (!(window.game && window.game.snipers118 === false)) {
+        deploy(gx(0.40), gx(0.80), 1, ['sniper', 'usscout']);
+        deploy(gx(0.42), gx(0.11), 2, ['gersniper', 'gergren']);
+      }
     },
   },
 ];
@@ -26417,6 +26423,10 @@ class Obstacles {
   /** The two shared geometries of a felled tree's cells, built once: a trunk length along +Z and a stump. */
   _logKit() {
     if (!this._logKitG) {
+      // (round 118, `game.reset118`) BUILT ON THE COSMETIC STREAM. The kit is built the first time a tree falls in the
+      // PAGE, inside the step (`fellTree` from `damage`), and three.js gives every new geometry a UUID from `Math.random`:
+      // the first battle of a session to fell a tree drew eight more sim rolls than every battle after it.
+      if (window.game && window.game.reset118 !== false && Math.random !== vrandom) return cosmeticScope(this._logKit, this, arguments);
       // the props kit, as the woodpile (`_logVariant`): bark on the sides (kind WOOD, the trunks' own procedural
       // grain from position and normal), the sawn ends pale end grain — on `mat.hedge`, no material of its own
       const BARK = [0.25, 0.20, 0.15], CUT = [0.60, 0.48, 0.32], L = TILE / K_PROP * 0.52;
@@ -26433,6 +26443,11 @@ class Obstacles {
     this._stillGeos = this._stillGeos || new WeakMap();
     let s = this._stillGeos.get(geo);
     if (s) return s;
+    // (round 118, `game.reset118`) THE CARRIED STATE THAT MADE A PRIMED SEEDED BATTLE NOT REPEAT. This WeakMap outlives
+    // `loadMap`, the clone is made in the step, and `clone()` draws a UUID from `Math.random` (four rolls): whether a
+    // felled crown cost the sim stream four rolls depended on whether an EARLIER battle of the page had felled that
+    // variant. Village seed 7: the first draw whose call site differed between two runs, draw 25,725 at step 1,064.
+    if (window.game && window.game.reset118 !== false && Math.random !== vrandom) return cosmeticScope(this._stillGeo, this, arguments);
     s = geo.clone(); const h = s.getAttribute('hedge');
     if (h) { for (let i = 0; i < h.count; i++) h.setY(i, 0); h.needsUpdate = true; }
     this._stillGeos.set(geo, s);
@@ -26574,6 +26589,7 @@ class Obstacles {
     if (this._draped) { for (const g of this._draped) g.dispose(); this._draped = []; }
     this.hazSelf.fill(0); this.hazNear.fill(0);
     this._n7 = 0;   // (round 118) no trench laid
+    if (window.game && window.game.reset118 !== false) this.falling = [];   // (round 118, reset118) the last map's falls: only the render loop pruned them
     this.terrain._touchMiniAll();
     this._rebakeT = 0; this._rebakeDebt = 0;   // re-batch on the very next tick
   }
@@ -71346,6 +71362,13 @@ class Game {
     // the battle.
     if (this._sweptMemo) this._sweptMemo.clear();
     this._sweptRays = 0;
+    // (round 118, `game.reset118`) …AND THREE MORE OF THE SAME SHAPE. `_boomSmokeT` is the battle time of the last
+    // burst that laid a smoke cloud (a real cloud: it blocks sightlines), and `explode` lays the next one only if
+    // `time - _boomSmokeT > 0.45` — so a battle inherited the last one's absolute time against a clock back at zero,
+    // and NO burst under vis 7 screened anything until the clock passed it (the whole battle, after a long one). The
+    // first battle of a fresh page was the only one that started at -99: Village seed 7 diverged from the second at
+    // step 100. `_urgNow` (the urgency read before the first doctrine pass) and `_refuseToastT` (a toast's throttle) too.
+    if (this.reset118 !== false) { this._boomSmokeT = null; this._urgNow = null; this._refuseToastT = null; }
     // EVERY SUBSYSTEM CADENCE GOES BACK TO THE START LINE.
     //
     // A dozen countdowns live on the Game and gate a subsystem each — the
@@ -73129,18 +73152,27 @@ cosmeticClass(Game, ['_spawnStrikePlane', '_craterLip', '_mineMesh', '_makeSmoke
 cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);   // (round 118) a felled tree's leaves and dust
 // (round 118) THE EFFECTS SWITCHES — each OFF is the round-114 picture exactly. Read by
 // `VFX.burst`/`fire`/`strike` (assets/vfx.js), `Projectiles` (the ground strike) and `_smokeBank`.
+Game.prototype.snipers118 = true;     // (round 118) a sniper pair each side on Village and in the platoon/company presets
+Game.prototype.setupMem118 = true;    // (round 118) the battle setup forgets a force remembered for a map whose own forces changed
 Game.prototype.fxBlast118 = true;     // HE: flash, hot core and a dust skirt on the baked ground burst (ON: better in every capture, no frame cost)
 Game.prototype.fxFire118 = true;      // fires: taller tongues, a wider glow (ON: better in the captures, no extra particles)
 Game.prototype.fxImpact118 = false;   // bullets into the ground: a puff in the colour of the surface
 Game.prototype.fxSmoke118 = false;    // smoke screens: fuller puffs that erode later
 // (round 118) DESTRUCTIBILITY: trees fall and lie as logs (`Obstacles.fellTree`); `destroy118` reserved for the rest
 Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 118 destructibility)
+// (round 118) CARRIED STATE: what a battle builds once per PAGE must not move the next battle's sim stream. ON: the
+// felled tree's log kit and still crown are built on the cosmetic stream; `Obstacles.clear` drops the last map's falls.
+Game.prototype.reset118 = true;       // ON: Village seed 7 repeats over six battles in a page (handoff, round 118 carried state)
 Game.prototype.destroy118 = false;
 // (round 118, second effects pass) the pool evicts by visibility, a burst's flash stays local to a first-person eye,
 // tracers are instanced streaks by the belt mix
 Game.prototype.fxPool118 = true;      // ON: no worse on Ponyri x13 and Hedgerow Hell x13 (handoff, round 118 effects second pass)
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
+// (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —
+// get back, near the eye and where the sun does not reach, the sky the Lambert's sun-shadow mask took from them
+// (assets/canopy.js `C.near`; OFF is the old drawing exactly, the branch is not taken)
+Game.prototype.fpvNear118 = true;     // ON: against the sun a fence 16->41/255, a hedge 33->70 (r118near s7); playing camera = null
 const TRACER_EVERY = { axis: 4, allied: 5, soviet: 5, british: 4 };   // MG42/34 one in 3-5, Browning one in 5, Bren/Vickers one in 4
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);

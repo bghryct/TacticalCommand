@@ -446,8 +446,25 @@
    *  THE EYE (faded out by world distance, so the playing camera is the old
    *  picture): x, solid (wood, bark, stone, earth); y, leaves and blades; z..w,
    *  the fade in world units. `near` is live: 0 is the old drawing exactly. */
-  C.near = { get value() { var g = root.game; return g && g.fpvNear118 ? 1 : 0; } };
-  C.nearSky = { value: [3.6, 2.0, 12.0, 36.0] };
+  // …AND ONLY UNDER A SUN. Overcast, the sky is the light and nothing lost its
+  // fill: a x3.6 sky there turned a fence to driftwood (Village fog, 88 -> 128).
+  // So the weight is how far the sun outshines the sky (sun / (ambient + hemi):
+  // ~9 on a clear morning, ~6 in the game's fog, ~3.9 on snow, whose glare
+  // raises the fill, 0 at night), 0 below 1.5, 1 above 3.5.
+  C.near = { get value() {
+    var g = root.game; if (!g || !g.fpvNear118) return 0;
+    var s = g.sun ? g.sun.intensity : 0, a = (g.ambientLight ? g.ambientLight.intensity : 0) + (g.hemiLight ? g.hemiLight.intensity : 0);
+    var t = Math.min(1, Math.max(0, (s / Math.max(a, 1e-3) - 1.5) / 2));
+    return t * t * (3 - 2 * t);
+  } };
+  // x3.6 is the buildings' own sky; leaves x5 (a crown against the sun read 11/255,
+  // x3.6 47, x5-6 a hedge), the verge's blades half way (x6 made them glow)
+  C.nearSky = { value: [3.6, 5.0, 12.0, 36.0] };
+  // the sun's own luminance (colour x intensity): a face is in shade when the
+  // direct light that reached it is a small part of THAT, not of the sky
+  // (in haze a face lit at a grazing angle had more sun than sky, and read as
+  // shade by a sun/sky ratio: the fence went to driftwood)
+  C.nearSun = { get value() { var s = root.game && root.game.sun; return s ? s.intensity * (0.2126 * s.color.r + 0.7152 * s.color.g + 0.0722 * s.color.b) : 1; } };
 
   C.hedgerow = function (mat, opts) {
     if (!mat || mat._hedgerow) return false;
@@ -495,7 +512,7 @@
       function rep(src, from, to) { if (src.indexOf(from) < 0) { ok = false; return src; } return src.replace(from, to); }
       sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.uWind; sh.uniforms.uHgSway = { value: o.sway };
       sh.uniforms.uHgSnow = C.snow; sh.uniforms.uHgStoneGamma = C.stoneGamma;
-      sh.uniforms.uHgNear = C.near; sh.uniforms.uHgNearSky = C.nearSky;
+      sh.uniforms.uHgNear = C.near; sh.uniforms.uHgNearSky = C.nearSky; sh.uniforms.uHgNearSun = C.nearSun;
       sh.vertexShader = rep(sh.vertexShader, '#include <common>',
         '#include <common>\n' + HEAD + 'attribute vec3 hedgeRim;\nattribute vec2 hedgeUP;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;');
       // `vHgPH`: one number per PROP, from where it stands — a wood is a range of
@@ -527,7 +544,7 @@
         '#include <project_vertex>\nvHgVP = -mvPosition.xyz;');
 
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
-        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nuniform float uHgNear;\nuniform vec4 uHgNearSky;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
+        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nuniform float uHgNear;\nuniform vec4 uHgNearSky;\nuniform float uHgNearSun;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
         '\nfloat hgBlade(float u, float n, float o){ float b = u * n + o; float h = 0.42 + 0.58 * fract(sin(floor(b) * 12.9898 + o) * 43758.5453); return h * pow(1.0 - abs(fract(b) - 0.5) * 2.0, 0.55); }');
       sh.fragmentShader = rep(sh.fragmentShader, '#include <clipping_planes_fragment>', [
         '#include <clipping_planes_fragment>',
@@ -623,13 +640,13 @@
           '',
           '\tif (uHgNear > 0.0) {',
           '\t\tvec3 hgLw = vec3(0.2126, 0.7152, 0.0722);',
-          '\t\tfloat hgSunR = dot(reflectedLight.directDiffuse, hgLw) / max(dot(reflectedLight.indirectDiffuse, hgLw), 1e-5);',
+          '\t\tfloat hgSunR = dot(reflectedLight.directDiffuse, hgLw) / max(dot(diffuseColor.rgb * RECIPROCAL_PI, hgLw) * PI * uHgNearSun, 1e-5);',
           // the sky fill is not under the sun's mask on a thin prop, so a face
           // in shade still has a little direct light: only the SUN's share
           // (several times the sky's) counts as sunlit
-          '\t\tfloat hgShd = 1.0 - smoothstep(2.0, 6.0, hgSunR);',
+          '\t\tfloat hgShd = 1.0 - smoothstep(0.06, 0.30, hgSunR);',
           '\t\tfloat hgNr = 1.0 - smoothstep(uHgNearSky.z, uHgNearSky.w, hgD);',
-          '\t\tfloat hgSk = (vHgK.x > 0.5 && vHgK.x < 2.5) ? uHgNearSky.y : uHgNearSky.x;',
+          '\t\tfloat hgSk = vHgK.x > 1.5 && vHgK.x < 2.5 ? 1.0 + (uHgNearSky.y - 1.0) * 0.5 : (vHgK.x > 0.5 && vHgK.x < 1.5 ? uHgNearSky.y : uHgNearSky.x);',
           '\t\treflectedLight.indirectDiffuse *= 1.0 + (hgSk - 1.0) * hgShd * hgNr * uHgNear;',
           '\t}',
         ].join('\n'));

@@ -98,10 +98,12 @@
   var MAX_SQUADS = 40, MAX_MISSIONS = 20;
 
   var PRESETS = [
-    { id: 'platoon', name: 'Rifle platoon', note: 'An HQ, three rifle squads, a machine gun, a mortar and an anti-tank team.',
-      parts: [['command', 1], ['rifle', 3], ['mg', 1], ['mortar', 1], ['at', 1]] },
-    { id: 'company', name: 'Rifle company', note: 'An HQ, six rifle squads, two machine guns, two mortars, two anti-tank teams and scouts.',
-      parts: [['command', 1], ['rifle', 6], ['mg', 2], ['mortar', 2], ['at', 2], ['recon', 1, 'foot']] },
+    // (round 118, `game.snipers118`) the owner: snipers never showed up — no preset had one. A pair (the shot and
+    // his observer) in the platoon and the company, each army's own where it has one (`baseOf` 'sniper').
+    { id: 'platoon', name: 'Rifle platoon', note: 'An HQ, three rifle squads, a machine gun, a mortar, an anti-tank team and a sniper pair.',
+      parts: [['command', 1], ['rifle', 3], ['mg', 1], ['mortar', 1], ['at', 1], ['recon', 1, 'sniper', 'r118']] },
+    { id: 'company', name: 'Rifle company', note: 'An HQ, six rifle squads, two machine guns, two mortars, two anti-tank teams, scouts and a sniper pair.',
+      parts: [['command', 1], ['rifle', 6], ['mg', 2], ['mortar', 2], ['at', 2], ['recon', 1, 'foot'], ['recon', 1, 'sniper', 'r118']] },
     { id: 'combined', name: 'Combined arms', note: 'A rifle platoon with an anti-tank gun and two tanks.',
       parts: [['command', 1], ['rifle', 3], ['mg', 1], ['mortar', 1], ['at', 1], ['atgun', 1], ['armour', 2]] },
     { id: 'armour', name: 'Armoured', note: 'Five tanks, two rifle squads to clear the hedges and a scout car.',
@@ -181,17 +183,22 @@
   }
   /** The commonest template of an arm — what a preset means by "a rifle
    *  squad". The headquarters is the `_hq` one, not the observer or the aid
-   *  post; `want` picks a recon car ('veh') or men on foot ('foot'). */
+   *  post; `want` picks a recon car ('veh') or men on foot ('foot'), or (round 118) a sniper pair ('sniper'):
+   *  the one whose shot is of the army's own kit first — the Scharfschütze with the Kar 98k, not the German
+   *  template that borrowed the American sniper. */
   function baseOf(nation, cat, want) {
-    var best = null, all = TPL();
+    var best = null, bestOwn = 0, all = TPL();
     for (var k in all) {
       var t = all[k];
       if (t.nation !== nation || t.cat !== cat) continue;
       if (cat === 'command' && !/_hq$/.test(k)) continue;
       if (want === 'veh' && !isVeh(t.men[0])) continue;
       if (want === 'foot' && isVeh(t.men[0])) continue;
+      if (want === 'sniper') { var d0 = DEF(t.men[0]); if (!d0 || d0.kind !== 'sniper') continue; }
+      var own = want === 'sniper' && armyOf(t.men[0]) === nation ? 1 : 0;
+      if (best && own < bestOwn) continue;
       // a tie goes to the dearer — the armoured car, not the jeep, scouts for tanks
-      if (!best || t.w > best.w || (t.w === best.w && (t.rp > best.rp || (t.rp === best.rp && t.id < best.id)))) best = t;
+      if (!best || own > bestOwn || t.w > best.w || (t.w === best.w && (t.rp > best.rp || (t.rp === best.rp && t.id < best.id)))) { best = t; bestOwn = own; }
     }
     return best ? best.id : null;
   }
@@ -200,6 +207,7 @@
     for (var i = 0; i < PRESETS.length; i++) {
       if (PRESETS[i].id !== id) continue;
       PRESETS[i].parts.forEach(function (p) {
+        if (p[3] === 'r118' && root118() && root118().snipers118 === false) return;   // (round 118) OFF: the old presets
         var t = baseOf(nation, p[0], p[2]);
         if (t) c[t] = (c[t] || 0) + p[1];
       });
@@ -511,6 +519,17 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  function root118() { return (A && A.game) || window.game || null; }
+  /** (round 118, `game.setupMem118`) WHAT THE MAP FIELDED when a choice was remembered: men by type and side.
+   *  A remembered force replaces the side's men, so once the map's own forces change (a sniper placed in the
+   *  editor and the map saved, or new squads written into the map) the memory is of a different map and the
+   *  setup starts from what the map fields now. A memory from before this has no print and is not used. */
+  function forcesPrint(units) {
+    var c = {}, k, out = [];
+    for (var i = 0; i < units.length; i++) { var u = units[i]; if (u && u.alive && (u.team === 1 || u.team === 2)) { k = u.team + ':' + u.type; c[k] = (c[k] || 0) + 1; } }
+    for (k in c) out.push(k + '=' + c[k]);
+    return out.sort().join(',');
+  }
   function loadAll() { try { return JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { return {}; } }
   function saveAll(all) { try { localStorage.setItem(STORE, JSON.stringify(all)); } catch (e) { /* private mode, quota */ } }
   /** Counts kept to templates that still exist, of this army's alliance and no
@@ -537,6 +556,9 @@
     // start as they stand rather than as remembered for the stock map.
     var edited = reason === 'play' && !!(g.editor && g.editor.undoStack && g.editor.undoStack.length);
     var st = { map: name, edited: edited, sides: {}, support: {}, more: {} };
+    // (round 118) …and a memory of the map as it fielded something else is not this map's
+    st.fp = forcesPrint(g.units);
+    if (mem && g.setupMem118 !== false && reason !== 'restart' && mem.fp !== st.fp) mem = { support: mem.support };
     for (var T = 1; T <= 2; T++) {
       var army = sideArmy(g.units, T);
       var side = { team: T, mapArmy: army, army: army || (T === 2 ? 'ger' : 'us'), mode: 'map', counts: {}, preset: 'map', view: 'all' };
@@ -800,6 +822,7 @@
     }
     var all = loadAll();
     all[st.map] = {
+      fp: st.fp,   // (round 118) what the map fielded when this was chosen (`forcesPrint`)
       sides: {
         1: { mode: st.sides[1].mode, army: st.sides[1].army, counts: st.sides[1].counts, preset: st.sides[1].preset },
         2: { mode: st.sides[2].mode, army: st.sides[2].army, counts: st.sides[2].counts, preset: st.sides[2].preset },
