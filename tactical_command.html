@@ -745,6 +745,8 @@ body.fpv #tacMap { display: none !important; }
         <div class="ed-seg" id="edPropMode">
           <div class="on" data-mode="brush">Brush</div><div data-mode="line">Line</div><div data-mode="rect">Rect</div>
         </div></div>
+      <div class="ed-row"><label>Trench</label>
+        <div class="ed-seg" id="edTrenchRev118"><div class="on" data-mode="auto">Auto</div><div data-mode="concrete">Concrete</div><div data-mode="wood">Wood</div><div data-mode="dirt">Dirt</div></div></div>
       <div class="ed-row"><label>Turn</label>
         <div class="ed-seg" id="edPropRotMode"><div class="on" data-mode="auto">Auto</div><div data-mode="set">Set</div><div data-mode="along">Along</div></div></div>
       <div class="ed-row"><label>Angle</label>
@@ -1566,6 +1568,7 @@ body.fpv #tacMap { display: none !important; }
      and fire support. Exposes window.BattleSetup. Builds on assets/squads.js. -->
 <script src="assets/battlesetup.js"></script>
 <script src="assets/ui117.js"></script>
+<script src="assets/editfps118.js"></script>
 <script>
 'use strict';
 /* ============================================================================
@@ -10012,6 +10015,12 @@ const AIMSEE_CELL  = 6;       // cache granularity, in cells — see the note
 // how long the leg to it is committed. See `Game._squadGunLine`.
 const GUNLINE_EVERY = 8.0;
 const SUP117_KNOWN_S = 30;   // (round 117) `_holdGunLine117`: an enemy the side saw this recently is one the gun is there to cover
+// (round 118) `game.cover118`: TAKE COVER (`Game._holdCover118`) within COVER118_R u, a section searching every COVER118_EVERY s and
+// moving at most COVER118_PER men a search; a player's move order lands each man on cover within COVER118_SNAP u of his slot
+// (`Game._snapSlots118`); DUCK AND RISE (`Unit._ducked118`): in a hole or trench, suppression >= DUCK118_SUPP or a hit inside
+// DUCK118_HIT_S puts him down, and he comes back up DUCK118_BASE + DUCK118_NERVE x (1 - nerve) s after the fire lifts.
+const COVER118_R = 8, COVER118_EVERY = 6, COVER118_PER = 2, COVER118_SNAP = 3;
+const DUCK118_SUPP = 0.3, DUCK118_HIT_S = 1.5, DUCK118_BASE = 1.5, DUCK118_NERVE = 4.5;
 const SUP117_ARC = Math.PI / 3, SUP117_ARC_SEEN = 3;   // (round 117 v2) `_gunSpot117`: the 60-degree arc, and 3 of its 5 points seen
 const GUNLINE_HOLD  = 5.0;
 // (round 111) The gun team goes firm together (`Game._gunTeamJoin`): a man of
@@ -21271,6 +21280,24 @@ const TRENCH118_ON = true, TRENCH118_SLACK = 0.15 / METERS_PER_UNIT;
 const TRENCH118_SEAT = { crouch: 1.45 / METERS_PER_UNIT, fire: 0.80 / METERS_PER_UNIT };
 FOOT_CROSS_COST[7] = 0; FOOT_CROSS_SLOW[7] = 0.8;   // free to route along (a price made the search walk beside it), slower to walk
 function trench118On() { const g = window.game; return g && g.trench118 != null ? !!g.trench118 : TRENCH118_ON; }
+// (round 118) WHAT A TRENCH IS REVETTED WITH (`Obstacles._trenchVariant`, with `trench118` on): planks, A-frames and
+// duckboards; poured concrete (the Atlantic Wall); or bare earth, its walls leaning back. Chosen per trench in the
+// editor (`o.rev`, saved as `v`), else by the map: concrete on the Channel coast, timber in the East, earth elsewhere.
+const REV118 = ['wood', 'concrete', 'dirt'];
+// (round 118) `game.gunpit118` (default OFF): A GUN AT REST BESIDE A GUN PIT IS IN IT. The 647 `gunpit`s (and the
+// `emplacement`s) were walls a gun stood next to, open to everything. A towed or anti-tank gun that has stopped
+// within a cell of one nobody holds claims it (`Unit._pitTick118`): its crew are dug in (`dugin` 0.85: 'dug',
+// cover 0.80, the hole's defilade), and its trail can be swung only `half` either side of the way it faced
+// when it came into the pit, so it fires out of the pit's mouth and nowhere else (its own traverse on top).
+// The gun is not moved into the pit's cell (a wall to the vehicle search, which could not path out of it).
+const GUNPIT118 = { half: 50 * Math.PI / 180 }, GUNPIT118_ON = false;
+function gunpit118On() { const g = window.game; return g && g.gunpit118 != null ? !!g.gunpit118 : GUNPIT118_ON; }
+function trenchRevDefault118() {
+  const m = window.game && window.game.mapDef, s = m ? ((m.name || '') + ' ' + (m.terrain || '') + ' ' + (m.era || '')) : '';
+  if (/atlantic|omaha|utah|gold|juno|sword|pointe|vierville|dieppe|beach|coast|channel/i.test(s)) return 'concrete';
+  if (/stalin|kursk|ponyri|prokhor|oboyan|smolensk|volokol|kotelnik|moscow|leningrad|kharkov|kiev|minsk|seelow|berlin|soviet|russia|steppe|winter|dnieper|don\b|volga|oder/i.test(s)) return 'wood';
+  return 'dirt';
+}
 // how far either side of the line a man is on it (its pace, a vault); where a man stands
 // pressed behind it (past its half-depth); the least he may be from it standing still
 const LINE_BAND = 0.5 / METERS_PER_UNIT, LINE_STAND = 0.22 / METERS_PER_UNIT, LINE_BODY = 0.12 / METERS_PER_UNIT;
@@ -22805,14 +22832,15 @@ class Obstacles {
    *  ground (the terrain is one heightfield), so like the old one it is built
    *  UP: the floor at ground level, the parapets raised round it. Laid along X
    *  and turned to its line by `_orientHedges`; `end` closes the +X end. */
-  _trenchVariant(i, end) {
+  _trenchVariant(i, end, rev) {
     // `end`: true closes the +X end (a line's last bay); 'both' closes both — a
     // lone trench, which is 74% of the trench cells on the shipped maps, and
     // open at both ends showed the hollow inside of its parapets
     this._trenchGeos = this._trenchGeos || [];
     // (round 118) `trench118`: the ditch goes on down under the ground, its own slots (read when the map is laid)
-    const deep = trench118On();
-    const slot = (end === 'both' ? 8 + i : end ? 4 + i : i) + (deep ? 100 : 0);
+    const deep = trench118On(), rv = deep ? (REV118.includes(rev) ? rev : trenchRevDefault118()) : null;
+    const isC118 = rv === 'concrete', isD118 = rv === 'dirt';
+    const slot = (end === 'both' ? 8 + i : end ? 4 + i : i) + (deep ? 100 + 20 * REV118.indexOf(rv) : 0);
     if (this._trenchGeos[slot]) return this._trenchGeos[slot];
     if (!deep) { const pg = this._refined113('trench', slot); if (pg) return (this._trenchGeos[slot] = pg); }
     const r = mulberry32(6400 + i * 29 + (end ? 7 : 0));
@@ -22826,7 +22854,8 @@ class Obstacles {
       put(a, fn, ca, kind); put(c, fn, cc, kind); put(d, fn, cd, kind);
     };
     const L = TILE * 0.515, NX = 4, x0 = end === 'both' ? -L + 0.10 : -L, x1 = end ? L - 0.10 : L;
-    const mud = [0.150, 0.120, 0.082], board = [0.300, 0.240, 0.160], plank = [0.330, 0.275, 0.200];
+    const mud = isC118 ? [0.300, 0.298, 0.285] : [0.150, 0.120, 0.082], board = isC118 ? [0.360, 0.358, 0.345] : isD118 ? [0.170, 0.135, 0.092] : [0.300, 0.240, 0.160],
+          plank = isC118 ? [0.430, 0.428, 0.410] : isD118 ? [0.250, 0.200, 0.135] : [0.330, 0.275, 0.200];
     const spoil = [0.300, 0.240, 0.160], turf = [0.212, 0.272, 0.108];
     const B = [0, 0, 0], W = [3, 0, 0];
     // the parapet's profile, lip outward; the last point is under the ground
@@ -22838,11 +22867,25 @@ class Obstacles {
       // duckboard walk, the ends shut. The terrain hides it all from above (the floor at the ground stays the
       // mouth the playing camera sees); from a man's eye down in it, it is the trench round him.
       if (deep) {
-        const KM = 1 / (METERS_PER_UNIT * K_PROP), yF = -1.45 * KM, yD = yF + 0.06 * KM, zW = 0.28, dark = [0.080, 0.064, 0.044];
-        quad([xa, yF, -zW], [xa, yF, zW], [xb, yF, zW], [xb, yF, -zW], mud, mud, mud, mud, B, [0, 1, 0]);
-        quad([xa, yD, -0.11], [xa, yD, 0.11], [xb, yD, 0.11], [xb, yD, -0.11], board, board, board, board, W, [0, 1, 0]);
-        quad([xa, yF, -zW], [xb, yF, -zW], [xb, 0.015, -zW], [xa, 0.015, -zW], dark, dark, plank, plank, W, [0, 0, 1]);
-        quad([xb, yF, zW], [xa, yF, zW], [xa, 0.015, zW], [xb, 0.015, zW], dark, dark, plank, plank, W, [0, 0, -1]);
+        // (concrete: poured walls straight down to a concrete floor; earth: the walls lean back to a narrower floor
+        // and there is no timber; wood: planks, an A-frame post each bay and the duckboards)
+        // 0.87 m across (a crouched man leaning to the parapet put his helmet through a 0.68 m one); the terrain's
+        // shadow lies over all of it, so it is coloured a little lighter than the timber above the ground
+        const KM = 1 / (METERS_PER_UNIT * K_PROP), yF = -1.45 * KM, yD = yF + 0.06 * KM, zW = 0.36, zF = isD118 ? 0.27 : zW;
+        const dark = isC118 ? [0.400, 0.396, 0.378] : isD118 ? [0.180, 0.144, 0.098] : [0.130, 0.104, 0.072];
+        const wl = [Math.min(1, plank[0] * 1.35), Math.min(1, plank[1] * 1.35), Math.min(1, plank[2] * 1.35)];
+        quad([xa, yF, -zF], [xa, yF, zF], [xb, yF, zF], [xb, yF, -zF], mud, mud, mud, mud, B, [0, 1, 0]);
+        if (!isC118 && !isD118) quad([xa, yD, -0.11], [xa, yD, 0.11], [xb, yD, 0.11], [xb, yD, -0.11], board, board, board, board, W, [0, 1, 0]);
+        quad([xa, yF, -zF], [xb, yF, -zF], [xb, 0.015, -zW], [xa, 0.015, -zW], dark, dark, wl, wl, isD118 ? B : W);
+        quad([xb, yF, zF], [xa, yF, zF], [xa, 0.015, zW], [xb, 0.015, zW], dark, dark, wl, wl, isD118 ? B : W);
+        // and the ledge where the timber above the ground (0.34 m out) meets the wider cut
+        quad([xa, 0.015, -zW], [xb, 0.015, -zW], [xb, 0.015, -0.28], [xa, 0.015, -0.28], wl, wl, wl, wl, isD118 ? B : W, [0, 1, 0]);
+        quad([xb, 0.015, zW], [xa, 0.015, zW], [xa, 0.015, 0.28], [xb, 0.015, 0.28], wl, wl, wl, wl, isD118 ? B : W, [0, 1, 0]);
+        if (!isC118 && !isD118) {   // the A-frame's legs, one each side at the bay's start
+          const post = [0.170, 0.125, 0.075], px0 = xa + 0.004, px1 = xa + 0.030, pz = zW - 0.012;
+          quad([px0, yF, -pz], [px1, yF, -pz], [px1, 0.015, -pz], [px0, 0.015, -pz], post, post, post, post, W, [0, 0, 1]);
+          quad([px1, yF, pz], [px0, yF, pz], [px0, 0.015, pz], [px1, 0.015, pz], post, post, post, post, W, [0, 0, -1]);
+        }
         if (a === NX - 1 && end) quad([x1, yF, -zW], [x1, yF, zW], [x1, 0.015, zW], [x1, 0.015, -zW], dark, dark, mud, mud, B, [-1, 0, 0]);
         if (a === 0 && end === 'both') quad([x0, yF, zW], [x0, yF, -zW], [x0, 0.015, -zW], [x0, 0.015, zW], dark, dark, mud, mud, B, [1, 0, 0]);
       }
@@ -22915,8 +22958,29 @@ class Obstacles {
         const cc = [hess[0] * j, hess[1] * j, hess[2] * j], cd = [cc[0] * 0.7, cc[1] * 0.7, cc[2] * 0.7];
         const b0 = [[cx - hx, cy - hy, cz - hz], [cx + hx, cy - hy, cz - hz], [cx + hx, cy - hy, cz + hz], [cx - hx, cy - hy, cz + hz]];
         const t0 = [[cx - hx * ti, cy + hy, cz - hz * ti], [cx + hx * ti, cy + hy, cz - hz * ti], [cx + hx * ti, cy + hy, cz + hz * ti], [cx - hx * ti, cy + hy, cz + hz * ti]];
+        if (deep) {
+          // (round 118) A FILLED BAG IS A PILLOW, not a box drawn in at the top: seen from low down those were a row of
+          // teeth. A superquadric (flat-ish faces, rounded edges and ends), lit smooth, darker where it sits, each a
+          // little turned and a different hessian; staggered half a bag a course as before
+          const sp = (v, e) => (v < 0 ? -1 : 1) * Math.pow(Math.abs(v), e), e1 = 0.45, e2 = 0.32, NP = 6, NT = 10;
+          const yaw = (r() - 0.5) * 0.10, cs = Math.cos(yaw), sn = Math.sin(yaw), bx = hx * 1.06, by = hy * 1.15, bz = hz * 1.05;
+          const V = (ph, th) => {
+            const cp = Math.cos(ph), sp1 = Math.sin(ph), ct = Math.cos(th), st = Math.sin(th);
+            const lx = bx * sp(cp, e1) * sp(ct, e2), ly = by * sp(sp1, e1), lz = bz * sp(cp, e1) * sp(st, e2);
+            let nx = sp(cp, 2 - e1) * sp(ct, 2 - e2) / bx, ny = sp(sp1, 2 - e1) / by, nz = sp(cp, 2 - e1) * sp(st, 2 - e2) / bz;
+            const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+            const k = 0.58 + 0.42 * (sp1 + 1) / 2;
+            return [[cx + lx * cs - lz * sn, cy + ly, cz + lx * sn + lz * cs], [nx * cs - nz * sn, ny, nx * sn + nz * cs], [cc[0] * k, cc[1] * k, cc[2] * k]];
+          };
+          for (let a = 0; a < NP; a++) for (let b = 0; b < NT; b++) {
+            const p0 = -Math.PI / 2 + Math.PI * a / NP, p1 = -Math.PI / 2 + Math.PI * (a + 1) / NP, q0 = 2 * Math.PI * b / NT, q1 = 2 * Math.PI * (b + 1) / NT;
+            const A = V(p0, q0), Bv = V(p1, q0), C = V(p1, q1), D = V(p0, q1);
+            for (const v of [A, Bv, C, A, C, D]) put(v[0], v[1], v[2], B);
+          }
+        } else {
         quad(t0[0], t0[3], t0[2], t0[1], cc, cc, cc, cc, B);
         for (let q = 0; q < 4; q++) { const q1 = (q + 1) % 4; quad(b0[q], t0[q], t0[q1], b0[q1], cd, cc, cc, cd, B); }
+        }
       }
     }
     // the verge against the parapet's foot
@@ -24932,7 +24996,7 @@ class Obstacles {
         if (body.geometry !== g) body.geometry = g;
       }
       if (body && body.isMesh && kind === 2 && o.mesh.userData.lineVar != null) {
-        const g = this._trenchVariant(o.mesh.userData.lineVar, nx + nz === 0 ? 'both' : endTo !== null);
+        const g = this._trenchVariant(o.mesh.userData.lineVar, nx + nz === 0 ? 'both' : endTo !== null, o.rev);
         if (body.geometry !== g) body.geometry = g;
       }
       if (body && body.isMesh && (kind === 5 || kind === 6) && o.mesh.userData.lineVar != null) {
@@ -26063,7 +26127,7 @@ class Obstacles {
     const foot = FOOT_THROUGH[type] != null && !(window.game && window.game.footThrough113 === false);
     this.occupied[gz * GRID + gx] = foot ? 2 : (type === 'hedge' && !(window.game && window.game.hedgeFoot113 === false) ? 3
       : LINE_CROSS[type] && !(window.game && window.game.line116 === false) ? LINE_CROSS[type].code : 1);   // (round 116) 4-6: a low line, climbed
-    if (TRENCH118[type] && trench118On()) this.occupied[gz * GRID + gx] = 7;   // (round 118) a trench a man stands IN
+    if (TRENCH118[type] && trench118On()) { this.occupied[gz * GRID + gx] = 7; this._n7 = (this._n7 || 0) + 1; }   // (round 118) a trench a man stands IN
     if (foot) obs.footR = FOOT_THROUGH[type];
     const hr = HAZ_RANK[type] || 0;
     if (hr) { this.hazSelf[gz * GRID + gx] = hr; this._hazTouch(gx, gz); }
@@ -26180,6 +26244,7 @@ class Obstacles {
     if (PROP_LINE_KIND[o.type] && this._lineSimReady) this._lineSimHeights(gx, gz);
     const fi = this.fires.indexOf(o);
     if (fi >= 0) this.fires.splice(fi, 1);
+    if (this.occupied[gz * GRID + gx] === 7) this._n7 = Math.max(0, (this._n7 || 1) - 1);   // (round 118)
     this.occupied[gz * GRID + gx] = 0;
     if (this.hazSelf[gz * GRID + gx]) { this.hazSelf[gz * GRID + gx] = 0; this._hazTouch(gx, gz); }
     this.terrain._touchMini(gx, gz, 2);          // repaint the ground under its dot
@@ -26248,6 +26313,7 @@ class Obstacles {
     this.list = []; this._byCell.clear(); this.occupied.fill(0); this._lineSimReady = false;
     if (this._draped) { for (const g of this._draped) g.dispose(); this._draped = []; }
     this.hazSelf.fill(0); this.hazNear.fill(0);
+    this._n7 = 0;   // (round 118) no trench laid
     this.terrain._touchMiniAll();
     this._rebakeT = 0; this._rebakeDebt = 0;   // re-batch on the very next tick
   }
@@ -26257,10 +26323,11 @@ class Obstacles {
       const r = { x: o.gx, z: o.gz, t: o.type };
       if (o.rot != null) r.r = Math.round(o.rot * 1e4) / 1e4;
       if (o.off) r.o = [Math.round(o.off[0] * 1e3) / 1e3, Math.round(o.off[1] * 1e3) / 1e3];
+      if (o.rev) r.v = o.rev;   // (round 118) a trench's revetment, chosen in the editor
       return r;
     });
   }
-  load(data, off) { this.clear(); off = off || 0; for (const o of data) this.add(o.x + off, o.z + off, o.t, o.r, false, o.o); }
+  load(data, off) { this.clear(); off = off || 0; for (const o of data) { const ob = this.add(o.x + off, o.z + off, o.t, o.r, false, o.o); if (ob && o.v && REV118.includes(o.v)) ob.rev = o.v; } }
   /** (round 113) Turn the prop on a cell to `rot` (radians), or hand it back to
    *  the automatic laying (`null`): built again from its own cell's seed, so it
    *  is the same variant, only turned. Returns the new record. */
@@ -29048,6 +29115,20 @@ class Effects {
    *  and then a spark. `mat` is the struck piece's material (`Structures.MATS`),
    *  (dx, dz) the way the round was going. It was two grey chips, whatever
    *  the wall was made of, and too small to see past fifty metres. */
+  /** (round 118) A ROUND INTO THE GROUND, drawn in the surface it hit
+   *  (`game.fxImpact118`): the terrain's kind at the point decides earth,
+   *  crop, hard (road, stone, rubble) or water — see `VFX.strike`. */
+  groundStrike(x, y, z) {
+    // (`Effects` holds no game: the terrain is the page's)
+    const G = this.game || (typeof game !== 'undefined' ? game : null), T = G && G.terrain;
+    const kn = T && T.typeAt ? typeKin(T.typeAt(worldToCell(x), worldToCell(z))) || '' : '';
+    const kind = /water|river|pond|lake|marsh|sea|ford/.test(kn) ? 'water'
+      : /road|cobble|stone|tarmac|rock|concrete|gravel|rubble|sett|brick|paving/.test(kn) ? 'hard'
+      : /crop|wheat|corn|barley|grass|meadow|pasture|field|hay/.test(kn) ? 'crop' : 'earth';
+    const color = kind === 'hard' ? { r: 0.62, g: 0.6, b: 0.56 } : kind === 'crop' ? { r: 0.5, g: 0.46, b: 0.28 } : { r: 0.46, g: 0.38, b: 0.28 };
+    if (this.vfx) { this.vfx.strike(x, y, z, { kind, color }); if (kind !== 'water') this.vfx.debris(x, y, z, 1, 0x6a5a48); return; }
+    this.debris(x, y, z, 2, 0x8a8272);
+  }
   wallStrike(x, y, z, mat, dx, dz) {
     const col = mat && mat.color != null ? mat.color : 0x9a9086;
     const c = new THREE.Color(col);
@@ -31216,14 +31297,16 @@ class Projectiles {
             this.list.splice(i, 1);
             continue;
           }
-          game.effects.debris(pos.x, pos.y, pos.z, 2, 0x8a8272);
+          if (game.fxImpact118) game.effects.groundStrike(pos.x, pos.y, pos.z);
+          else game.effects.debris(pos.x, pos.y, pos.z, 2, 0x8a8272);
         } else if (!isBullet) {
           // Arrows stick in the ground — battlefields should look fought-over
           game.effects.addDecal(p.mesh, 8);
           this.list.splice(i, 1);
           continue;
         } else if (impact !== 'gone') {
-          game.effects.debris(pos.x, pos.y + 0.05 * K_FX, pos.z, 2, 0x8a8272);  // dirt kick
+          if (game.fxImpact118) game.effects.groundStrike(pos.x, pos.y + 0.05 * K_FX, pos.z);   // (round 118) by surface
+          else game.effects.debris(pos.x, pos.y + 0.05 * K_FX, pos.z, 2, 0x8a8272);  // dirt kick
         }
       }
       game.scene.remove(p.mesh);
@@ -34073,7 +34156,7 @@ class Unit {
     this.closeAtLeft = undefined; this.closeAtCd = undefined; this.apAmmo = undefined; this.heAmmo = undefined;
     this.subAmmo = undefined; this.mgAmmo = undefined; this.smokeAmmo = undefined; this.shellType = undefined;
     this._burnT = undefined; this._seenT = undefined; this.posture = undefined; this.moveMode = undefined;
-    this._attackedT = undefined; this._lastHitBy = undefined; this.aMorale = undefined; this.aIntel = undefined;
+    this._attackedT = undefined; this._lastHitBy = undefined; this.aMorale = undefined; this.aIntel = undefined; this._duckT118 = undefined;
     this.aStrength = undefined; this.aExp = undefined; this.aLead = undefined; this.ccState = undefined; this.fear = undefined;
     this._ccRollT = undefined; this.strain = undefined; this.fatigue = undefined; this._refuseT = undefined;
     this._refuseWhy = undefined; this._rallyT = undefined; this._mood = undefined; this._overwatch = undefined;
@@ -35858,6 +35941,7 @@ class Unit {
       if (this.digT <= 0) this._completeDigIn();
     }
     else if (this._dugByTrench118 || !this.dugin) this._trenchTick118();   // (round 118) in a trench, he is in it
+    if (this._pit118 || ((this.def.towed || this.def.kind === 'atgun') && !this.def.vehicle && gunpit118On())) this._pitTick118();   // (round 118) a gun in its pit
     if (this.setupT > 0) this.setupT -= dt;   // towed gun limbering / unlimbering
     this._gunHaul(dt);                       // …and hitch up / come into battery on its own
     if (this.def.vehicle && !this.crewBailed) this._checkBailOut(dt);   // crippled crews may abandon ship
@@ -35986,6 +36070,8 @@ class Unit {
       this.pos.copy(this.garrisonSlot.pos);
       if (!this.target) this.targetFace = this.garrisonSlot.face;
     }
+    // (round 118) `gunpit118`: a gun in its pit swings its trail no further than the pit's mouth
+    if (this._pit118) { const dp = angDiff(this.targetFace, this._pit118.face); if (Math.abs(dp) > GUNPIT118.half) this.targetFace = this._pit118.face + (dp > 0 ? GUNPIT118.half : -GUNPIT118.half); }
     // Turn toward the desired facing at a limited rate — tanks swing their whole
     // hull round slowly (neutral steer); infantry pivot near-instantly.
     const maxTurn = this._turnRate() * dt;
@@ -43957,7 +44043,7 @@ class Unit {
    *  clears it in `orderMove`, a shove does not) is not. Runs for every man not otherwise dug in; with the
    *  switch off it reads one flag and returns. */
   _trenchTick118() {
-    if (!this._dugByTrench118 && !trench118On()) return;
+    if (!this._dugByTrench118 && (!this.game.obstacles._n7 || !trench118On())) return;   // no trench laid on this map: one read
     let inT = !!this._trench118();
     // stopped on its banks (an order ends within a metre or so of the cell's middle), he steps down into it
     if (!inT && !this.dugin && !(this.digT > 0) && !(this.path && this.path.length)) {
@@ -43967,6 +44053,32 @@ class Unit {
     }
     if (inT && !this.dugin && !(this.digT > 0) && !(this.path && this.path.length)) { this.dugin = 0.85; this._dugByTrench118 = true; }
     else if (!inT && this._dugByTrench118) { if (this.dugin) this._clearDigIn(); this._dugByTrench118 = false; }
+  }
+  /** (round 118) `gunpit118`: claim a gun pit beside a gun at rest, or give it up when the gun moves or dies. */
+  _pitTick118() {
+    const P = this._pit118, moving = !!(this.path && this.path.length) || !!this.limbered;
+    if (P) {
+      if (moving || !this.alive || !gunpit118On()) {
+        if (P.o._gun118 === this) P.o._gun118 = null;
+        this._pit118 = null;
+        if (this._dugByPit118) { this._dugByPit118 = false; if (this.dugin) this._clearDigIn(); }
+      }
+      return;
+    }
+    if (moving || !this.alive) return;
+    const gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z), ci = gz * GRID + gx;
+    if (this._pitCell118 === ci) return;            // looked round this cell already
+    this._pitCell118 = ci;
+    const O = this.game.obstacles;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      if (!inGrid(gx + dx, gz + dz)) continue;
+      const o = O.at(gx + dx, gz + dz);
+      if (!o || (o.type !== 'gunpit' && o.type !== 'emplacement') || (o._gun118 && o._gun118 !== this && o._gun118.alive && o._gun118._pit118)) continue;
+      o._gun118 = this;
+      this._pit118 = { o, face: this.face };
+      if (!this.dugin) { this.dugin = 0.85; this._dugByPit118 = true; }
+      return;
+    }
   }
   _inFoxhole117() { return this.dugin > 0 && this._holeKind117() === 'fox'; }
   /** (round 117) Which hole this unit digs: 'fox' (a man on foot with his own
@@ -43984,7 +44096,7 @@ class Unit {
    *  to: head and shoulders up, the rifle over the parapet. Drawing only. */
   _stanceDrawn117(moving) {
     const st = this._stance(moving);
-    if (st === 'crouch' && this.suppState !== 'Suppressed' && this.posture !== 'hide' && this._inFoxhole117()
+    if (st === 'crouch' && !(this.game.cover118 === true && this._ducked118()) && this.suppState !== 'Suppressed' && this.posture !== 'hide' && this._inFoxhole117()
         && (this.target || this.groundAtk || this.aimT > 0 || this.recoilT > 0)) return 'aim';
     return st;
   }
@@ -43995,6 +44107,7 @@ class Unit {
     if (this.game.digExposure117 === false || !this._inFoxhole117()) return -1;
     const S = DIG117.shown;
     if (this.suppState === 'Pinned' || this.posture === 'prone' || this.posture === 'ambush' || this._proneReflex) return S.flat;
+    if (this.game.cover118 === true && this._ducked118()) return S.crouch;
     if (this.suppState !== 'Suppressed' && this.posture !== 'hide'
         && (this.target || this.groundAtk || this.aimT > 0)) return S.fire;
     return S.crouch;
@@ -44016,8 +44129,27 @@ class Unit {
   /** (round 117) What a man in a hole is doing, as far as a burst is concerned: 'fire' (stood to), 'crouch'
    *  (down in it) or 'flat'. `Game.explode` takes it BEFORE the burst's own suppression (`_heWas117`): its
    *  blast clears his aim and pins him before the fragments are scored. */
+  /** (round 118) DUCK AND RISE (`game.cover118`). A man in a hole or a trench (dug in: a trench digs him in)
+   *  who is under fire — suppression at DUCK118_SUPP, or hit in the last DUCK118_HIT_S — goes below the
+   *  parapet: he holds his fire and keeps his target (`_holdsFire`), and a burst or a bullet finds the man
+   *  crouched in it (`_heStance117`, `_dugShown117`, `_stance`) instead of the head and shoulders of a man
+   *  stood to fire, which is where dug-in men spent most of a battle. He comes back up when the fire lifts,
+   *  after DUCK118_BASE + DUCK118_NERVE x (1 - his nerve, `aMorale`) seconds. No dice; `_duckT118` is reset
+   *  with the man. */
+  _ducked118() {
+    if (this.game.duck118 === false) return false;   // (round 118) the sub-switch: take cover without the duck
+    if (!(this.dugin > 0) || this.garrison || this.def.vehicle) return false;
+    const now = this.game.time;
+    if ((this.suppression || 0) >= DUCK118_SUPP || now - this._attackedT < DUCK118_HIT_S) {
+      const nerve = this.aMorale != null ? this.aMorale : 0.5;
+      this._duckT118 = now + DUCK118_BASE + DUCK118_NERVE * (1 - nerve);
+      return true;
+    }
+    return this._duckT118 != null && now < this._duckT118;
+  }
   _heStance117() {
     if (this.suppState === 'Pinned' || this.posture === 'prone' || this.posture === 'ambush') return 'flat';
+    if (this.game.cover118 === true && this._ducked118()) return 'crouch';
     if (this.suppState !== 'Suppressed' && this.posture !== 'hide' && (this.target || this.groundAtk || this.aimT > 0)) return 'fire';
     return 'crouch';
   }
@@ -44132,6 +44264,7 @@ class Unit {
     this._sink117 = 0;
     this._foxRelease();
     this._dugByTrench118 = false;
+    this._dugByPit118 = false;
   }
 
   /** Take Cover: path to the nearest cover object and hunker down (Defend). */
@@ -44972,6 +45105,7 @@ class Unit {
       }
       return !spring;
     }
+    if (this.game.cover118 === true && this._ducked118()) return true;   // (round 118) down in the hole: he keeps his target
     return this.game.openFire117 === true && this._openingHold117(target, d);
   }
 
@@ -46558,6 +46692,7 @@ class Editor {
       }
       game.obstacles.remove(gx, gz);
       if (game.obstacles.add(gx, gz, tool, this._propRad(), this.propAlong && this._lineRad != null, this._lineOff(gx, gz))) game.sfx.place();
+      { const ob = game.obstacles.at(gx, gz); if (ob && ob.type === 'trench' && REV118.includes(this.trenchRev118)) ob.rev = this.trenchRev118; }   // (round 118) its revetment
     } else if (tool === 'turnObs') {
       // (round 113) THE TURN TOOL: a placed prop takes the Angle (or goes back
       // to automatic); Shift+click turns it on by 15 degrees from where it is
@@ -47331,6 +47466,7 @@ class UI {
     };
     seg('edPaintMode', d => { ed.paintMode = d.mode; });
     seg('edPropMode',  d => { ed.propMode = d.mode; });
+    if (document.getElementById('edTrenchRev118')) seg('edTrenchRev118', d => { ed.trenchRev118 = d.mode; });   // (round 118) a trench's revetment
     // (round 113) the props' turn: Auto, or Set to the Angle (its slider is
     // wired below, with the others: `slider` is declared after this line)
     seg('edPropRotMode', d => { ed.setPropRot(d.mode === 'set' ? ed.propAngle : null, d.mode === 'along'); });
@@ -50017,6 +50153,7 @@ class Game {
     const ang = Math.atan2(wx - cx, wz - cz);
     const sq = this._selectionSquad();
     const slots = this._formationSlots(sel.length, wx, wz, ang, sq ? sq.formation : this.formation);
+    if (this.cover118 === true && !append) this._snapSlots118(slots);   // (round 118) each man onto cover near his place
     // COMBINED ARMS: in a mixed selection the formation is layered by role —
     // armour takes the leading slots, riflemen march in its lee, and the
     // support weapons (MGs, guns, tubes, snipers) bring up the rear. Slots are
@@ -53782,6 +53919,96 @@ class Game {
    *  A test of infantry section tactics on a tank map measures nothing.
    *
    *  Returns true if the gun element is on, or on its way to, a gun line. */
+  /** (round 118) TAKE COVER (`game.cover118`). The owner: "the ai for player units and enemy units should
+   *  know how to utilize cover including the trenches better". A computer's section holding a position,
+   *  once its side knows of an enemy, sends up to COVER118_PER men a search (every COVER118_EVERY s) who
+   *  stand on open ground — not dug in, not in a trench, not behind anything (`_coverAtCell` under 0.35) —
+   *  to the best cover within COVER118_R that still has a line of fire to that enemy (`_coverSpot118`):
+   *  a trench first, then what the sim already calls cover (`_bestCoverNear`: walls, hedges, banks,
+   *  craters, building edges, on the far side of the line). The place is claimed as his `_gunSpot`, which
+   *  the formation and the prepared position leave alone and `_squadTask` releases when the section's job
+   *  changes; arrived, he goes firm. The player's sections are his (`_snapSlots118` is their share). */
+  _holdCover118(rec, t) {
+    const live = rec.live, sq = rec.sq;
+    if (!live.length || !t) return;
+    const T = live[0].team;
+    if (T === this.playerTeam || !(T > 0)) return;
+    for (const u of live) {
+      const s = u._gunSpot;
+      if (s && s.cover118 && !u.path.length && !u.hold && hyp(u.pos.x - s.x, u.pos.z - s.z) < 2.2) { u.hold = true; u.posture = 'defend'; u.anchor.copy(u.pos); }
+    }
+    const now = this.time;
+    if (now - (sq._cov118T == null ? -99 : sq._cov118T) < COVER118_EVERY) return;
+    sq._cov118T = now;
+    let e = null, bd = Infinity;
+    for (const v of this.units) {
+      if (!v.alive || v.downed || v.embarkedIn || !areHostile(T, v.team)) continue;
+      const ct = v._contactT && v._contactT[T];
+      if (ct == null || now - ct > SUP117_KNOWN_S) continue;
+      const d = hyp(v.pos.x - t.x, v.pos.z - t.z);
+      if (d < bd) { bd = d; e = v; }
+    }
+    if (!e) return;
+    let moved = 0;
+    for (const u of live) {
+      if (moved >= COVER118_PER) break;
+      const d = u.def;
+      if (d.vehicle || d.towed || u.garrison || u._assault || u._strSpot != null || u._gunSpot || u.embarkedIn || u.downed || u.path.length) continue;
+      if (u.dugin > 0) continue;
+      const here = this._coverAtCell(worldToCell(u.pos.x), worldToCell(u.pos.z));
+      if (here >= 0.35) continue;
+      const spot = this._coverSpot118(u, e, here);
+      if (!spot) continue;
+      u._gunSpot = { x: spot.x, z: spot.z, cover118: true }; u.hold = false;
+      u._setPathTo(spot.x, spot.z); u._commitMove(GUNLINE_HOLD); u.state = 'advance';
+      moved++;
+    }
+  }
+  /** (round 118) Where `_holdCover118` sends him: the nearest trench cell within COVER118_R from which he can see
+   *  the enemy (inside his reach, by a sightline), else `_bestCoverNear` if it is real cover, better than where
+   *  he stands, and sees it; null (he stays) if neither. Reads only. */
+  _coverSpot118(u, e, here) {
+    const ex = e.pos.x, ez = e.pos.z, ety = this.terrain.heightAt(ex, ez) + MARK_H, reach = u.def.rng || 0;
+    const sees = (x, z) => hyp(ex - x, ez - z) <= reach && this.sightClear(x, this.terrain.heightAt(x, z) + 1.2, z, ex, ety, ez);
+    const O = this.obstacles, gx0 = worldToCell(u.pos.x), gz0 = worldToCell(u.pos.z), R = Math.ceil(COVER118_R / TILE);
+    let best = null, bd = Infinity;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const gx = gx0 + dx, gz = gz0 + dz;
+      if (!inGrid(gx, gz) || O.occupied[gz * GRID + gx] !== 7) continue;
+      if (!this.pathfinder.passable(gx, gz) && !(O.footThrough(gx, gz) && this.terrain.typePassable(gx, gz))) continue;
+      const x = cellCenter(gx), z = cellCenter(gz), dd = hyp(x - u.pos.x, z - u.pos.z);
+      if (dd > COVER118_R || dd >= bd || !u._tetherAt(x, z) || !sees(x, z)) continue;
+      bd = dd; best = { x, z };
+    }
+    if (best) return best;
+    const c = u._bestCoverNear(COVER118_R, { x: ex, z: ez });
+    if (c && c.cover >= Math.max(0.35, here + 0.1) && sees(c.x, c.z)) return { x: c.x, z: c.z };
+    return null;
+  }
+  /** (round 118) A player's move order (`commandMove`, `game.cover118`): each formation slot moves to the
+   *  nearest trench cell, or cell the sim counts as cover (>= 0.35), within COVER118_SNAP of it, one man to a
+   *  cell. The order is still his: the men go where he sent them, each onto the cover nearest his place. */
+  _snapSlots118(slots) {
+    const O = this.obstacles, used = new Set(), R = Math.ceil(COVER118_SNAP / TILE);
+    for (const s of slots) {
+      if (!s) continue;
+      const gx0 = worldToCell(s.x), gz0 = worldToCell(s.z);
+      let best = null, bd = Infinity;
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        const gx = gx0 + dx, gz = gz0 + dz, k = gz * GRID + gx;
+        if (!inGrid(gx, gz) || used.has(k)) continue;
+        const trench = O.occupied[k] === 7;
+        if (!trench && this._coverAtCell(gx, gz) < 0.35) continue;
+        if (!this.pathfinder.passable(gx, gz) && !(O.footThrough(gx, gz) && this.terrain.typePassable(gx, gz))) continue;
+        const x = cellCenter(gx), z = cellCenter(gz), raw = hyp(x - s.x, z - s.z), dd = raw - (trench ? 1.5 : 0);
+        if (raw > COVER118_SNAP || dd >= bd) continue;
+        bd = dd; best = { x, z, k };
+      }
+      if (best) { s.x = best.x; s.z = best.z; used.add(best.k); }
+    }
+    return slots;
+  }
+
   /** (round 117) A GUN THAT CANNOT SEE IS MOVED UNTIL IT CAN (`game.support117`).
    *
    *  Every army sited its machine guns, and its snipers, for their field of
@@ -55052,9 +55279,11 @@ class Game {
     if (t.kind === 'hold' && t.inPlace) {
       sq.task = 'Holding ' + (t.label || 'its position');
       if (this.support117 === true) this._holdGunLine117(rec);
+      if (this.cover118 === true) this._holdCover118(rec, t);
       for (const u of live) {
         if (u._assault || u.garrison || u.embarkedIn || u._strSpot != null) continue;
         if (this.support117 === true && u._gunSpot != null) continue;   // (round 117) a gun gone to where it can see
+        if (this.cover118 === true && u._gunSpot != null) continue;     // (round 118) …or a man gone to cover
         if (!u.hold) { u.hold = true; if (u.posture !== 'ambush') u.posture = 'defend'; if (!u.path.length) u.anchor.copy(u.pos); }
         if (!u.dugin && !u.digT && !u.path.length && !u.def.vehicle && !u.def.towed && u.suppression < 0.6
             && Math.random() < 0.02 * D.dig) u.orderDigIn();
@@ -55139,6 +55368,7 @@ class Game {
       case 'hold': {
         sq.task = 'Holding ' + (t.label || 'the position');
         if (this.support117 === true) this._holdGunLine117(rec);
+        if (this.cover118 === true) this._holdCover118(rec, t);
         const r = t.r || AICFG.vpRadius;
         // A HOUSE ON THE POSITION IS THE POSITION.
         //
@@ -63451,7 +63681,9 @@ class Game {
       const rr = f * R * 0.85, up = Math.random() * R * 0.28;
       const px = cx + Math.cos(a) * rr - E.ux * up, pz = cz + Math.sin(a) * rr - E.uz * up;
       const hf = Math.pow(Math.random(), 1.6);   // most of the smoke is low
-      const size = clamp(R * (0.36 + Math.random() * 0.24) * (1 - 0.2 * f), 1.3, 9);
+      // (round 118, `fxSmoke118`) the bank was a scatter of round puffs at range: each
+      // one bigger and eroding later, so the same count makes a wall
+      const size = clamp(R * (0.36 + Math.random() * 0.24) * (1 - 0.2 * f) * (this.fxSmoke118 ? 1.3 : 1), 1.3, this.fxSmoke118 ? 11 : 9);
       const gy = T.heightAt(px, pz);
       const core = f < 0.55;
       // lit by where it stands: the top and the sunward side bright, the base
@@ -63460,14 +63692,14 @@ class Game {
       // sunlit screening smoke is WHITE beside the ground it stands on — the
       // tint is the smoke's colour in shade, and the light lifts it
       const k = (1.08 + 0.24 * hf) * (1 + 0.12 * sun) * (0.96 + Math.random() * 0.08) * (wp ? 1.08 : 1);
-      vfx.spawn(V.KIND.SMOKE, { flip: 1,
+      vfx.spawn(V.KIND.SMOKE, { flip: 1, fin: this.fxSmoke118 ? 0.14 : 0.3,
         x: px, y: gy + size * 0.22 + hf * H, z: pz,
         vx: Math.cos(a) * 0.14, vy: young ? 0.9 + Math.random() * 1.1 : 0.08 + Math.random() * 0.14, vz: Math.sin(a) * 0.14,
         size, grow: size * (wp ? 0.06 : 0.035),
         life: LIFE * (0.75 + Math.random() * 0.5), spin: rand(-0.12, 0.12),
         cell: Math.random() < (core ? 0.9 : 0.6) ? V.CELL.PUFF : V.CELL.WISP,
         r: Math.min(1.2, tint[0] * k), g: Math.min(1.2, tint[1] * k), b: Math.min(1.2, tint[2] * k),
-        a: Math.min(0.9, (core ? 0.72 + Math.random() * 0.16 : 0.45 + Math.random() * 0.15) * Math.pow(dens, 0.6)),
+        a: Math.min(0.9, (core ? (this.fxSmoke118 ? 0.84 : 0.72) + Math.random() * 0.16 : (this.fxSmoke118 ? 0.6 : 0.45) + Math.random() * 0.15) * Math.pow(dens, 0.6)),
         drag: 0.35,
       });
     }
@@ -72262,6 +72494,12 @@ cosmeticClass(Game, ['_spawnStrikePlane', '_craterLip', '_mineMesh', '_makeSmoke
   '_updateSmokeInstanced', '_fireFx', '_structureFireFx',
   // (round 113) the three kinds of cloud the emitter now draws
   '_smokeBank', '_smokeColumn', '_smokeDust']);
+// (round 118) THE EFFECTS SWITCHES — each OFF is the round-114 picture exactly. Read by
+// `VFX.burst`/`fire`/`strike` (assets/vfx.js), `Projectiles` (the ground strike) and `_smokeBank`.
+Game.prototype.fxBlast118 = true;     // HE: flash, hot core and a dust skirt on the baked ground burst (ON: better in every capture, no frame cost)
+Game.prototype.fxFire118 = true;      // fires: taller tongues, a wider glow (ON: better in the captures, no extra particles)
+Game.prototype.fxImpact118 = false;   // bullets into the ground: a puff in the colour of the surface
+Game.prototype.fxSmoke118 = false;    // smoke screens: fuller puffs that erode later
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);
 
@@ -72513,7 +72751,8 @@ function boot() {
   campaignInstall();
   battleSetupInstall();    // (round 111) after the squad layer, whose spawnSquad it deploys with
   playerOrdersInstall();   // (round 110) after every module that puts a command on the prototype
-  if (typeof ui117Install === 'function') ui117Install();   // (round 117) the battle HUD's one visual language (game.ui117); after every module that builds HUD DOM
+  if (typeof editFps118Install === 'function') editFps118Install();   // (118) game.editFps118
+  if (typeof ui117Install === 'function') ui117Install();   // (117) game.ui117
   game.loadMap(defaultMapIdx());   // the opening field — see DEFAULT_MAP_NAME
   game.setMode('edit');
 }

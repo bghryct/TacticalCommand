@@ -85,6 +85,8 @@
     // and how dark a rain streak on the render that is left
     fallen: 0.69,
     streak: 0.26,
+    // (round 118) the joists under a boarded floor, centre to centre (60 cm at true scale)
+    joist: 0.44,
   };
   /** Live, so it can be tuned in the page: Fabric.sky.value = 2.0 */
   F.sky = { value: F.defaults.sky };
@@ -102,6 +104,12 @@
   // `game.mat117 = false`, is the flat wall again, live.
   F._relief = 0.0075;
   F.relief = { get value() { var g = root.game; return (g && g.mat117 === false) ? 0 : F._relief; }, set value(v) { F._relief = +v || 0; } };
+  // (round 118) FLOORS AND CEILINGS: a face looking straight up or straight
+  // down is a floor or a ceiling, not a roof, and is laid in X and Z — boards,
+  // brick pavers, flags; under boards, the joists. `game.floors118 = false`
+  // draws them as before, live; `F.def118` is the default.
+  F.def118 = true;
+  F.floors = { get value() { var g = root.game; return (g && (g.floors118 === true || (g.floors118 !== false && F.def118))) ? 1 : 0; } };
   /** TRUE SCALE (round 105): the game's building factor, once. The courses
    *  above were chosen for a storey of 2.6 units; a life-size storey is three
    *  metres, and its tiles and blocks — and the range at which a course is
@@ -114,6 +122,7 @@
     D.brickCourse *= k; D.brickRun *= k; D.brickNear *= k; D.brickFar *= k; D.boardRun *= k; D.weather *= k;
     D.fadeNear *= k; D.fadeFar *= k;
     F._relief *= k;
+    D.joist *= k;
   };
 
   function glsl(o) {
@@ -211,8 +220,22 @@
       // the layer and the coordinates first, and ONE sample outside any
       // branch: a mipmapped lookup needs its neighbours in the same flow
       '  float fbLum = (diffuseColor.r + diffuseColor.g + diffuseColor.b) / 3.0;',
-      '  float fbL; vec2 fbUv; float fbGapM = 0.0;',
+      '  float fbL; vec2 fbUv; float fbGapM = 0.0; float fbJoist = 0.0;',
+      // (round 118) a floor or a ceiling (`F.floors`), and straw that is not a roof (a bale)
+      '  bool fbFlat = false; bool fbStrawC = fbRed < 0.2 && diffuseColor.g > diffuseColor.b * 1.55 && fbLum > 0.36;',
+      '#ifdef FAB_FLOOR',
+      '  fbFlat = uFabFloor > 0.5 && abs(normalize(vFabN).y) > 0.9995;',
+      '#endif',
       '  {',
+      '    if (fbFlat) {',
+      '      fbL = (fbRed > 0.18 && fbRed <= 0.35) ? 6.0 : fbRed > 0.35 ? 0.0 : fbStrawC ? 5.0 : vFabN.y > 0.0 ? 1.0 : 2.0;',
+      '      fbUv = fbL == 6.0 ? vec2(vFabP.x / ' + f(6 * o.boardRun) + ', vFabP.z / ' + f(12 * o.boardRun) + ')',
+      '           : fbL == 0.0 ? vec2(vFabP.x / ' + f(4 * o.brickRun) + ', vFabP.z / ' + f(12 * o.brickCourse) + ')',
+      '           : vec2(vFabP.x, vFabP.z) / ' + f(2.2 * o.wallRun) + ';',
+      '    } else',
+      '#ifdef FAB_FLOOR',
+      '    if (uFabFloor > 0.5 && !fbRoof && fbStrawC) { fbL = 5.0; fbUv = vec2(fbAlong, vFabP.y) / ' + f(3 * o.wallCourse) + '; } else',
+      '#endif',
       '    if (fbRoof) {',
       '      bool fbStraw = diffuseColor.r > diffuseColor.b * 1.45 && diffuseColor.g > diffuseColor.b * 1.25 && fbRed < 0.35;',
       '      fbL = fbStraw ? 5.0 : (diffuseColor.b >= diffuseColor.r * 0.92 ? 3.0 : 4.0);',
@@ -263,11 +286,19 @@
       '  } else',
       '#endif',
       '  diffuseColor.rgb *= mix(1.0, fbTone, fbFade);',
+      '#ifdef FAB_FLOOR',
+      // (round 118) the joists under boards, across them, and the board beside each in their shadow
+      '  if (fbFlat && vFabN.y < 0.0 && fbL == 6.0) {',
+      '    float fbJq = fract(vFabP.z / ' + f(o.joist) + ');',
+      '    fbJoist = smoothstep(0.0, 0.02, fbJq) * (1.0 - smoothstep(0.19, 0.21, fbJq));',
+      '    diffuseColor.rgb *= 1.0 - fbJoist * 0.38 - (1.0 - fbJoist) * 0.16 * (1.0 - smoothstep(0.21, 0.36, fbJq));',
+      '  }',
+      '#endif',
       // (round 117) relief off the tile's own height; see `F.relief`
       '#ifdef FAB_RELIEF',
       '#if NUM_DIR_LIGHTS > 0',
       '  if (uFabRelief > 0.0 && uFabTexOn > 0.5) {',
-      '    float fbHt = (fbT.r - 0.5) * 0.22 - fbT.g - fbT.b * 0.4 - fbGapM * 1.6;',
+      '    float fbHt = (fbT.r - 0.5) * 0.22 - fbT.g - fbT.b * 0.4 - fbGapM * 1.6 + fbJoist * 1.4;',
       '    vec3 fbSx = dFdx(vFabV), fbSy = dFdy(vFabV);',
       '    vec3 fbNg = normalize(cross(fbSx, fbSy));',
       '    vec3 fbR1 = cross(-fbSy, fbNg), fbR2 = cross(fbNg, -fbSx);',
@@ -334,14 +365,14 @@
       // and only on the Lambert program, whose line this is.
       var dl = 'reflectedLight.directDiffuse *= BRDF_Diffuse_Lambert( diffuseColor.rgb ) * getShadowMask();';
       if (tex && sh.fragmentShader.indexOf(dl) >= 0) {
-        sh.uniforms.uFabRelief = F.relief;
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n#define FAB_RELIEF\nuniform float uFabRelief;')
+        sh.uniforms.uFabRelief = F.relief; sh.uniforms.uFabFloor = F.floors;   // (round 118) floors
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n#define FAB_RELIEF\nuniform float uFabRelief;\n#define FAB_FLOOR\nuniform float uFabFloor;')
           .replace(dl, dl + '\n\treflectedLight.directDiffuse *= fbRelD;\n\treflectedLight.indirectDiffuse *= fbRelI;');
         F.reliefOn = true;
       }
       if (!ok) F.failed = (F.failed || 0) + 1;
     };
-    var key = '|fab11:' + [o.fallen, o.streak, o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '') + (planks() ? '|planks' : '') + '|rel117';
+    var key = '|fab12:' + [o.fallen, o.streak, o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '') + (planks() ? '|planks' : '') + '|rel117|floor118';
     m.customProgramCacheKey = function () {
       return (prevKey ? prevKey.call(this) : '') + key;
     };

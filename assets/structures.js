@@ -302,6 +302,135 @@
    *  `.gutters` (false, then rebuild the chunks), and both off with
    *  `game.mat117 = false`. */
   function k117(name) { return KIT[name] !== false && !(window.game && window.game.mat117 === false); }
+  /** (round 118) FLOORS AND ROOMS — drawing only: nothing the sim, the
+   *  pathfinder, sight or first-person collision reads.
+   *  `game.floors118`: a slab over the ground in every roofed cell (the upper
+   *  storeys had theirs), and floors and ceilings drawn as boards, pavers,
+   *  flags and joists (assets/fabric.js, `Fabric.floors`).
+   *  `game.interior118`: furniture by building type, built only for the chunks
+   *  near the camera, one mesh a chunk on the structures' own material, no
+   *  shadow cast. `false` (then rebuild the chunks or load the map) is the old
+   *  layer; `DEF118` is the default. */
+  var DEF118 = { floors118: true, interior118: false };   // interiors: placed and tested, not yet seen furnished in a capture
+  function g118(name) { var g = window.game; return !!(g && (g[name] === true || (g[name] !== false && DEF118[name]))); }
+  var GROUND118 = { farm: 0x5e5a52, town: 0x5a2616, timber: 0x4e3a24, hut: 0x4e3a24, barn: 0x4e3a24, hall: 0x6a6760, works: 0x6a6760 };
+  /** The ground floor: flags in a stone farm, pavers in a brick town house,
+   *  boards in timber, concrete in a hall. Its top face only, 1.6 cm over the
+   *  flattened ground the sim stands men on (`floorY` of storey 0). */
+  function emitGround118(B, cx, y, cz, kind, seed) {
+    var c = hexc(GROUND118[kind] || GROUND118.farm, 0.96 + ((seed >>> 5) % 9) * 0.01), e = 0.012 * S;
+    B.box(cx, y + e * 0.5, cz, T, e, T, 0, 0, 0, c.r, c.g, c.b, 16);
+  }
+  var FURN118 = { oak: 0x2e2014, pine: 0x553e25, iron: 0x161514, linen: 0x8f877a, lime: 0xb3ac9e, hay: 0x9a8146, crate: 0x6b5133, olive: 0x353f27 };
+  /** What stands against the inside of the SOLID edge `e` of a room's cell, by
+   *  what the house is (`_kindAt`) and the storey: within a metre and a half of
+   *  that wall, clear of the cell's middle and of the doorways (at the middle
+   *  of the OTHER edges), so a route through the room — cell middle to door —
+   *  passes none of it. Sizes in metres. */
+  function furnish118(B, cx, y, cz, e, kind, L, h, pier) {
+    var MU = T / 6, d = EDGE_D[e], horiz = (e === 0 || e === 2), inner = T * 0.5 - WALL_TH * 0.5;
+    var span = (T - WALL_TH) / MU * 0.5 - 0.15, ceil = (FLOOR_H - FLOOR_TH) / MU, F = FURN118;
+    // `a` along the wall from the edge's middle, `b` out from the wall's face
+    // to the back, `y0` up from the floor; `rb` turns it about the axis out of
+    // the wall (a wheel, a leaning fork), `ry` about the vertical (a drum)
+    function bx(a, b, y0, la, ly, lb, hex, k, rb, ry) {
+      var cc = hexc(hex, k || 1), off = inner - (b + lb * 0.5) * MU;
+      B.box(horiz ? cx + a * MU : cx + d[0] * off, y + (y0 + ly * 0.5) * MU, horiz ? cz + d[1] * off : cz + a * MU,
+        (horiz ? la : lb) * MU, ly * MU, (horiz ? lb : la) * MU, horiz ? 0 : (rb || 0), ry || 0, horiz ? (rb || 0) : 0, cc.r, cc.g, cc.b, 31);
+    }
+    function legs(a, b, w, dp, ht, hex) {
+      for (var s = -1; s <= 1; s += 2) for (var q = 0; q < 2; q++) bx(a + s * (w * 0.5 - 0.05), b + 0.02 + q * (dp - 0.09), 0, 0.05, ht, 0.05, hex, 0.85);
+    }
+    function table(a, b, w, dp, hex) { bx(a, b, 0.71, w, 0.04, dp, hex, 1.06); legs(a, b, w, dp, 0.71, hex); }
+    function chair(a, b, s, hex) {   // its back on the `s` side, along the wall
+      bx(a, b, 0.42, 0.42, 0.04, 0.42, hex); bx(a + s * 0.19, b, 0.46, 0.04, 0.5, 0.42, hex, 0.95);
+      bx(a, b + 0.03, 0, 0.36, 0.42, 0.03, hex, 0.85); bx(a, b + 0.36, 0, 0.36, 0.42, 0.03, hex, 0.85);
+    }
+    var rr = h >>> 0;
+    function r(n) { rr = (Math.imul(rr, 1103515245) + 12345) >>> 0; return (rr >>> 9) % n; }   // the house's own dice
+    var W = r(2) ? F.oak : F.pine, living = kind === 'farm' || kind === 'timber' || kind === 'town' || kind === 'hut';
+    var GOODS = [0x5a2418, 0x2c4a5a, 0x7a6a42, 0x3f4a2a, 0x8f877a];
+    if (pier) {
+      // THE PIER between a window pair (a metre and nine of wall at the edge's
+      // middle): one piece, standing out from it, the windows either side left
+      // clear for the men who fire from them
+      if (living && L === 0 && kind === 'town' && r(2)) {
+        bx(0, 0, 0, 1.5, 2.1, 0.03, W, 0.85);
+        for (var s5 = 0; s5 < 5; s5++) bx(0, 0.03, 0.12 + s5 * 0.45, 1.5, 0.03, 0.32, W);
+        bx(-0.74, 0.03, 0, 0.04, 2.1, 0.32, W, 0.9); bx(0.74, 0.03, 0, 0.04, 2.1, 0.32, W, 0.9);
+        for (var g5 = 0; g5 < 6; g5++) bx(-0.5 + (g5 % 3) * 0.5, 0.06, 0.15 + (g5 > 2 ? 3 : 1) * 0.45, 0.28, 0.25, 0.22, GOODS[r(5)]);
+      } else if (living && L === 0) {   // the table, its end to the wall, a chair either side
+        bx(0, 0.05, 0.71, 0.8, 0.04, 1.5, W, 1.06); legs(0, 0.05, 0.8, 1.5, 0.71, W);
+        chair(-0.62, 0.55, -1, W); chair(0.62, 0.55, 1, W);
+      } else if (living) {              // the bed, its head to the wall
+        bx(0, 0.03, 0, 1.4, 0.34, 2.0, W); bx(0, 0.08, 0.34, 1.3, 0.16, 1.9, F.linen);
+        bx(0, 0.15, 0.5, 1.1, 0.13, 0.36, F.linen, 1.08);
+        bx(0, 0.0, 0, 1.42, 1.05, 0.06, W, 0.9); bx(0, 2.0, 0, 1.42, 0.62, 0.06, W, 0.9);
+      } else if (kind === 'barn') {
+        for (var z6 = 0; z6 < 2; z6++) bx(0, 0.02 + z6 * 0.05, z6 * 0.46, 1.5, 0.46, 1.0 - z6 * 0.1, F.hay, 1 - z6 * 0.05);
+      } else {
+        bx(-0.3, 0.02, 0, 0.9, 0.9, 0.9, F.crate); bx(0.5, 0.05, 0, 0.6, 0.6, 0.6, kind === 'works' ? F.olive : F.crate, 0.93);
+      }
+      return;
+    }
+    if (living && L === 0 && kind === 'hut') {
+      // the stove of a Russian house, whitewashed, the sleeping shelf on it; the bench and the table
+      bx(-span + 0.95, 0.0, 0, 1.9, 1.55, 1.6, F.lime); bx(-span + 0.95, 0.0, 1.55, 1.9, 0.3, 0.75, F.lime, 0.94);
+      bx(span - 1.0, 0.03, 0.42, 1.9, 0.05, 0.38, F.pine); bx(span - 1.85, 0.06, 0, 0.05, 0.42, 0.3, F.pine, 0.85); bx(span - 0.15, 0.06, 0, 0.05, 0.42, 0.3, F.pine, 0.85);
+      table(span - 1.0, 0.5, 1.4, 0.75, F.pine);
+    } else if (living && L === 0 && kind === 'town' && r(3) > 0) {
+      if (r(2)) {   // a shop: shelves on the wall with the goods on them, the counter before them
+        bx(0, 0, 0, 3.4, 2.3, 0.03, W, 0.85);
+        for (var s1 = 0; s1 < 5; s1++) bx(0, 0.03, 0.15 + s1 * 0.48, 3.4, 0.03, 0.32, W);
+        bx(-1.69, 0.03, 0, 0.04, 2.3, 0.32, W, 0.9); bx(1.69, 0.03, 0, 0.04, 2.3, 0.32, W, 0.9);
+        for (var g1 = 0; g1 < 10; g1++) bx(-1.45 + (g1 % 5) * 0.72, 0.06, 0.18 + (g1 > 4 ? 3 : 1) * 0.48, 0.3, 0.26, 0.22, GOODS[r(5)]);
+        bx(0, 1.05, 0, 2.8, 0.95, 0.6, W); bx(0, 1.02, 0.95, 2.9, 0.04, 0.66, F.pine, 1.1);
+      } else {      // a cafe: two tables and their chairs
+        for (var q1 = -1; q1 <= 1; q1 += 2) { table(q1 * 1.3, 0.85, 0.7, 0.7, W); chair(q1 * 1.3 - 0.62, 0.99, -1, W); chair(q1 * 1.3 + 0.62, 0.99, 1, W); }
+      }
+    } else if (living && L === 0) {
+      // the kitchen: the dresser and its plates, the iron range and its flue, the table
+      var dA = r(2) ? -1 : 1, da = dA * (span - 0.75), ra = -dA * (span - 0.5);
+      bx(da, 0.02, 0, 1.3, 0.88, 0.5, W); bx(da, 0.0, 0.88, 1.3, 1.1, 0.04, W, 0.85);
+      for (var s2 = 1; s2 <= 2; s2++) { bx(da, 0.04, 0.88 + s2 * 0.36, 1.3, 0.03, 0.26, W);
+        for (var p2 = -1; p2 <= 1; p2++) bx(da + p2 * 0.4, 0.05, 0.91 + s2 * 0.36, 0.25, 0.25, 0.03, F.linen, 1.2); }
+      bx(ra, 0.02, 0, 0.95, 0.82, 0.62, F.iron); bx(ra, 0.0, 0.82, 0.99, 0.04, 0.66, F.iron, 1.3);
+      bx(ra + dA * 0.25, 0.12, 0.86, 0.14, Math.max(0.5, ceil - 0.86), 0.14, F.iron, 0.9);
+      table(-dA * 0.2, 0.05, 1.5, 0.8, W); chair(dA * 0.75, 0.24, dA, W); chair(-dA * 1.15, 0.24, -dA, W);
+    } else if (living) {
+      // a bedroom: the bed with its long side to the wall, the armoire, a chest
+      var bA = r(2) ? -1 : 1, bc = bA * (span - 1.15);
+      bx(bc, 0.03, 0, 2.0, 0.34, 1.4, W); bx(bc, 0.08, 0.34, 1.9, 0.16, 1.3, F.linen);
+      bx(bc + bA * 0.72, 0.15, 0.5, 0.36, 0.13, 1.1, F.linen, 1.08);
+      bx(bc + bA * 1.02, 0.03, 0, 0.06, 1.05, 1.42, W, 0.9); bx(bc - bA * 1.02, 0.03, 0, 0.06, 0.62, 1.42, W, 0.9);
+      bx(-bA * (span - 0.65), 0.02, 0, 1.2, 1.95, 0.6, W); bx(-bA * (span - 0.65), 0.0, 1.95, 1.3, 0.08, 0.66, W, 0.88);
+      bx(bc - bA * 1.6, 0.03, 0, 0.9, 0.5, 0.48, W, 0.95);
+    } else if (kind === 'barn') {
+      // hay in bales against the wall; below, a farm cart and the tools
+      var hA = r(2) ? -1 : 1, rows = 2 + r(2);
+      for (var z2 = 0; z2 < rows; z2++) for (var x2 = 0; x2 < 2; x2++)
+        bx(hA * (span - 0.55 - x2 * 1.05), 0.02 + (z2 & 1) * 0.05, z2 * 0.46, 1.0, 0.46, 1.1 - z2 * 0.12, F.hay, 1 - z2 * 0.05);
+      if (L === 0) {
+        var ca = -hA * (span - 1.45);
+        bx(ca, 0.45, 0.55, 2.2, 0.08, 1.2, F.crate); bx(ca, 0.45, 0.63, 2.2, 0.32, 0.05, F.crate, 0.9); bx(ca, 1.6, 0.63, 2.2, 0.32, 0.05, F.crate, 0.9);
+        for (var w2 = 0; w2 < 2; w2++) for (var k2 = 0; k2 < 2; k2++) bx(ca + hA * 0.3, w2 ? 1.68 : 0.33, 0, 0.92, 0.92, 0.07, F.oak, 0.9, k2 * Math.PI / 4);
+        bx(hA * 0.15, 0.06, 0, 0.04, 1.6, 0.04, F.pine, 0.9, 0.1); bx(hA * 0.45, 0.06, 0, 0.04, 1.5, 0.04, F.pine, 0.85, -0.12);
+      }
+    } else if (kind === 'hall') {
+      // crates two high, and drums
+      var cA = r(2) ? -1 : 1;
+      for (var n2 = 0; n2 < 3; n2++) { var xa = cA * (span - 0.55 - n2 * 1.05);
+        bx(xa, 0.02, 0, 1.0, 1.0, 1.0, F.crate, 1 - n2 * 0.05); if (n2 < 2) bx(xa + 0.04, 0.06, 1.0, 0.9, 0.9, 0.9, F.crate, 0.92); }
+      for (var m2 = 0; m2 < 3; m2++) { var xd = -cA * (span - 0.4 - m2 * 0.62);
+        bx(xd, 0.12, 0, 0.5, 0.88, 0.5, F.olive); bx(xd, 0.12, 0, 0.5, 0.88, 0.5, F.olive, 1, 0, Math.PI / 4); }   // turned 45 degrees, a drum clears the wall
+    } else {
+      // the works: ammunition boxes, a two-tier bunk
+      var wA = r(2) ? -1 : 1, bk = -wA * (span - 1.1);
+      for (var n3 = 0; n3 < 4; n3++) bx(wA * (span - 0.4 - (n3 >> 1) * 0.8), 0.03, (n3 & 1) * 0.32, 0.7, 0.3, 0.42, F.olive, 1 - (n3 & 1) * 0.06);
+      for (var t3 = 0; t3 < 2; t3++) { bx(bk, 0.03, 0.35 + t3 * 0.9, 1.95, 0.08, 0.85, F.crate); bx(bk, 0.06, 0.43 + t3 * 0.9, 1.85, 0.1, 0.75, F.linen, 0.8); }
+      for (var p3 = -1; p3 <= 1; p3 += 2) for (var q3 = 0; q3 < 2; q3++) bx(bk + p3 * 0.95, 0.03 + q3 * 0.8, 0, 0.06, 1.75, 0.06, F.iron);
+    }
+  }
   function kitPieces() {
     var P = window.PROP_PACK;
     if (!KIT.on || !P || !P.chimStack || !P.chimPots || !P.doorFrame || !P.doorLeaf || !P.doorStep || typeof window.unpackCompact !== 'function'
@@ -2452,6 +2581,7 @@
           pieces++;
         }
         if (this.floorM[i]) { emitFloor(B, cx, y, cz, MATS[this.floorM[i]], 1 - this.floorH[i] / 255, seed0 + L * 3); pieces++; }
+        else if (L === 0 && g118('floors118') && this._roomAt(gx, gz, 0)) emitGround118(B, cx, this._groundTop118(gx, gz, y), cz, this._kindAt(gx, gz), seed0);   // (round 118)
         if (this.roofM[i]) {
           var rsh = this.roofK[i] & 7, rrk = this.roofK[i] >> 3, rdm = 1 - this.roofH[i] / 255;
           emitRoof(B, cx, y + FLOOR_H, cz, roofLook(MATS[this.roofM[i]], this.bid[gz * G.GRID + gx] || (HOUSE_LOOK.on ? this._houseOf(gx, gz) : 0)), rsh, rrk, rdm, seed0 + L * 11); pieces++;
@@ -2488,6 +2618,8 @@
     if (g1) {
       c.mesh = new THREE.Mesh(g1, this.mat);
       c.mesh.castShadow = true; c.mesh.receiveShadow = true;
+      // (round 118) walls and floors before the ground they stand on: the ground under a floor is never shaded
+      if (g118('floors118')) c.mesh.renderOrder = -1;
       c.mesh.matrixAutoUpdate = false; c.mesh.updateMatrix();
       this.group.add(c.mesh);
     }
@@ -2497,8 +2629,122 @@
       c.glass.matrixAutoUpdate = false; c.glass.updateMatrix();
       this.group.add(c.glass);
     }
+    // (round 118) the furniture follows the rooms: built again when next near
+    if (c.inner) { if (c.inner.parent) c.inner.parent.remove(c.inner); c.inner.geometry.dispose(); c.inner = null; }
+    c.innerOk = false;
     c.pieces = pieces;
     c.tris = (B.ni + Gl.ni) / 3;
+  };
+
+  // ---- (round 118) ROOMS: what a house is, and its furniture near the eye ----
+  /** What a house is, for its floors and furniture, off its walls and roof:
+   *  a stone farm, a brick town house, timber, a thatched hut, a plank barn, a
+   *  brick hall under iron, the concrete works. */
+  Structures.prototype._kindAt = function (gx, gz) {
+    var wm = 0, rm = 0, L, e;
+    for (L = 0; L < LEVELS; L++) {
+      var i = this.li(gx, gz, L);
+      for (e = 0; e < 4 && !wm; e++) wm = this.wallM[i * 4 + e];
+      if (this.roofM[i]) rm = this.roofM[i];
+    }
+    for (var r = 1; r < 6 && !wm; r++) for (e = 0; e < 4 && !wm; e++) {   // a hall's middle has no wall: the nearest along a row
+      var nx = gx + EDGE_D[e][0] * r, nz = gz + EDGE_D[e][1] * r;
+      if (!this.inb(nx, nz, 0)) continue;
+      var j = this.li(nx, nz, 0);
+      for (var q = 0; q < 4 && !wm; q++) wm = this.wallM[j * 4 + q];
+    }
+    return wm === M_CONCRETE ? 'works' : wm === M_PLANK ? 'barn' : wm === M_WOOD ? (rm === M_THATCH ? 'hut' : 'timber')
+      : wm === M_STONE ? 'farm' : rm === M_METAL ? 'hall' : 'town';
+  };
+  /** One chunk's furniture, in one mesh: every second cell of a room on every
+   *  storey, against one of its solid walls — never a flight's cell, the well
+   *  over one, or a cell beside one (its foot, its landing), never a holed
+   *  floor. Its THREE objects are made on the cosmetic stream (three draws
+   *  Math.random for every uuid), and it is never raycast. */
+  /** The kind of the wall on edge `e` of a cell, wherever it is stored (a
+   *  wall is kept in one of the two cells it divides); -1 for none. */
+  /** Where the drawn ground floor goes: the sim's floor, or the drawn ground
+   *  where that stands higher (a plot laid in the editor is not flattened to
+   *  the centimetre: Village's ground stood 2 cm over its floors and hid
+   *  them), never more than 8 cm over the floor men stand on. */
+  Structures.prototype._groundTop118 = function (gx, gz, y) {
+    var t = this.terrain; if (!t || typeof t.heightAt !== 'function') return y;
+    var cx = G.cellCenter(gx), cz = G.cellCenter(gz), q = T * 0.45, m = y;
+    for (var k = 0; k < 5; k++) { var v = t.heightAt(cx + (k === 1 ? q : k === 2 ? -q : 0), cz + (k === 3 ? q : k === 4 ? -q : 0)); if (v > m) m = v; }
+    return Math.min(m, y + 0.06 * S);
+  };
+  Structures.prototype._wallOf118 = function (gx, gz, L, e) {
+    if (this.wallMat(gx, gz, L, e)) return this.wallKind(gx, gz, L, e);
+    var nx = gx + EDGE_D[e][0], nz = gz + EDGE_D[e][1], o = (e + 2) & 3;
+    return this.wallMat(nx, nz, L, o) ? this.wallKind(nx, nz, L, o) : -1;
+  };
+  Structures.prototype._furnishChunk = function (k) {
+    var c = this.chunks[k], self = this;
+    c.innerOk = true;
+    var B = this._Bi || (this._Bi = new Builder(1024));
+    B.reset();
+    var x0 = c.cx * CHUNK, z0 = c.cz * CHUNK, x1 = Math.min(G.GRID, x0 + CHUNK), z1 = Math.min(G.GRID, z0 + CHUNK);
+    for (var gz = z0; gz < z1; gz++) for (var gx = x0; gx < x1; gx++) {
+      if (!this.mask[gz * G.GRID + gx]) continue;
+      var kind = null;
+      for (var L = 0; L < LEVELS; L++) {
+        if (!this._roomAt(gx, gz, L)) break;
+        var i = this.li(gx, gz, L);
+        if (L > 0 && !this.floorM[i]) continue;
+        if (this.feat[i] || (L > 0 && this.feat[this.li(gx, gz, L - 1)])) continue;
+        var near = false;
+        for (var e0 = 0; e0 < 4 && !near; e0++) {
+          var ax = gx + EDGE_D[e0][0], az = gz + EDGE_D[e0][1];
+          if (!this.inb(ax, az, L)) continue;
+          var f0 = this.feat[this.li(ax, az, L)], f1 = L > 0 ? this.feat[this.li(ax, az, L - 1)] : 0;
+          if ((f0 & 7) === F_STAIR && ((f0 >> 3) & 3) === e0) near = true;               // this cell is the flight's foot
+          if ((f1 & 7) === F_STAIR && ((f1 >> 3) & 3) === ((e0 + 2) & 3)) near = true;   // …or the landing it climbs onto
+        }
+        if (near) continue;
+        var h = ((gx * 73856093) ^ (gz * 19349663) ^ ((L + 1) * 83492791)) >>> 0;
+        if ((h >>> 7) % 3 === 0) continue;
+        var e = -1, pier = false;
+        for (var t = 0; t < 4 && e < 0; t++) { var ee = (t + (h >>> 3)) & 3; if (this._wallOf118(gx, gz, L, ee) === K_SOLID) e = ee; }
+        if (e < 0 && pairs()) for (var t2 = 0; t2 < 4 && e < 0; t2++) { var e2 = (t2 + (h >>> 3)) & 3; if (this._wallOf118(gx, gz, L, e2) === K_WINDOW) { e = e2; pier = true; } }
+        if (e < 0) continue;
+        if (!kind) kind = this._kindAt(gx, gz);
+        furnish118(B, G.cellCenter(gx), this.floorY(gx, gz, L), G.cellCenter(gz), e, kind, L, h, pier);
+      }
+    }
+    c.innerTris = B.ni / 3;
+    if (!B.n) return;
+    var mk = function () {
+      var g = B.geometry();
+      if (!self.igroup) { self.igroup = new THREE.Group(); self.igroup.name = 'interiors118'; self.scene.add(self.igroup); }
+      var m = new THREE.Mesh(g, self.mat);
+      m.castShadow = false; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); m.renderOrder = -1;
+      m.raycast = function () {};
+      self.igroup.add(m);
+      return m;
+    };
+    c.inner = typeof window.cosmeticScope === 'function' ? window.cosmeticScope(mk) : mk();
+  };
+  /** Per frame: the chunks within `Structures.INNER_R` of the camera show
+   *  their furniture (one chunk furnished a frame, as it comes into range);
+   *  the rest hide theirs. Nothing in range from the playing camera's height. */
+  Structures.prototype._innerTick = function () {
+    var on = this._innerOn || [], keep = [], g = this.game, cam = g && g.camera;
+    if (g118('interior118') && this.any && cam) {
+      var p = cam.position, CS = CHUNK * T, half = G.GRID * T * 0.5, R = window.Structures.INNER_R || 24, built = 0;
+      var r2 = (R + CS * 0.75) * (R + CS * 0.75);
+      var c0 = Math.max(0, Math.floor((p.x + half - R) / CS) - 1), c1 = Math.min(this.NC - 1, Math.floor((p.x + half + R) / CS) + 1);
+      var r0 = Math.max(0, Math.floor((p.z + half - R) / CS) - 1), r1 = Math.min(this.NC - 1, Math.floor((p.z + half + R) / CS) + 1);
+      for (var cz = r0; cz <= r1; cz++) for (var cx = c0; cx <= c1; cx++) {
+        var k = cz * this.NC + cx, c = this.chunks[k];
+        if (!c || !c.mesh || c.dirty) continue;
+        var s = c.mesh.geometry.boundingSphere, dx = s.center.x - p.x, dy = s.center.y - p.y, dz = s.center.z - p.z;
+        if (dx * dx + dy * dy + dz * dz > r2) continue;
+        if (!c.innerOk) { if (built) continue; this._furnishChunk(k); built++; }
+        if (c.inner) { c.inner.visible = true; keep.push(k); }
+      }
+    }
+    for (var a = 0; a < on.length; a++) { var o = this.chunks[on[a]]; if (o && o.inner && keep.indexOf(on[a]) < 0) o.inner.visible = false; }
+    this._innerOn = keep;
   };
 
   /** Per-frame: rebuild what changed (bounded), then run the fire. */
@@ -2512,6 +2758,7 @@
    */
   Structures.prototype.update = function (dt, budgetMs) {
     var ms = budgetMs === undefined ? 3 : budgetMs;
+    if (this._innerOn || g118('interior118')) this._innerTick();   // (round 118)
     if (this.dirty.length) {
       var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
       var first = true;
@@ -2573,7 +2820,9 @@
       if (!c) continue;
       if (c.mesh) { this.group.remove(c.mesh); c.mesh.geometry.dispose(); }
       if (c.glass) { this.group.remove(c.glass); c.glass.geometry.dispose(); }
+      if (c.inner) { if (c.inner.parent) c.inner.parent.remove(c.inner); c.inner.geometry.dispose(); }   // (round 118)
     }
+    this._innerOn = null;
     this.chunks = new Array(this.NC * this.NC);
     this.dirty.length = 0; this.fires.length = 0; this.settleQ.length = 0;
     if (this.wallM) {

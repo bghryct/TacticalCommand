@@ -48,6 +48,9 @@
 
 
   var VERSION = 1;
+  // (round 118) the owner's switches, read at spawn time: `game.fxBlast118`,
+  // `game.fxFire118`, `game.fxImpact118` (OFF = the round-114 picture exactly)
+  function F118(name) { var G = typeof window !== 'undefined' ? window.game : null; return !!(G && G[name]); }
   var THREE = null;
   var installed = false;
 
@@ -1074,6 +1077,26 @@
               life: this.rnd(5, 9) + p * 0.9, rot: this.rnd(-0.5, 0.5), spin: this.rnd(-0.08, 0.08),
               r: gc.r * 0.85, g: gc.g * 0.76, b: gc.b * 0.66, a: this.rnd(0.26, 0.48), drag: 0.5 });
           }
+          if (F118('fxBlast118')) {
+            // (round 118) WHAT READS FROM THE PLAYING CAMERA. The baked column is
+            // earth, and at forty units it was a brown smudge with no event in it.
+            // An HE burst is a flash you see from the next field, a hot orange
+            // core inside the dirt for the first half second, and a pale skirt of
+            // dust running out along the ground: three things, nine particles.
+            this.spawn(K.FLASH, { x: x, y: o.groundY + p * 0.6, z: z, size: p * 4.2, life: 0.13,
+              cell: S.GLOW, r: 1, g: 0.8, b: 0.5, a: 0.9, grow: p * 6 });
+            this.spawn(this.fbFrames ? K.FBALL : K.BOOM, { x: x, y: o.groundY + p * 0.55, z: z, size: p * 1.7,
+              life: Math.min(1.1, 0.42 + p * 0.09), grow: p * 1.3, vy: 1.6, spin: this.rnd(-0.2, 0.2),
+              r: 0.3, g: 0.28, b: 0.26, a: 1, drag: 0.3 });
+            var ns = Math.round(6 * this.quality);
+            for (var si = 0; si < ns; si++) {
+              var sa = si / ns * 6.283 + this.rnd(-0.3, 0.3), ssp = this.rnd(2.5, 5.5) * Math.min(2.2, p * 0.5);
+              this.spawn(K.DUST, { flip: 1, fin: 0.6, x: x + Math.cos(sa) * p * 0.3, y: o.groundY + p * 0.22, z: z + Math.sin(sa) * p * 0.3,
+                vx: Math.cos(sa) * ssp, vy: this.rnd(0.1, 0.5), vz: Math.sin(sa) * ssp,
+                size: p * this.rnd(0.8, 1.2), grow: p * this.rnd(0.6, 1.0), life: this.rnd(1.2, 2.0), rot: this.rnd(-0.5, 0.5), spin: this.rnd(-0.2, 0.2),
+                r: gc.r * 1.5, g: gc.g * 1.42, b: gc.b * 1.3, a: this.rnd(0.3, 0.45), drag: 2.0 });
+            }
+          }
           return;
         }
         // A FIREBALL — fuel, ammunition, a vehicle going up: orange rolling
@@ -1112,9 +1135,11 @@
         // handful of orange dots shrinking on the way up. Fewer particles, a warm
         // glow under them, and sparks off the top. A tinted fire (phosphorus) is
         // not a wood fire and keeps its own white glow below.
-        var m = Math.max(1, Math.round(n * 0.55));
+        var m = Math.max(1, Math.round(n * 0.55)), f118 = F118('fxFire118');
         for (var li = 0; li < m; li++) {
-          var ls = this.rnd(2.2, 3.6) * s;
+          // (round 118) a fire read as an orange dot from the playing camera: the
+          // tongues are taller and the glow under them wider — no more particles
+          var ls = this.rnd(2.2, 3.6) * s * (f118 ? 1.45 : 1);
           this.spawn(K.LICK, {
             x: x + this.rnd(-0.42, 0.42) * s, y: y + ls * 0.38, z: z + this.rnd(-0.42, 0.42) * s,
             vy: this.rnd(0.1, 0.45) * s, vx: this.rnd(-0.1, 0.1), vz: this.rnd(-0.1, 0.1),
@@ -1122,9 +1147,9 @@
             r: 0.07, g: 0.055, b: 0.045, a: this.rnd(0.82, 1), drag: 0.5,
           });
         }
-        if (crand() < 0.5) {
-          this.spawn(K.FIRE, { x: x, y: y + 0.25 * s, z: z, size: this.rnd(1.6, 2.4) * s, life: this.rnd(0.3, 0.55), cell: S.GLOW,
-            r: 1, g: 0.42, b: 0.1, a: 0.22, drag: 0 });
+        if (crand() < (f118 ? 0.8 : 0.5)) {
+          this.spawn(K.FIRE, { x: x, y: y + 0.25 * s, z: z, size: this.rnd(1.6, 2.4) * s * (f118 ? 1.7 : 1), life: this.rnd(0.3, 0.55), cell: S.GLOW,
+            r: 1, g: 0.42, b: 0.1, a: f118 ? 0.42 : 0.22, drag: 0 });
         }
         if (crand() < 0.3 * n) {
           this.spawn(K.EMBER, {
@@ -1408,6 +1433,35 @@
       }
     },
 
+    /** (round 118) A ROUND INTO THE GROUND. It was two grey chunks, invisible past
+     *  ten metres, whatever it struck. A rifle round throws a knee-high puff of
+     *  the surface it hit — earth brown off a field, pale off a road with a spark
+     *  and a chip, a white spout off water. `o.kind`: earth | crop | hard | water;
+     *  `o.color` the ground's own. One or two particles a round. */
+    strike: function (x, y, z, o) {
+      o = o || {};
+      var c = o.color || { r: 0.5, g: 0.42, b: 0.32 }, kind = o.kind || 'earth';
+      if (kind === 'water') {
+        this.spawn(K.SMOKE, { x: x, y: y + 0.15, z: z, vy: 3.2, size: 0.7, grow: 0.9, life: this.rnd(0.4, 0.6), spin: this.rnd(-1, 1),
+          cell: S.PUFF, r: 1.4, g: 1.42, b: 1.45, a: 0.85, drag: 1.6 });
+        for (var wi = 0; wi < 4; wi++) {
+          var wa = crand() * 6.283, ws = this.rnd(0.6, 2.0);
+          this.spawn(K.DEBRIS, { x: x, y: y + 0.1, z: z, vx: Math.cos(wa) * ws, vy: this.rnd(4, 7), vz: Math.sin(wa) * ws,
+            size: this.rnd(0.05, 0.09), life: this.rnd(0.4, 0.7), cell: S.DROP, r: 1.2, g: 1.3, b: 1.4, a: 0.9, gravity: 17, drag: 0.2 });
+        }
+        return;
+      }
+      var hard = kind === 'hard', pale = hard ? 0.35 : 0.18;
+      this.spawn(K.DUST, { flip: 1, fin: 0.5, x: x, y: y + (hard ? 0.25 : 0.35), z: z,
+        vx: this.rnd(-0.3, 0.3), vy: hard ? 0.6 : 1.1, vz: this.rnd(-0.3, 0.3),
+        size: hard ? 0.7 : 1.0, grow: hard ? 0.9 : 1.3, life: this.rnd(0.45, 0.8), rot: this.rnd(-0.5, 0.5), spin: this.rnd(-0.4, 0.4),
+        r: c.r + pale, g: c.g + pale, b: c.b + pale, a: hard ? 0.4 : 0.6, drag: 1.4 });
+      if (hard) {
+        this.spawn(K.FLASH, { x: x, y: y + 0.08, z: z, size: 0.35, life: 0.05, cell: S.GLOW, r: 1, g: 0.9, b: 0.7, a: 0.8, grow: 2 });
+        if (crand() < 0.6) this.sparks(x, y + 0.05, z, 3, 0xfff0c0, 0.45);
+      }
+    },
+
     /** A muzzle flash: a star at the muzzle plus a cone of hot gas down-range,
      *  and the dust a big gun kicks off the ground behind it. */
     muzzle: function (x, y, z, size, dirX, dirZ) {
@@ -1469,7 +1523,7 @@
   // constructor). One that calls another (a muzzle's smoke, a burst's sparks)
   // keeps the outer call's point, so the whole picture shrinks as one.
   ['explosion', 'burst', 'fire', 'smoke', 'dust', 'sparks', 'streak', 'exhaust', 'jet', 'spray', 'debris',
-   'blood', 'woundSpray', 'muzzle', 'shockwave', 'trail'].forEach(function (name) {
+   'blood', 'woundSpray', 'muzzle', 'shockwave', 'trail', 'strike'].forEach(function (name) {
     var f = System.prototype[name];
     if (!f) return;
     System.prototype[name] = function (x, y, z) {

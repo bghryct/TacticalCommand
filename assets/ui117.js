@@ -261,6 +261,48 @@ body.ui117.u7m #bsetup .bs-foot button { font: 600 var(--u7-t-md) var(--u7-font)
 body.ui117.u7m #bsetup .bs-foot button:hover { border-color: var(--u7-khaki-dim); background: var(--u7-raise2); color: #fff; }
 body.ui117.u7m #bsetup .bs-foot button.go { border-color: var(--u7-khaki); background: var(--u7-khaki); color: #14150f; font-weight: 700; }
 body.ui117.u7m #bsetup .bs-foot button.go:hover { background: #dfca93; color: #14150f; }
+
+/* ==== the Edit panel (game.uiEditor118, inside game.ui117): the HUD's panel, buttons and type ==== */
+body.ui117.u7e #editorPanel { width: 276px; background: var(--u7-panel); border: 1px solid var(--u7-line); border-top: 2px solid var(--u7-khaki-dim);
+  border-radius: var(--u7-r); box-shadow: var(--u7-shadow); font-family: var(--u7-font); color: var(--u7-text);
+  overflow-x: hidden; scroll-padding-top: 76px; scroll-padding-bottom: 210px; -webkit-backdrop-filter: none; backdrop-filter: none; }
+body.ui117.u7e #editorPanel * { font-family: var(--u7-font); }
+body.ui117.u7e #editorPanel::-webkit-scrollbar { width: 6px; height: 0; }
+body.ui117.u7e #editorPanel::-webkit-scrollbar-thumb { background: var(--u7-line2); border-radius: 3px; }
+body.ui117.u7e #editorPanel::-webkit-scrollbar-track { background: transparent; }
+body.ui117.u7e #editorPanel .ed-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 8px 8px 7px; background: var(--u7-panel); border-bottom: 1px solid var(--u7-line); }
+body.ui117.u7e #editorPanel .ed-tab { font-size: var(--u7-t-sm); font-weight: 600; letter-spacing: 0.3px; padding: 5px 2px; border: 1px solid var(--u7-line); border-radius: 2px;
+  background: var(--u7-raise); color: var(--u7-dim); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+body.ui117.u7e #editorPanel .ed-tab:hover { color: #fff; border-color: var(--u7-khaki-dim); background: var(--u7-raise2); }
+body.ui117.u7e #editorPanel .ed-tab.on { background: var(--u7-khaki); border-color: var(--u7-khaki); color: #14150f; font-weight: 700; }
+body.ui117.u7e #editorPanel .ed-body { padding: 8px 10px 10px; }
+body.ui117.u7e #editorPanel .ed-row { gap: 8px; margin: 6px 0; min-width: 0; }
+body.ui117.u7e #editorPanel .ed-row > label { flex: none; min-width: 52px; font-size: var(--u7-t-sm); font-weight: 600; letter-spacing: 0.2px; color: var(--u7-dim); }
+body.ui117.u7e #editorPanel .ed-row input[type=range] { min-width: 0; accent-color: var(--u7-khaki); }
+body.ui117.u7e #editorPanel .ed-row .val { flex: none; min-width: 36px; font-size: var(--u7-t-md); font-weight: 700; color: var(--u7-khaki); text-align: right;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.ui117.u7e #editorPanel .ed-seg { min-width: 0; gap: 2px; }
+body.ui117.u7e #editorPanel .ed-seg > div { min-width: 0; font-size: 10.5px; font-weight: 600; letter-spacing: 0; padding: 4px 1px; border: 1px solid var(--u7-line); border-radius: 2px;
+  background: var(--u7-raise); color: var(--u7-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.ui117.u7e #editorPanel .ed-seg > div:hover { border-color: var(--u7-khaki-dim); background: var(--u7-raise2); }
+body.ui117.u7e #editorPanel .ed-seg > div.on { background: var(--u7-khaki); border-color: var(--u7-khaki); color: #14150f; font-weight: 700; }
+body.ui117.u7e #editorPanel .ed-search { background: var(--u7-ink); border: 1px solid var(--u7-line); border-radius: 2px; color: var(--u7-text); font-size: var(--u7-t-md); padding: 5px 7px; }
+body.ui117.u7e #editorPanel .ed-search:focus { border-color: var(--u7-khaki-dim); }
+body.ui117.u7e #editorPanel .ed-note { font-size: var(--u7-t-sm); line-height: 1.45; color: var(--u7-dim); }
+body.ui117.u7e #editorPanel .ed-note b { color: var(--u7-text); }
+body.ui117.u7e #editorPanel .tool-grid { gap: 4px; }
+body.ui117.u7e #editorPanel .tool-btn { min-width: 0; padding: 6px 2px 5px; font-size: var(--u7-t-sm); line-height: 1.2; border: 1px solid var(--u7-line); border-radius: 2px;
+  background: var(--u7-raise); color: var(--u7-text); overflow-wrap: break-word; hyphens: auto; }
+body.ui117.u7e #editorPanel .tool-btn:hover { background: var(--u7-raise2); border-color: var(--u7-khaki-dim); color: #fff; }
+body.ui117.u7e #editorPanel .tool-btn.selected { background: #2e2917; border-color: var(--u7-khaki); color: #f0e3bd; font-weight: 700; box-shadow: inset 0 0 0 1px var(--u7-khaki); }
+body.ui117.u7e #editorPanel .tool-btn .swatch { width: 18px; height: 10px; border-radius: 1px; border-color: rgba(0,0,0,0.55); margin-bottom: 4px; }
+body.ui117.u7e #editorPanel .team-btn { font-size: var(--u7-t-sm); font-weight: 600; border-radius: 2px; }
+body.ui117.u7e #editorPanel h2, body.ui117.u7e #editorPanel h3 { font-size: var(--u7-t-cap); font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--u7-khaki); margin: 10px 0 6px; }
+body.ui117.u7e #editorPanel .panel-section { border-bottom-color: var(--u7-line); }
+body.ui117.u7e #editorPanel .btn, body.ui117.u7e #editorPanel select, body.ui117.u7e #editorPanel .ed-mini { background: var(--u7-raise); border: 1px solid var(--u7-line); border-radius: 2px;
+  color: var(--u7-text); font-size: var(--u7-t-md); font-weight: 600; }
+body.ui117.u7e #editorPanel .btn:hover, body.ui117.u7e #editorPanel .ed-mini:hover { background: var(--u7-raise2); border-color: var(--u7-khaki-dim); color: #fff; }
+body.ui117.u7e #editorPanel .ed-foot { background: rgba(12,14,12,0.98); border-top: 1px solid var(--u7-line); padding: 6px 10px 8px; }
 `;
 
   var SVG_OPT = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 3h10M1 6h10M1 9h10" stroke="currentColor" stroke-width="1.2" fill="none"/>'
@@ -477,6 +519,7 @@ body.ui117.u7m #bsetup .bs-foot button.go:hover { background: #dfca93; color: #1
       U.on = on;
       B.classList.toggle('ui117', on);
       B.classList.toggle('u7m', on && U.menus);   // the setup screen goes with the HUD
+      B.classList.toggle('u7e', on && U.edUi);    // (round 118) and the Edit panel
       selSig = ''; objSig = ''; supSig = '';
       if (on) { dock(); drawSel(); }
       else {
@@ -492,6 +535,13 @@ body.ui117.u7m #bsetup .bs-foot button.go:hover { background: #dfca93; color: #1
       configurable: true, enumerable: true,
       get: function () { return U.menus; },
       set: function (v) { U.menus = !!v; B.classList.toggle('u7m', U.on && U.menus); }
+    });
+    /* (round 118) the Edit panel in the same language: its own switch, inside this one (class u7e with ui117) */
+    U.edUi = game.uiEditor118 !== false;
+    Object.defineProperty(game, 'uiEditor118', {
+      configurable: true, enumerable: true,
+      get: function () { return U.edUi; },
+      set: function (v) { U.edUi = !!v; B.classList.toggle('u7e', U.on && U.edUi); }
     });
     var want = game.ui117 !== false;   // default ON (measured 10 Nov 13:13-13:21: no overlap at 1024 or 1920, no control lost, no cost); false before the install keeps the old HUD
     Object.defineProperty(game, 'ui117', {
