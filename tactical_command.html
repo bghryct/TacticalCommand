@@ -26567,6 +26567,7 @@ const FRAG_WALL_MASONRY = 0.08;
 // STACK_ARRIVE u. And out of a fire: cells within FLEE_FOE_R of the enemy
 // count against a way out (`_fleeFire`).
 const STACK_R = 16, STACK_OFF = 0.36, STACK_STEP = 0.24, STACK_GAP = 1.2, NADE_ROOM_WAIT = 2.2, STACK_MAX = 25, STACK_ARRIVE = 0.3;
+const STACK_GAP_IN = 0.5, STACK_MAX_IN = 6;   // (round 115) at an inner door
 const FLEE_FOE_R = 10;
 // (round 115) how far above a storey's floor a man is on a flight's treads, not on the floor (u)
 const STAIR_STEP = 0.12;
@@ -37685,7 +37686,7 @@ class Unit {
       }
 
       // Rifle infantry lob a grenade when the enemy is in the sweet spot
-      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive && !(this._stack && this.game.room115 !== false)) {
+      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive && !(this._stack && this.game.room115 === true && this.nades <= 1)) {
         const gDef = this.def.grenade;
         const gd = dist2(this.pos, this.target.pos);
         // Not with one of ours inside the burst. A grenade is the shortest
@@ -38299,18 +38300,18 @@ class Unit {
    * the flight's own height, as before.
    */
   /** (round 115) The man you ride is on a flight's treads if he is within
-   *  STAIR_STEP of them (he walked onto them, up or down), or walking up its
-   *  axis; crossing its cell at floor level he keeps his floor. Undefined off
-   *  a flight. */
+   *  STAIR_STEP of them (he walked onto them, up or down), or if he stepped on
+   *  from its side where the treads are still low; crossing its cell at floor
+   *  level elsewhere he keeps his floor. Undefined off a flight. */
   _fpvOnTreads() {
     const g = this.game, S = g.structures, L = this.lvl | 0;
     const gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z), f = S && S.any ? S.featAt(gx, gz, L) : 0;
     if (!f || (f & 7) === 3) return undefined;
-    if (Math.abs(g.groundYAt(this.pos.x, this.pos.z, L, true) - this.pos.y) <= STAIR_STEP) return true;
-    const d = SHUFFLE_EDGE[(f >> 3) & 3], p = this.path && this.path[0];
-    if (!p) return false;
-    const mx = p.x - this.pos.x, mz = p.z - this.pos.z, ml = hyp(mx, mz) || 1;
-    return (mx * d[0] + mz * d[1]) / ml > 0.6;
+    const ys = g.groundYAt(this.pos.x, this.pos.z, L, true);
+    if (Math.abs(ys - this.pos.y) <= STAIR_STEP) return true;
+    // from beside the flight, onto its first treads (its low third); higher up
+    // its side is a wall of steps, and under its high half there is headroom
+    return this.pos.y <= S.floorY(gx, gz, L) + STAIR_STEP && ys - S.floorY(gx, gz, L) <= window.Structures.FLOOR_H * 0.34;
   }
   _routeClimbs() {
     const p = this.path, S = this.game.structures;
@@ -51331,6 +51332,18 @@ class Game {
     if (tryMove(u.pos.x + dx, u.pos.z + dz)) { u.pos.x += dx; u.pos.z += dz; }
     else if (tryMove(u.pos.x + dx, u.pos.z)) u.pos.x += dx;      // slide along the wall
     else if (tryMove(u.pos.x, u.pos.z + dz)) u.pos.z += dz;
+    else if (S && !u.def.vehicle && this.clear115 !== false) {
+      // (round 115) …AND INTO THE DOORWAY HE IS PUSHING AT: walking at a door
+      // edge beside its opening he was held at the brick; he is drawn along the
+      // wall toward the opening, as a man feels his way to a door
+      const ox = worldToCell(u.pos.x), oz = worldToCell(u.pos.z), ax = Math.abs(dx) >= Math.abs(dz);
+      const e = ax ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0), H = TILE * 0.5;
+      const along = ax ? u.pos.z - (cellCenter(oz) - H) : u.pos.x - (cellCenter(ox) - H);
+      if (S.moveSpan(ox, oz, u.lvl | 0, e, along) === 2) {
+        const mid = (S.spanLo + S.spanHi) * 0.5, step = Math.min(Math.abs(mid - along), hyp(dx, dz)) * Math.sign(mid - along);
+        if (ax) { if (tryMove(u.pos.x, u.pos.z + step)) u.pos.z += step; } else if (tryMove(u.pos.x + step, u.pos.z)) u.pos.x += step;
+      }
+    }
     if (!u.def.vehicle) this._wallClamp(u);
   }
 
@@ -54498,7 +54511,7 @@ class Game {
         // throwing at a position, not at a man — so the danger test has to be
         // made against the point he actually throws at.
         const gtx = t.x + rand(-2, 2), gtz = t.z + rand(-2, 2);
-        if ((u._assault || t.kind === 'assault') && !(u._stack && this.room115 !== false) && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
+        if ((u._assault || t.kind === 'assault') && !(u._stack && this.room115 === true && u.nades <= 1) && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
             && !u._friendlyNearPoint(gtx, gtz, u._grenadeDanger(g), u._leadFor('grenade'))) {
           if (u._throwGrenade(gtx, gtz)) continue;
         }
@@ -54529,7 +54542,7 @@ class Game {
           if (u._friendlyNearPoint(e.pos.x, e.pos.z, u._grenadeDanger(g), u._leadFor('grenade'))) continue;
           bd = d; best = e;
         }
-        if (best && !(u._stack && this.room115 !== false) && u._throwGrenade(best.pos.x, best.pos.z)) continue;
+        if (best && !(u._stack && this.room115 === true && u.nades <= 1) && u._throwGrenade(best.pos.x, best.pos.z)) continue;
       }
 
       // ---- THE PANZERFAUST, AND THE BAZOOKA ------------------------------
@@ -58886,8 +58899,12 @@ class Game {
     if (this.stack115 === false || !S || !S.any || !u.path || !u.path.length || u.def.vehicle || u.def.towed) return false;
     // (round 115) ROOM BY ROOM: inside, the next door on his route into a room
     // the enemy holds is stacked on too (`room115`); from the street, the
-    // first door into the house, as before
-    const inner = this.room115 !== false && (!!skip || u._inRoom());
+    // first door into the house, as before. OFF BY DEFAULT (`game.room115 =
+    // true` turns it on): over 5 seeds x 4 doors on Ortona and Village it took
+    // fewer houses in a minute than the plain entry (Ortona 7 -> 5 of 20,
+    // Village 13 -> 11) — every inner door costs the section time the next
+    // room uses — though it lost fewer men on Ortona
+    const inner = this.room115 === true && (!!skip || u._inRoom());
     if (u._inRoom() && !inner) return false;             // already inside
     // where his route goes in: march the legs on the ground floor
     let px = u.pos.x, pz = u.pos.z, door = null;
@@ -58907,7 +58924,8 @@ class Game {
           const se = gx > pgx ? 1 : gx < pgx ? 3 : gz > pgz ? 2 : 0;
           const isSkip = skip && skip.ox === pgx && skip.oz === pgz && skip.e === se;
           if (!isSkip && !inner && lv === 0 && roofed(gx, gz) && !roofed(pgx, pgz)) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: 0 };
-          else if (!isSkip && inner && S.insideAt(pgx, pgz, lv) >= 0.5 && S.moveSpan(pgx, pgz, lv, se, TILE * 0.5) === 2 && this._roomFoe(u.team, gx, gz)) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: lv };
+          else if (!isSkip && inner && S.insideAt(pgx, pgz, lv) >= 0.5 && S.moveSpan(pgx, pgz, lv, se, TILE * 0.5) === 2 && this._roomFoe(u.team, gx, gz)
+            && this._knownFoeAt(u.team, cellCenter(gx), cellCenter(gz), TILE * 2.5, 20)) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: lv };
         }
         pgx = gx; pgz = gz;
       }
@@ -58922,7 +58940,7 @@ class Game {
     if (!foe) return false;                              // nobody near: walk in
     const Q = this._doorQs || (this._doorQs = new Map()), qk = (door.oz * GRID + door.ox) * 4 + e;
     let q = Q.get(qk);
-    if (!q || this.time - q.made > 120) { q = { n: 0, last: -99, nadeT: 0, made: this.time, ix: door.ix, iz: door.iz, ox: door.ox, oz: door.oz, e, L: door.L }; Q.set(qk, q); }
+    if (!q || this.time - q.made > 120) { q = { n: 0, last: -99, nadeT: 0, made: this.time, ix: door.ix, iz: door.iz, ox: door.ox, oz: door.oz, e, L: door.L, inner }; Q.set(qk, q); }
     // beside the doorway, against the wall, out of the line through it
     const side = (q.n & 1) ? 1 : -1, rank = q.n >> 1;
     q.n++;
@@ -58965,13 +58983,17 @@ class Game {
         s.at = now; u.posture = 'defend'; u.targetFace = Math.atan2(cellCenter(q.ix) - u.pos.x, cellCenter(q.iz) - u.pos.z);
       }
       const waited = now - s.at;
-      if (waited < STACK_MAX) {
+      // (round 115) inside the house the drill is quick: a short gap, a short
+      // wait for the grenade, and nobody held at an inner door for long — a
+      // section that stops at every door gives the next room the time it needs
+      const gap = q.inner ? STACK_GAP_IN : STACK_GAP, nadeWait = q.inner ? NADE_ROOM_WAIT * 0.6 : NADE_ROOM_WAIT;
+      if (waited < (q.inner ? STACK_MAX_IN : STACK_MAX)) {
         let first = true;
         for (const o of set) {
           const os = o._stack;
           if (o !== u && os && os.q === q && os.at >= 0 && (os.at < s.at || (os.at === s.at && o.id < u.id))) { first = false; break; }
         }
-        if (!first || now - q.last < STACK_GAP) continue;
+        if (!first || now - q.last < gap) continue;
         if (!q.nadeT && this._roomFoe(u.team, q.ix, q.iz)) {
           // the grenade from whoever in the stack has one — himself first
           let th = null;
@@ -58979,14 +59001,14 @@ class Game {
           if (th && th._throwGrenade(cellCenter(q.ix), cellCenter(q.iz))) { q.nadeT = now; q.last = now; this._stackNades = (this._stackNades || 0) + 1; continue; }
           if (th && th.grenadeCd > 0 && waited < STACK_MAX * 0.4) continue;   // his arm is still coming back
           // (round 115) no grenade in the stack: smoke into the doorway, and in under it
-          if (this.room115 !== false && !th) {
+          if (this.room115 === true && !th) {
             let sm = null;
             for (const o of set) { const os = o._stack; if (os && os.q === q && os.at >= 0 && o.smokeAmmo > 0) { sm = o; break; } }
             if (sm) { this.projectiles.fireSmoke(sm, cellCenter(q.ix), cellCenter(q.iz)); if (sm.smokeAmmo !== Infinity) sm.smokeAmmo--; q.nadeT = now; q.last = now; this._stackSmokes = (this._stackSmokes || 0) + 1; continue; }
           }
           q.nadeT = -1;                                 // nobody has one: in without one
         }
-        if (q.nadeT > 0 && now - q.nadeT < NADE_ROOM_WAIT) continue;
+        if (q.nadeT > 0 && now - q.nadeT < nadeWait) continue;
       }
       q.last = now;
       u._stack = null; set.delete(u);
@@ -58994,7 +59016,7 @@ class Game {
       u.orderMove(s.tx, s.tz, false, 'fast', s.L);
       u._strSpot = s.key; u._pendingCover = true;
       // (round 115) …and the next room the enemy holds on his way: stack again at its door
-      if (this.room115 !== false) { this._roomsCleared = (this._roomsCleared || 0) + 1; this._entryPlan(u, s.key, s.tx, s.tz, s.L, 'fast', q); }
+      if (this.room115 === true) { this._roomsCleared = (this._roomsCleared || 0) + 1; this._entryPlan(u, s.key, s.tx, s.tz, s.L, 'fast', q); }
     }
   }
   /**

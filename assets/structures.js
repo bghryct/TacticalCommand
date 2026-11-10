@@ -1280,7 +1280,17 @@
    * before. True when the step (x, z, L) + (dx, dz) is one of those.
    */
   Structures.prototype.underFlight = function (x, z, L, dx, dz) {
-    if (!this.feat || !this.inb(x, z, L)) return false;
+    // the ground floor only: above it a well's cell is the hole over the flight
+    // below, and the step from a landing into it is how the next flight up is
+    // reached (one well, flights stacked) — blocked there, a fifth of the
+    // routes to second and third floors on Berlin went partial (round 115)
+    if (L !== 0 || !this.feat || !this.inb(x, z, L)) return false;
+    // …and no diagonal step PAST a flight either: the line cuts the corner of
+    // its cell, which a man in first person walks into and stands under
+    if (dx && dz) {
+      var c1 = this.inb(x + dx, z, L) ? this.feat[this.li(x + dx, z, L)] : 0, c2 = this.inb(x, z + dz, L) ? this.feat[this.li(x, z + dz, L)] : 0;
+      if ((c1 && (c1 & 7) !== F_LADDER) || (c2 && (c2 & 7) !== F_LADDER)) return true;
+    }
     var fa = this.feat[this.li(x, z, L)], nx = x + dx, nz = z + dz;
     var fb = this.inb(nx, nz, L) ? this.feat[this.li(nx, nz, L)] : 0;
     if ((fa & 7) === F_LADDER) fa = 0;
@@ -1356,7 +1366,17 @@
     var gx = G.worldToCell(wx), gz = G.worldToCell(wz);
     if (!this.has(gx, gz)) return 0;                       // stepped out of the building
     if (lvl < 0) lvl = 0;
-    if (this.featAt(gx, gz, lvl)) return lvl;              // standing on the flight itself
+    if (this.featAt(gx, gz, lvl)) {                       // standing on the flight itself
+      // (round 115) …or on the one BELOW it in the same well: the flights of a
+      // house are stacked in one cell, so a man stepping off a landing into
+      // the well at that floor's height is at the TOP of the lower flight, not
+      // the foot of the upper one; the slope nearest his feet says which
+      if (y != null && lvl > 0 && this.featAt(gx, gz, lvl - 1) && window.Structures.stairFoot !== false) {
+        var hiY = this.walkY(wx, wz, lvl, false), loY = this.walkY(wx, wz, lvl - 1, false);
+        if (hiY != null && loY != null && Math.abs(loY - y) + 0.01 < Math.abs(hiY - y)) return lvl - 1;
+      }
+      return lvl;
+    }
     if (y != null) {
       // The honest answer: of the surfaces you could be standing on in this
       // cell, the one your feet are nearest. That is what disambiguates the
@@ -2848,7 +2868,35 @@
       };
       var sx = (sdir === 1) ? x0 : x0 + ((w / 2) | 0);
       var sz = (sdir === 1) ? z0 + ((d / 2) | 0) : z0;
-      for (var pk = 0; pk < picks.length; pk++) {
+      // (round 115) A FREE CELL AT THE FOOT. Every flight was laid in the cell
+      // against an outside wall, climbing inward, so its foot was the wall:
+      // a man came off the bottom tread sideways, the search routed him round
+      // the flight's high corner at floor level, and a man in first person,
+      // walking that, climbed the flight back to the landing (Ortona, round
+      // 115). Where the plan has three cells along a climb, the flight now
+      // stands one cell in, with the cell at the wall left free as its foot;
+      // a plan two cells each way keeps the old flight. `Structures.stairFoot
+      // = false` (and a reload) is the old layout.
+      var foot = window.Structures.stairFoot !== false, footed = false;
+      if (foot) {
+        var axes = [sdir === 1 || sdir === 3 ? 1 : 2, sdir === 1 || sdir === 3 ? 2 : 1];
+        for (var ai = 0; ai < 2 && !footed; ai++) {
+          var ax = axes[ai], spanA = ax === 1 ? w : d, spanB = ax === 1 ? d : w;
+          if (spanA < 3) continue;
+          var nearA = ax === 1 ? x0 : z0, farA = ax === 1 ? x1 : z1, alongA = ax === 1 ? z0 : x0;
+          var ks = [(spanB / 2) | 0, (spanB / 4) | 0, ((3 * spanB) / 4) | 0];
+          for (var kk = 0; kk < ks.length && !footed; kk++) for (var sideA = 0; sideA < 2 && !footed; sideA++) {
+            var pdA = sideA === 0 ? ax : (ax === 1 ? 3 : 0), dA = EDGE_D[pdA];
+            var wallA = sideA === 0 ? nearA : farA;          // the foot's cell, at the wall
+            var fx = ax === 1 ? wallA : alongA + ks[kk], fz = ax === 1 ? alongA + ks[kk] : wallA;
+            var qx = fx + dA[0], qz = fz + dA[1], lxA = qx + dA[0], lzA = qz + dA[1];
+            if (lxA < x0 || lxA > x1 || lzA < z0 || lzA > z1) continue;
+            if (!clear(pdA, qx, qz)) continue;
+            sdir = pdA; sx = qx; sz = qz; footed = true;
+          }
+        }
+      }
+      for (var pk = 0; pk < picks.length && !footed; pk++) {
         var pd = picks[pk][0], px2 = (pd === 1 || pd === 3) ? picks[pk][1] : picks[pk][2], pz2 = (pd === 1 || pd === 3) ? picks[pk][2] : picks[pk][1];
         var ld2 = EDGE_D[pd];
         if (px2 + ld2[0] < x0 || px2 + ld2[0] > x1 || pz2 + ld2[1] < z0 || pz2 + ld2[1] > z1) continue;
@@ -2866,6 +2914,7 @@
         this.setWall(sx, sz, L4, sdir, 0, 0);                   // nothing between flight and landing
         this.setWall(sx, sz, L4 + 1, sdir, 0, 0);
         this.setFloor(lx, lz, L4 + 1, fmat);                    // the landing you step onto
+        if (footed) this.setWall(sx, sz, L4, (sdir + 2) % 4, 0, 0);   // (round 115) …and nothing between its foot and the flight
       }
     }
 
@@ -3289,6 +3338,9 @@
     /** (round 115) a round is tested against a wall where it crosses it
      *  (`_rayCross`); false: at the next sample, as before */
     exactRay: true,
+    /** (round 115) a flight one cell in from the wall, its foot free, where the
+     *  plan allows (`build`); false and a reload: the old layout */
+    stairFoot: true,
     FIRE_RATE: FIRE_RATE,    // (round 115) the pace of a house fire (`_fireK`, `heatAt`)
     K_SOLID: K_SOLID, K_DOOR: K_DOOR, K_WINDOW: K_WINDOW, K_RUBBLE: K_RUBBLE, K_ARCH: K_ARCH,
     K_BREACH: K_BREACH, HOLE_COLS: HOLE_COLS, HOLE_ROWS: HOLE_ROWS, HOLE_FALL: HOLE_FALL, EDGE_BLAST: EDGE_BLAST,
