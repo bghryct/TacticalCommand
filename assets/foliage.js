@@ -2052,9 +2052,15 @@
         var card = kindCard || cardLod ? 1 : 0;
         var cw = cardLod && !kindCard ? cardW : 1, ct = cardLod && !kindCard ? cardT : 1;
 
+        // (round 118) IN ITS OWN CELL. `cellX` is the cell's corner (the
+        // cell is [cellX, cellX + TILE]) and the scatter was centred on it:
+        // every plant stood half a cell (3 m) west and north of the cell the
+        // battle reads it in, so a meadow's edge grew into the kitchen across
+        // the wall. `game.grass118 = false` (then reload) is the old scatter.
+        var half118 = (window.game && window.game.grass118 === false) ? 0 : 0.5;
         for (var j = 0; j < n && w < total; j++, w++) {
-          var px = cellX + (R() - 0.5) * TILEl;
-          var pz = cellZ + (R() - 0.5) * TILEl;
+          var px = cellX + (R() - 0.5 + half118) * TILEl;
+          var pz = cellZ + (R() - 0.5 + half118) * TILEl;
           var py = T.heightAt(px, pz);
           if (py < minY) minY = py;
           // HOW TALL IT GREW HERE. Two terms the render was missing and the

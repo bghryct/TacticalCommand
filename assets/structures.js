@@ -311,7 +311,7 @@
    *  near the camera, one mesh a chunk on the structures' own material, no
    *  shadow cast. `false` (then rebuild the chunks or load the map) is the old
    *  layer; `DEF118` is the default. */
-  var DEF118 = { floors118: true, interior118: false };   // interiors: placed and tested, not yet seen furnished in a capture
+  var DEF118 = { floors118: true, interior118: true };   // interiors: rooms read in first-person captures, <= 0.1 ms in a room
   function g118(name) { var g = window.game; return !!(g && (g[name] === true || (g[name] !== false && DEF118[name]))); }
   var GROUND118 = { farm: 0x5e5a52, town: 0x5a2616, timber: 0x4e3a24, hut: 0x4e3a24, barn: 0x4e3a24, hall: 0x6a6760, works: 0x6a6760 };
   /** The ground floor: flags in a stone farm, pavers in a brick town house,
@@ -2695,8 +2695,8 @@
     if (g1) {
       c.mesh = new THREE.Mesh(g1, this.mat);
       c.mesh.castShadow = true; c.mesh.receiveShadow = true;
-      // (round 118) walls and floors before the ground they stand on: the ground under a floor is never shaded
-      if (g118('floors118')) c.mesh.renderOrder = -1;
+      // (round 118) NOT drawn before the ground: `renderOrder = -1` measured +1.05 ms in an Ortona room (parity-balanced
+      // A/B) and nothing at the playing camera; the earlier "-2.8 ms" was frame-parity aliasing in an alternating A/B
       c.mesh.matrixAutoUpdate = false; c.mesh.updateMatrix();
       this.group.add(c.mesh);
     }
@@ -2895,7 +2895,7 @@
       var g = B.geometry();
       if (!self.igroup) { self.igroup = new THREE.Group(); self.igroup.name = 'interiors118'; self.scene.add(self.igroup); }
       var m = new THREE.Mesh(g, self.mat);
-      m.castShadow = false; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); m.renderOrder = -1;
+      m.castShadow = false; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
       m.raycast = function () {};
       self.igroup.add(m);
       return m;
