@@ -262,11 +262,11 @@ void main() {
   // the dome's own curve (it is not tone mapped, like the old sky), a little saturation, the night
   vec3 c = sqrt(1.0 - exp(-col));
   c = mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, 1.18) * uTone.y;
-  c += uTone.z * vec3(0.035, 0.055, 0.110) * (1.0 - a * 0.55);
+  c += uTone.z * vec3(0.045, 0.070, 0.140) * (1.0 - a * 0.55);   // night: dark navy, the tree line still reads against it
   if (uTone.z > 0.02) {
-    vec3 sp = d * 140.0, ip = floor(sp), fp = fract(sp) - 0.5;
+    vec3 sp = d * 110.0, ip = floor(sp), fp = fract(sp) - 0.5;
     float h = fract(sin(dot(ip, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-    float st = step(0.9965, h) * smoothstep(0.35, 0.05, length(fp)) * (0.45 + 0.55 * fract(h * 917.0));
+    float st = step(0.993, h) * smoothstep(0.42, 0.0, length(fp)) * (0.5 + 0.7 * fract(h * 917.0));   // v2's were too faint to see
     c += st * uTone.z * (1.0 - a) * (1.0 - cia) * smoothstep(0.03, 0.25, y) * vec3(0.85, 0.9, 1.0);
   }
   c += uTone.w * vec3(0.55, 0.6, 0.75) * (0.35 + 0.65 * a);
@@ -332,6 +332,7 @@ void main() {
     const wx = weatherOf(g, this._wx), cover = wx[0], covK = sstep(0.6, 0.95, cover);
     const qc = this.q[Math.round(Math.min(1, Math.max(0, cover)) * 100)];
     u.uCloud.value.set(qc - wx[1] * (0.5 + 1.1 * covK), wx[1], covK, wx[5]);
+    if (this.clouds === false) { u.uCloud.value.x += (1 - covK) * 9; u.uCloud.value.w = 0; }   // broken cloud off, a deck kept
     u.uTone.value.x = E; u.uTone.value.y = gain; u.uTone.value.z = night;
     // the horizon: the weather's own fog colour, cast by the model's horizon at this sun height
     const base = this._c.set(w.fogColor), b3 = [base.r, base.g, base.b], tint = [0, 0, 0], fog = this.fog;

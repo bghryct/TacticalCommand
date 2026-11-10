@@ -49466,7 +49466,7 @@ class Game {
     // ROUND 117 — the baked sky (assets/sky117.js): one dome drawn last at the far plane, a scattering table
     // re-baked as the sun moves, clouds that follow the weather and drift on the wind. Off is the Sky above,
     // exactly: its meshes only leave the camera's layers while this is on.
-    this.sky117 = false;   // default OFF until the second version is judged in captures (see .claude/wip117/sky/NOTES.md)
+    this.sky117 = true;    // default ON: no dearer than the old sky, and better in every first-person capture (handoff, round 117)
     this.skyNew = null;
     try { if (window.Sky117 && window.Sky117.create) this.skyNew = window.Sky117.create(this); } catch (e) { console.warn('sky117', e); }
     this.fogBanks = new FogBanks(this.scene, this);

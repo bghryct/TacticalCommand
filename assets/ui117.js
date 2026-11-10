@@ -189,6 +189,15 @@ body.ui117 #tooltip { background: var(--u7-ink); border: 1px solid var(--u7-line
 body.ui117.fpv #tooltip { display: none !important; }                 /* a top-down hover left a stale label mid-screen in first person */
 @media (max-width: 1499px) { body.ui117 #controlsHint { display: none; } }
 
+/* ---- first person: the same panel, and the key hints no longer run across it on a narrow window ---- */
+body.ui117 #gsPanel { background: rgba(16,19,17,0.74); border: 1px solid var(--u7-line); border-top: 2px solid var(--u7-khaki-dim);
+  border-radius: var(--u7-r); box-shadow: var(--u7-shadow); font-family: var(--u7-font); -webkit-backdrop-filter: none; backdrop-filter: none; }
+body.ui117 #gsPanel .nm { color: var(--u7-khaki); font-size: var(--u7-t-md); font-weight: 700; letter-spacing: 1.4px; }
+body.ui117 #gsPanel .row { color: var(--u7-dim); font-size: var(--u7-t-sm); }
+body.ui117 #gsPanel .row span:last-child { color: var(--u7-text); }
+body.ui117 #gsRight, body.ui117 #gsStance { font-family: var(--u7-font); }
+@media (max-width: 1365px) { body.ui117 #gsPanel { bottom: 108px; } }   /* the hints are three or four rows from 24 px up */
+
 /* ---- messages ---- */
 body.ui117 #pausePill { display: none !important; }                   /* still written, for whoever reads it; shown by the feed */
 body.ui117 #u7Feed { display: flex; position: fixed; top: 108px; left: 50%; transform: translateX(-50%); z-index: 120;
