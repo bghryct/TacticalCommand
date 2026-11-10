@@ -10012,6 +10012,7 @@ const AIMSEE_CELL  = 6;       // cache granularity, in cells — see the note
 // how long the leg to it is committed. See `Game._squadGunLine`.
 const GUNLINE_EVERY = 8.0;
 const SUP117_KNOWN_S = 30;   // (round 117) `_holdGunLine117`: an enemy the side saw this recently is one the gun is there to cover
+const SUP117_ARC = Math.PI / 3, SUP117_ARC_SEEN = 3;   // (round 117 v2) `_gunSpot117`: the 60-degree arc, and 3 of its 5 points seen
 const GUNLINE_HOLD  = 5.0;
 // (round 111) The gun team goes firm together (`Game._gunTeamJoin`): a man of
 // it further than GUN_TEAM_R from the team's first claim takes a place beside
@@ -53720,12 +53721,56 @@ class Game {
       }
       if (sees || !e) continue;
       const ty = this.terrain.heightAt(e.pos.x, e.pos.z) + MARK_H;
-      const spot = this._gunLineNear(u, { x: e.pos.x, z: e.pos.z }, { pos: { x: e.pos.x, y: ty, z: e.pos.z } });
+      const spot = this.support117v2 !== false ? this._gunSpot117(u, rec, e)                             // (v2) cover and the arc
+        : this._gunLineNear(u, { x: e.pos.x, z: e.pos.z }, { pos: { x: e.pos.x, y: ty, z: e.pos.z } });   // (v1) the view alone
       if (!spot) continue;
       u._gunSpot = spot; u.hold = false;
       u._setPathTo(spot.x, spot.z); u._commitMove(GUNLINE_HOLD); u.state = 'advance';
       break;                                   // one gun a section a search, as `_squadGunLine` does
     }
+  }
+  /** (round 117 v2) WHERE A GUN MAY GO: COVER FIRST, THEN THE ARC.
+   *
+   *  v1 (`game.support117v2 = false`) took the nearest place with a view of
+   *  the enemy, and the gunners who walked into a sightline walked into the
+   *  enemy's: on Village the Germans lost 70 -> 93 men. An alternate position
+   *  is chosen as the first one was — cover, and a field of fire over the
+   *  ground the section holds. So a spot must have BOTH: the game's own cover
+   *  value there (`_coverValueCalc` on a ghost of him standing on it: ground,
+   *  hedge, wall, building edge, crop, and no hole) at least the cover he has
+   *  where he is, hole included; and a verified sightline to SUP117_ARC_SEEN
+   *  of five points across the enemy's approach to the held point, a
+   *  SUP117_ARC sector at the enemy's distance from it. Nearest ring first;
+   *  null (he stays put) if no spot has both. Reads only. */
+  _gunSpot117(u, rec, e) {
+    const t = rec.sq._task, hx = t ? t.x : rec.cx, hz = t ? t.z : rec.cz;
+    const reach = u.def.rng || 0, ex = e.pos.x, ez = e.pos.z, dNow = hyp(ex - u.pos.x, ez - u.pos.z);
+    const a0 = Math.atan2(ex - hx, ez - hz), R = clamp(hyp(ex - hx, ez - hz), 20, reach * 0.9), arc = [];
+    for (let k = -2; k <= 2; k++) {
+      const a = a0 + k * SUP117_ARC / 4, x = hx + Math.sin(a) * R, z = hz + Math.cos(a) * R;
+      arc.push(x, this.terrain.heightAt(x, z) + MARK_H, z);
+    }
+    const cNow = u._coverValueCalc();
+    const ghost = Object.create(u);
+    ghost.dugin = 0; ghost._coverFrom = undefined;
+    for (const r of [6, 10, 14]) {
+      for (let b = 0; b < 10; b++) {
+        const a = (b / 10) * Math.PI * 2 + (u.id || 0) * 0.37;
+        const x = clamp(u.pos.x + Math.sin(a) * r, -HALF + 4, HALF - 4), z = clamp(u.pos.z + Math.cos(a) * r, -HALF + 4, HALF - 4);
+        const cx = worldToCell(x), cz = worldToCell(z);
+        if (!inGrid(cx, cz) || !this.pathfinder.passable(cx, cz)) continue;
+        const dC = hyp(ex - x, ez - z);
+        if (dC > reach || dC > dNow + 2) continue;
+        const gy = this.terrain.heightAt(x, z);
+        ghost.pos = { x, y: gy, z };
+        if (u._coverValueCalc.call(ghost) < cNow) continue;
+        const ey = gy + 1.2;
+        let seen = 0;
+        for (let i = 0; i < arc.length && seen < SUP117_ARC_SEEN; i += 3) if (this.sightClear(x, ey, z, arc[i], arc[i + 1], arc[i + 2])) seen++;
+        if (seen >= SUP117_ARC_SEEN) return { x, z };
+      }
+    }
+    return null;
   }
 
   _squadGunLine(rec, t, ax, az) {
