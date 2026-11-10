@@ -1459,6 +1459,26 @@
      *  it is stable across reloads and identical on both machines in a replay.
      *  Cells a map (or a player) has already planted are left alone unless
      *  `force` — so a hand-authored field always beats the automatic one. */
+    /** (round 118) NOTHING GROWS UNDER A ROOF. The sowing reads the ground's
+     *  type, and the ground under a house is still the field it was laid on:
+     *  Village grew grass and weeds in its kitchens — drawn, and read by the
+     *  battle (`coverAt`, `concealAt`, `heightAt`: a man indoors stood in a
+     *  meadow). Every roofed cell of a building's plot (`_roomAt` at storey 0:
+     *  not a yard, not the street outside a wall) is cleared after each sow.
+     *  `game.grass118 = false` (then reload the map) keeps the old cover. */
+    unsowRoofed: function (S) {
+      var g = window.game;
+      if (!S || !S.any || !S.mask || typeof S._roomAt !== 'function' || (g && g.grass118 === false)) return 0;
+      var GR = G.GRID, n = 0;
+      for (var z = 0; z < GR; z++) for (var x = 0; x < GR; x++) {
+        var i = z * GR + x;
+        if (!this.kind[i] || !S.mask[i] || !S._roomAt(x, z, 0)) continue;
+        this.kind[i] = 0; this.dens[i] = 0; n++;
+      }
+      if (n) for (var c = 0; c < this.chunks.length; c++) { var ch = this.chunks[c]; if (!ch.dirty) { ch.dirty = true; this.dirtyList.push(ch); } }
+      this._unsown118 = n;
+      return n;
+    },
     autoSow: function (force) {
       var T = this.terrain, GR = G.GRID, i, x, z;
       var TY = G.TYPE;

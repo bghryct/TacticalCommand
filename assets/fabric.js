@@ -110,6 +110,9 @@
   // draws them as before, live; `F.def118` is the default.
   F.def118 = true;
   F.floors = { get value() { var g = root.game; return (g && (g.floors118 === true || (g.floors118 !== false && F.def118))) ? 1 : 0; } };
+  // (round 118) LIME RENDER: the render tile's grain at a quarter of its contrast, its joints and pits at a third,
+  // and a 40 cm mottle — a hand-laid finish, not salt and pepper. `game.plaster118 = false`, live.
+  F.plaster = { get value() { var g = root.game; return (g && g.plaster118 === false) ? 0 : 1; } };
   /** TRUE SCALE (round 105): the game's building factor, once. The courses
    *  above were chosen for a storey of 2.6 units; a life-size storey is three
    *  metres, and its tiles and blocks — and the range at which a course is
@@ -263,6 +266,8 @@
       // (round 117) fallen render and rain streaks: BEFORE the sample, which
       // stays the one lookup outside any branch
       '#ifdef FAB_RELIEF',
+      // (round 118) cloth (a short normal, see structures.js `fbox118`) keeps its own colour
+      '  vec3 fbV0 = diffuseColor.rgb; bool fbCloth = length(vFabN) < 0.75;',
       // the wall behind fallen render, and on the render that is left the
       // streaks rain and soot have drawn down it (long in Y, narrow along)
       '  if (uFabRelief > 0.0 && uFabTexOn > 0.5 && !fbRoof) {',
@@ -280,6 +285,9 @@
       '#else',
       '  if (uFabTexOn > 0.5 && !fbWood) {',
       '#endif',
+      '#ifdef FAB_RELIEF',
+      '    if (fbL == 2.0 && uFabPlaster > 0.5) { fbT = vec3(0.5 + (fbT.r - 0.5) * 0.24, fbT.g * 0.3, fbT.b * 0.3); diffuseColor.rgb *= 0.97 + fbNoise(vFabP * ' + (1 / (0.12 * +o.weather)).toFixed(4) + ' + 5.0) * 0.06; }',
+      '#endif',
       '    vec3 fbJ = fbL < 1.5 ? vec3(0.30, 0.285, 0.26) : diffuseColor.rgb * 0.5;',
       '    diffuseColor.rgb *= (0.62 + fbT.r * 0.76) * (1.0 - fbT.b * 0.4);',
       '    diffuseColor.rgb = mix(diffuseColor.rgb, fbJ, fbT.g * 0.8);',
@@ -293,6 +301,7 @@
       '    fbJoist = smoothstep(0.0, 0.02, fbJq) * (1.0 - smoothstep(0.19, 0.21, fbJq));',
       '    diffuseColor.rgb *= 1.0 - fbJoist * 0.38 - (1.0 - fbJoist) * 0.16 * (1.0 - smoothstep(0.21, 0.36, fbJq));',
       '  }',
+      '  if (fbCloth) { diffuseColor.rgb = fbV0 * (0.95 + fbT.r * 0.1); fbT = vec3(0.5, 0.0, 0.0); }',
       '#endif',
       // (round 117) relief off the tile's own height; see `F.relief`
       '#ifdef FAB_RELIEF',
@@ -365,14 +374,14 @@
       // and only on the Lambert program, whose line this is.
       var dl = 'reflectedLight.directDiffuse *= BRDF_Diffuse_Lambert( diffuseColor.rgb ) * getShadowMask();';
       if (tex && sh.fragmentShader.indexOf(dl) >= 0) {
-        sh.uniforms.uFabRelief = F.relief; sh.uniforms.uFabFloor = F.floors;   // (round 118) floors
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n#define FAB_RELIEF\nuniform float uFabRelief;\n#define FAB_FLOOR\nuniform float uFabFloor;')
+        sh.uniforms.uFabRelief = F.relief; sh.uniforms.uFabFloor = F.floors; sh.uniforms.uFabPlaster = F.plaster;   // (round 118) floors, lime
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n#define FAB_RELIEF\nuniform float uFabRelief;\n#define FAB_FLOOR\nuniform float uFabFloor;\nuniform float uFabPlaster;')
           .replace(dl, dl + '\n\treflectedLight.directDiffuse *= fbRelD;\n\treflectedLight.indirectDiffuse *= fbRelI;');
         F.reliefOn = true;
       }
       if (!ok) F.failed = (F.failed || 0) + 1;
     };
-    var key = '|fab12:' + [o.fallen, o.streak, o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '') + (planks() ? '|planks' : '') + '|rel117|floor118';
+    var key = '|fab12:' + [o.fallen, o.streak, o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '') + (planks() ? '|planks' : '') + '|rel117|floor118|lime118';
     m.customProgramCacheKey = function () {
       return (prevKey ? prevKey.call(this) : '') + key;
     };

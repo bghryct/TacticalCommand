@@ -21295,7 +21295,7 @@ const REV118 = ['wood', 'concrete', 'dirt'];
 // cover 0.80, the hole's defilade), and its trail can be swung only `half` either side of the way it faced
 // when it came into the pit, so it fires out of the pit's mouth and nowhere else (its own traverse on top).
 // The gun is not moved into the pit's cell (a wall to the vehicle search, which could not path out of it).
-const GUNPIT118 = { half: 50 * Math.PI / 180 }, GUNPIT118_ON = false;
+const GUNPIT118 = { half: 50 * Math.PI / 180, deploy: 40, deployT: 2 }, GUNPIT118_ON = false;   // `deploy` cells: the maps lay their pits 15-30 cells from the guns
 // (round 118) `game.trenchCurve118` (default OFF): A TRENCH DRAWN AS A CURVE over the grid it is laid on. Each
 // piece is turned to the line through its neighbours, diagonals included (a step round a traverse becomes a chord
 // across the corner), and drawn a quarter of a cell toward their middle (`Obstacles._curveTrenches118`, at bake).
@@ -22868,6 +22868,7 @@ class Obstacles {
           plank = isC118 ? [0.430, 0.428, 0.410] : isD118 ? [0.250, 0.200, 0.135] : [0.330, 0.275, 0.200];
     const spoil = [0.300, 0.240, 0.160], turf = [0.212, 0.272, 0.108];
     const B = [0, 0, 0], W = [3, 0, 0];
+    const RK = isC118 ? [4, 0, 1] : W;   // (round 118) concrete takes the shader's stone (mottled, no moss)
     // the parapet's profile, lip outward; the last point is under the ground
     const prof = [[0.30, 0.44], [0.40, 0.52], [0.60, 0.42], [0.84, 0.17], [1.00, -0.10]];
     const hump = (a, b) => (a === 0 || a === NX) ? 0 : Math.sin(a * 2.3 + b * 1.9 + i * 2.1) * 0.035;
@@ -22884,13 +22885,34 @@ class Obstacles {
         const KM = 1 / (METERS_PER_UNIT * K_PROP), yF = -1.45 * KM, yD = yF + 0.06 * KM, zW = 0.36, zF = isD118 ? 0.27 : zW;
         const dark = isC118 ? [0.400, 0.396, 0.378] : isD118 ? [0.180, 0.144, 0.098] : [0.130, 0.104, 0.072];
         const wl = [Math.min(1, plank[0] * 1.35), Math.min(1, plank[1] * 1.35), Math.min(1, plank[2] * 1.35)];
-        quad([xa, yF, -zF], [xa, yF, zF], [xb, yF, zF], [xb, yF, -zF], mud, mud, mud, mud, B, [0, 1, 0]);
+        quad([xa, yF, -zF], [xa, yF, zF], [xb, yF, zF], [xb, yF, -zF], mud, mud, mud, mud, isC118 ? RK : B, [0, 1, 0]);
         if (!isC118 && !isD118) quad([xa, yD, -0.11], [xa, yD, 0.11], [xb, yD, 0.11], [xb, yD, -0.11], board, board, board, board, W, [0, 1, 0]);
-        quad([xa, yF, -zF], [xb, yF, -zF], [xb, 0.015, -zW], [xa, 0.015, -zW], dark, dark, wl, wl, isD118 ? B : W);
-        quad([xb, yF, zF], [xa, yF, zF], [xa, 0.015, zW], [xb, 0.015, zW], dark, dark, wl, wl, isD118 ? B : W);
+        // THE WALL IN COURSES: timber in seven planks with a dark gap between, concrete in four pours with the
+        // formwork joint between, earth in three uneven bands; lighter toward the top, where the light gets in
+        const NS = isC118 ? 4 : isD118 ? 3 : 7, WK = isD118 ? B : RK;
+        for (let s = 0; s < NS; s++) {
+          const t0 = s / NS, t1 = (s + 1) / NS, gap = isD118 ? 0 : isC118 ? 0.012 : 0.022;
+          const ya = yF + (0.015 - yF) * t0, yb = yF + (0.015 - yF) * t1 - gap, za = zF + (zW - zF) * t0, zb = zF + (zW - zF) * (t1 - (yb < 0.015 ? 0 : 0));
+          const sh = (isD118 ? 0.80 + 0.40 * r() : isC118 ? 0.93 + 0.10 * r() : (s % 2 ? 0.84 : 1.04) * (0.92 + 0.14 * r())) * (0.70 + 0.30 * t1);
+          const c = [Math.min(1, wl[0] * sh), Math.min(1, wl[1] * sh), Math.min(1, wl[2] * sh)], gc = [c[0] * 0.30, c[1] * 0.30, c[2] * 0.30];
+          quad([xa, ya, -za], [xb, ya, -za], [xb, yb, -zb], [xa, yb, -zb], c, c, c, c, WK);
+          quad([xb, ya, za], [xa, ya, za], [xa, yb, zb], [xb, yb, zb], c, c, c, c, WK);
+          if (gap) {
+            const yg = yb + gap, zg = zb;   // flush: set back, the sliver showed the void behind the wall
+            quad([xa, yb, -zg], [xb, yb, -zg], [xb, yg, -zg], [xa, yg, -zg], gc, gc, gc, gc, WK, [0, 0, 1]);
+            quad([xb, yb, zg], [xa, yb, zg], [xa, yg, zg], [xb, yg, zg], gc, gc, gc, gc, WK, [0, 0, -1]);
+          }
+        }
+        // earth: a few stones and the cut ends of roots in the face
+        if (isD118) for (let q = 0; q < 3; q++) {
+          const sd2 = r() < 0.5 ? -1 : 1, px = xa + (xb - xa) * (0.2 + 0.6 * r()), py = yF + (0.015 - yF) * (0.25 + 0.6 * r()), s2 = 0.018 + 0.02 * r();
+          const pz = sd2 * (zF + (zW - zF) * ((py - yF) / (0.015 - yF)) - 0.008), st = r() < 0.6 ? [0.330, 0.320, 0.300] : [0.160, 0.110, 0.070];
+          if (sd2 < 0) quad([px - s2, py - s2, pz], [px + s2, py - s2, pz], [px + s2, py + s2, pz], [px - s2, py + s2, pz], st, st, st, st, [4, 0, 1], [0, 0, 1]);
+          else quad([px + s2, py - s2, pz], [px - s2, py - s2, pz], [px - s2, py + s2, pz], [px + s2, py + s2, pz], st, st, st, st, [4, 0, 1], [0, 0, -1]);
+        }
         // and the ledge where the timber above the ground (0.34 m out) meets the wider cut
-        quad([xa, 0.015, -zW], [xb, 0.015, -zW], [xb, 0.015, -0.28], [xa, 0.015, -0.28], wl, wl, wl, wl, isD118 ? B : W, [0, 1, 0]);
-        quad([xb, 0.015, zW], [xa, 0.015, zW], [xa, 0.015, 0.28], [xb, 0.015, 0.28], wl, wl, wl, wl, isD118 ? B : W, [0, 1, 0]);
+        quad([xa, 0.015, -zW], [xb, 0.015, -zW], [xb, 0.015, -0.28], [xa, 0.015, -0.28], wl, wl, wl, wl, isD118 ? B : RK, [0, 1, 0]);
+        quad([xb, 0.015, zW], [xa, 0.015, zW], [xa, 0.015, 0.28], [xb, 0.015, 0.28], wl, wl, wl, wl, isD118 ? B : RK, [0, 1, 0]);
         if (!isC118 && !isD118) {   // the A-frame's legs, one each side at the bay's start
           const post = [0.170, 0.125, 0.075], px0 = xa + 0.004, px1 = xa + 0.030, pz = zW - 0.012;
           quad([px0, yF, -pz], [px1, yF, -pz], [px1, 0.015, -pz], [px0, 0.015, -pz], post, post, post, post, W, [0, 0, 1]);
@@ -22907,18 +22929,29 @@ class Obstacles {
         // the revetment: stakes and planks, dark at the foot
         const lo = [plank[0] * 0.55, plank[1] * 0.55, plank[2] * 0.55];
         const A = [xa, 0.015, sd * 0.28], Bq = [xb, 0.015, sd * 0.28], C = [xb, 0.44 + hump(a + 1, 0), sd * 0.30], D = [xa, 0.44 + hump(a, 0), sd * 0.30];
-        if (sd > 0) quad(A, D, C, Bq, lo, plank, plank, lo, W, [0, 0, -1]); else quad(A, Bq, C, D, lo, lo, plank, plank, W, [0, 0, 1]);
+        if (sd > 0) quad(A, D, C, Bq, lo, plank, plank, lo, RK, [0, 0, -1]); else quad(A, Bq, C, D, lo, lo, plank, plank, RK, [0, 0, 1]);
+        // (round 118) the revetment's top, seen over the parapet from the enemy's side: a poured coping, or a capping board
+        // standing proud of the spoil's crest (0.52), with its face to the field, so the enemy sees what lines it
+        if (deep && !isD118) { const zc0 = sd > 0 ? 0.25 : -0.43, zc1 = sd > 0 ? 0.43 : -0.25, yc = isC118 ? 0.60 : 0.56, cap = isC118 ? [0.560, 0.555, 0.530] : [0.420, 0.345, 0.240];
+          const cf = [cap[0] * 0.86, cap[1] * 0.86, cap[2] * 0.86], zo = sd * 0.43, yl = 0.40;
+          quad([xa, yc, zc0], [xa, yc, zc1], [xb, yc, zc1], [xb, yc, zc0], cap, cap, cap, cap, RK, [0, 1, 0]);
+          if (sd > 0) quad([xb, yl, zo], [xa, yl, zo], [xa, yc, zo], [xb, yc, zo], cf, cf, cap, cap, RK, [0, 0, 1]); else quad([xa, yl, zo], [xb, yl, zo], [xb, yc, zo], [xa, yc, zo], cf, cf, cap, cap, RK, [0, 0, -1]); }
         // the parapet, lip to buried foot
         for (let b = 0; b < prof.length - 1; b++) {
           const [z0, y0] = prof[b], [z1, y1] = prof[b + 1];
           const t0 = b / (prof.length - 1), t1 = (b + 1) / (prof.length - 1);
-          const c0 = [spoil[0] + (turf[0] - spoil[0]) * t0, spoil[1] + (turf[1] - spoil[1]) * t0, spoil[2] + (turf[2] - spoil[2]) * t0];
-          const c1 = [spoil[0] + (turf[0] - spoil[0]) * t1, spoil[1] + (turf[1] - spoil[1]) * t1, spoil[2] + (turf[2] - spoil[2]) * t1];
+          let c0 = [spoil[0] + (turf[0] - spoil[0]) * t0, spoil[1] + (turf[1] - spoil[1]) * t0, spoil[2] + (turf[2] - spoil[2]) * t0];
+          let c1 = [spoil[0] + (turf[0] - spoil[0]) * t1, spoil[1] + (turf[1] - spoil[1]) * t1, spoil[2] + (turf[2] - spoil[2]) * t1];
+          // (round 118) what lines the trench shows on its parapet: poured concrete over the crest, or the timber's
+          // top boards on the lip; earth is spoil all the way down
+          const pk = deep && isC118 && b <= 1 ? [0.560, 0.552, 0.525] : deep && !isC118 && !isD118 && b === 0 ? [0.430, 0.352, 0.245] : null;
+          if (pk) { c0 = pk; c1 = b === 1 ? [pk[0] * 0.9, pk[1] * 0.9, pk[2] * 0.9] : pk; }
+          const PK = pk ? (isC118 ? RK : W) : B;
           const P = (x, z, y, aa) => [x, y + (y > 0 ? hump(aa, b) : 0), sd * z];
           const p00 = P(xa, z0, y0, a), p01 = P(xa, z1, y1, a), p11 = P(xb, z1, y1, a + 1), p10 = P(xb, z0, y0, a + 1);
           // wound so the face looks up and out (checked by the cross product:
           // lip→crest faces the trench, the outer slope faces the field)
-          if (sd > 0) quad(p00, p01, p11, p10, c0, c1, c1, c0, B); else quad(p00, p10, p11, p01, c0, c0, c1, c1, B);
+          if (sd > 0) quad(p00, p01, p11, p10, c0, c1, c1, c0, PK); else quad(p00, p10, p11, p01, c0, c0, c1, c1, PK);
         }
       }
     }
@@ -22979,8 +23012,9 @@ class Obstacles {
             const lx = bx * sp(cp, e1) * sp(ct, e2), ly = by * sp(sp1, e1), lz = bz * sp(cp, e1) * sp(st, e2);
             let nx = sp(cp, 2 - e1) * sp(ct, 2 - e2) / bx, ny = sp(sp1, 2 - e1) / by, nz = sp(cp, 2 - e1) * sp(st, 2 - e2) / bz;
             const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
-            const k = 0.58 + 0.42 * (sp1 + 1) / 2;
-            return [[cx + lx * cs - lz * sn, cy + ly, cz + lx * sn + lz * cs], [nx * cs - nz * sn, ny, nx * sn + nz * cs], [cc[0] * k, cc[1] * k, cc[2] * k]];
+            // pale tan hessian (they were near-black: albedo 0.3-0.47 on their shaded side is black here), the side seam darker
+            const k = (Math.abs(sp1) < 0.3 ? 0.82 : 1.0) * (0.88 + 0.16 * (sp1 + 1) / 2);
+            return [[cx + lx * cs - lz * sn, cy + ly, cz + lx * sn + lz * cs], [nx * cs - nz * sn, ny, nx * sn + nz * cs], [Math.min(1, cc[0] * 1.70 * k), Math.min(1, cc[1] * 1.68 * k), Math.min(1, cc[2] * 1.72 * k)]];
           };
           for (let a = 0; a < NP; a++) for (let b = 0; b < NT; b++) {
             const p0 = -Math.PI / 2 + Math.PI * a / NP, p1 = -Math.PI / 2 + Math.PI * (a + 1) / NP, q0 = 2 * Math.PI * b / NT, q1 = 2 * Math.PI * (b + 1) / NT;
@@ -29589,8 +29623,16 @@ class Effects {
     // picture's: at true scale a 75 mm burst lit 160 m of life-size field
     l.distance = (16 + pw * 26) * K_FX;
     l.position.set(x, y + (1.2 + pw * 0.5) * K_FX, z);
-    this.lights.push({ light: l, life: 0.16 + pw * 0.10, maxLife: 0.16 + pw * 0.10,
-                       peak: 2.4 + pw * 2.6, power: pw, curve: 3 });
+    let life = 0.16 + pw * 0.10;
+    // (round 118, `fpvExpo118`) A BURST'S FLASH IS BRIEF AND LOCAL. From a first-person eye a point light of
+    // intensity 18 reaching 50 units with a linear falloff lit the whole field white to the horizon for most of a
+    // second: the frame read as blown exposure. In first person it reaches a third as far, falls off with the
+    // square, is capped, and is gone in half the time; the burst's own fireball carries the light you see.
+    const G = typeof game !== 'undefined' ? game : null;
+    if (G && G.fpvExpo118 && G.fpv) { l.intensity = Math.min(l.intensity, 6); l.distance *= 0.35; l.decay = 2; life *= 0.55; }
+    else l.decay = 1;
+    this.lights.push({ light: l, life, maxLife: life,
+                       peak: l.intensity, power: pw, curve: 3 });
   }
   /** A free slot from the pool, or null when all three are lit. */
   _takeLight() {
@@ -30121,6 +30163,19 @@ class Projectiles {
    *  with the meshes (see `cosmeticClass(Projectiles, …)` after the class):
    *  `tracer` is read by nothing but `_flightFx`. */
   _bulletMesh(shooter, opts, speed) {
+    if (this.game.fxTracer118) {
+      // (round 118) NO MESH PER ROUND. A tracer is one instanced streak a frame (`_flightFx`, K.STREAK): its core and
+      // glow in the army's colour, as long as the round goes in a thirtieth of a second, fading as it burns out.
+      // Which rounds burn follows the belt (`TRACER_EVERY`); the rest, the faint hairline nobody saw, draw nothing.
+      const nat = nationOf((shooter && shooter.type) || '');
+      const every = TRACER_EVERY[nat] || 5;
+      shooter._tracerN = ((shooter._tracerN || 0) + 1) % 60;
+      const burns = opts.mg ? shooter._tracerN % every === 0 : Math.random() < 0.32;
+      const ob = new THREE.Object3D();
+      ob.userData.tracer = burns; ob.userData.spd = speed || 0;
+      ob.userData.tcol = (this.tracerMats[nat] || this.tracerMats.allied).color;
+      return ob;
+    }
     shooter._tracerN = ((shooter._tracerN || 0) + 1) % 5;
     const isTracer = opts.mg ? shooter._tracerN === 0 : Math.random() < 0.32;
     if (!isTracer) return new THREE.Mesh(this.ballGeo, this.ballMat);
@@ -30866,6 +30921,17 @@ class Projectiles {
    *  a `Math.random()` per tracer per step inside the simulation, so once
    *  which round is a tracer became a picture, how many tracers were in the
    *  air would have dealt every later roll of a seeded battle. */
+  /** (round 118) A TRACER THAT MEETS HARD GROUND AT A SHALLOW ANGLE SKIPS: the streak goes on, up and away, dimmer,
+   *  for half a second (K.STREAK through `vfx.streak`). Earth swallows it. Cosmetic: no dice, the terrain kind only. */
+  _tracerSkip(p, pos) {
+    const T = this.game.terrain, kn = T && T.typeAt ? typeKin(T.typeAt(worldToCell(pos.x), worldToCell(pos.z))) || '' : '';
+    if (!/road|cobble|stone|tarmac|rock|concrete|gravel|rubble|sett|brick|paving/.test(kn)) return;
+    const dx = p.e.x - p.s.x, dy = p.e.y - p.s.y, dz = p.e.z - p.s.z, L = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    if (Math.abs(dy) / L > 0.35) return;                          // too steep to skip
+    const spd = (p.mesh.userData.spd || 200) * 0.55, c = p.mesh.userData.tcol;
+    this.game.effects.vfx.streak(pos.x, pos.y + 0.02, pos.z, dx / L * spd, Math.abs(dy / L) * spd + spd * 0.12, dz / L * spd,
+      { color: c.getHex(), life: 0.5, size: 0.05, stretch: 60, gravity: 9, drag: 0.2 });
+  }
   _flightFx(p, pos, dt) {
     const game = this.game;
     p.mesh.position.copy(pos);
@@ -30877,7 +30943,22 @@ class Projectiles {
     if (p.kind === 'bullet') {
       // A tracer burns for a fixed distance then goes dark; and the streak
       // stretches with velocity so it reads as speed, not as a floating dart.
-      if (p.tracer) {
+      if (p.tracer && p.mesh.userData.tcol && game.effects.vfx) {
+        // (round 118) the streak: one K.STREAK along the flight, as long as the round travels in 1/30 s, laid on
+        // screen by `update`; a soft glow under it; both gone next frame. Burning out, it shortens and dims.
+        const burn = 1 - Math.max(0, p.t - 0.62) / 0.38;
+        if (burn > 0.02 && p.t < 0.98) {
+          const nx = PJ_NEXT.x - pos.x, ny = PJ_NEXT.y - pos.y, nz = PJ_NEXT.z - pos.z, nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+          const spd = p.mesh.userData.spd || 200, L = Math.max(0.4, Math.min(9, spd / 30)) * burn, c = p.mesh.userData.tcol, V = game.effects.vfx;
+          // the core: a soft round cell stretched along the flight reads as a line at any range (the spark cell's
+          // hairline vanished past twenty units); under it a wider, dimmer glow of the same colour
+          const w = 0.14, cx = pos.x + nx / nl * L * 0.5, cy = pos.y + ny / nl * L * 0.5, cz = pos.z + nz / nl * L * 0.5;
+          V.spawn(VFX.KIND.STREAK, { x: cx, y: cy, z: cz, vx: nx / nl * spd, vy: ny / nl * spd, vz: nz / nl * spd, size: w, stretch: L / w,
+            rot: 0, life: 0.05, cell: VFX.CELL.GLOW, r: c.r * 1.3 + 0.3, g: c.g * 1.3 + 0.3, b: c.b * 1.3 + 0.3, a: burn, gravity: 0, drag: 0, keepV: true });
+          V.spawn(VFX.KIND.STREAK, { x: cx, y: cy, z: cz, vx: nx / nl * spd, vy: ny / nl * spd, vz: nz / nl * spd, size: w * 2.6, stretch: L / (w * 2.6),
+            rot: 0, life: 0.05, cell: VFX.CELL.GLOW, r: c.r, g: c.g, b: c.b, a: 0.45 * burn, gravity: 0, drag: 0, keepV: true });
+        }
+      } else if (p.tracer) {
         // The element burns out on the way, and it GUTTERS while it does —
         // a tracer is a little chemical fire, not a lamp.
         const burn = 1 - Math.max(0, p.t - 0.62) / 0.38;
@@ -31432,6 +31513,7 @@ class Projectiles {
         } else if (impact !== 'gone') {
           if (game.fxImpact118) game.effects.groundStrike(pos.x, pos.y + 0.05 * K_FX, pos.z);   // (round 118) by surface
           else game.effects.debris(pos.x, pos.y + 0.05 * K_FX, pos.z, 2, 0x8a8272);  // dirt kick
+          if (game.fxTracer118 && p.tracer && p.mesh.userData.tcol && game.effects.vfx) this._tracerSkip(p, pos);   // (round 118) off hard ground
         }
       }
       game.scene.remove(p.mesh);
@@ -31450,7 +31532,7 @@ class Projectiles {
 // goes, what it hits and what it does to it stay on the simulation's stream
 // (`fire*`, `update`); what it looks like is built in these, and drawn in
 // flight by `_flightFx`. See `cosmeticScope`.
-cosmeticClass(Projectiles, ['_makePulse', '_makeRail', '_makeShot', '_arrowMesh', '_bulletMesh', '_beamLine', '_mortarMesh',
+cosmeticClass(Projectiles, ['_tracerSkip', '_makePulse', '_makeRail', '_makeShot', '_arrowMesh', '_bulletMesh', '_beamLine', '_mortarMesh',
   '_salvoMesh', '_smokeMesh', '_grenadeMesh', '_rocketMesh', '_flameMesh', '_fireballMesh', '_bombMesh', '_flightFx']);
 
 // ---------------------------------------------------------------------------
@@ -44184,7 +44266,10 @@ class Unit {
     const P = this._pit118, moving = !!(this.path && this.path.length) || !!this.limbered;
     if (P) {
       if (moving || !this.alive || !gunpit118On()) {
+        const O = this.game.obstacles;
         if (P.o._gun118 === this) P.o._gun118 = null;
+        // a pit it was put into gives its cell back to the pit (it was opened for the gun)
+        if (P.idx != null && O.occupied && O.at(P.o.gx, P.o.gz) === P.o) O.occupied[P.idx] = P.occ;
         this._pit118 = null;
         if (this._dugByPit118) { this._dugByPit118 = false; if (this.dugin) this._clearDigIn(); }
       }
@@ -44192,18 +44277,41 @@ class Unit {
     }
     if (moving || !this.alive || !gunpit118On()) return;
     const gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z), ci = gz * GRID + gx;
-    if (this._pitCell118 === ci) return;            // looked round this cell already
+    // AT DEPLOYMENT (the battle's first seconds) a gun takes the nearest free pit within `deploy` cells (240 m) and is put
+    // IN it: the map laid 647 pits and no gun beside one. After that, only a pit a cell away, where it stands.
+    const deploy = this.game.time != null && this.game.time < GUNPIT118.deployT && !this._pitDeploy118;
+    this._pitDeploy118 = true;
+    if (!deploy && this._pitCell118 === ci) return;            // looked round this cell already
     this._pitCell118 = ci;
-    const O = this.game.obstacles;
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-      if (!inGrid(gx + dx, gz + dz)) continue;
+    const O = this.game.obstacles, R = deploy ? GUNPIT118.deploy : 1;
+    let best = null, bd = 1e9;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      if (!inGrid(gx + dx, gz + dz) || dx * dx + dz * dz >= bd) continue;
       const o = O.at(gx + dx, gz + dz);
       if (!o || (o.type !== 'gunpit' && o.type !== 'emplacement') || (o._gun118 && o._gun118 !== this && o._gun118.alive && o._gun118._pit118)) continue;
-      o._gun118 = this;
-      this._pit118 = { o, face: this.face };
-      if (!this.dugin) { this.dugin = 0.85; this._dugByPit118 = true; }
-      return;
+      best = o; bd = dx * dx + dz * dz;
     }
+    if (!best) return;
+    best._gun118 = this;
+    this._pit118 = { o: best, face: this.face };
+    if (deploy && O.occupied) {
+      const idx = best.gz * GRID + best.gx;
+      this._pit118.idx = idx; this._pit118.occ = O.occupied[idx];
+      O.occupied[idx] = 0;                                     // its crew and its trail stand in it
+      this.pos.x = cellCenter(best.gx); this.pos.z = cellCenter(best.gz);
+      this._pitDraw118(best);
+    }
+    if (!this.dugin) { this.dugin = 0.85; this._dugByPit118 = true; }
+  }
+  /** (round 118) The pit drawn round its gun: opened out to the gun's size and turned so its bermed front faces
+   *  the way the gun lays (the prop's front is its local +Z). A picture: nothing reads it back. */
+  _pitDraw118(o) {
+    if (!o.mesh) return;
+    const O = this.game.obstacles, k = Math.max(1.6, Math.min(2.8, 2.2 * this._pitScale()));
+    if (o._pitS0118 == null) o._pitS0118 = [o.mesh.scale.x, o.mesh.scale.z];
+    o.mesh.scale.x = o._pitS0118[0] * k; o.mesh.scale.z = o._pitS0118[1] * k;
+    o.mesh.rotation.y = this.face || 0; o.mesh.updateMatrix();
+    O._rebakeDebt = (O._rebakeDebt || 0) + 1;
   }
   _inFoxhole117() { return this.dugin > 0 && this._holeKind117() === 'fox'; }
   /** (round 117) Which hole this unit digs: 'fox' (a man on foot with his own
@@ -47120,7 +47228,7 @@ class Editor {
     // Dress the generated ground with cover that matches the surfaces it just
     // painted — a generated map arrives planted, not bald.
     if (g.foliage) {
-      g.foliage.clear(); g.foliage.autoSow(true);
+      g.foliage.clear(); g.foliage.autoSow(true); if (g.foliage.unsowRoofed) g.foliage.unsowRoofed(g.structures);   // (round 118) grass118
       if (g.foliage.flora && g.flora113 !== false) g.foliage.flora(g.mapDef && g.mapDef.era, g.mapDef && g.mapDef.name);   // (round 113)
     }
     g.ui.toast('Generated a new field');
@@ -68527,6 +68635,7 @@ class Game {
       // A map saved before this layer existed has no foliage block at all —
       // plant it from its surfaces rather than loading a bare field.
       if (!fdata) this.foliage.autoSow(false);
+      if (this.foliage.unsowRoofed) this.foliage.unsowRoofed(this.structures);   // (round 118) nothing grows under a roof (grass118)
     }
     if (data.units) {
       for (const s of data.units) {
@@ -70385,6 +70494,7 @@ class Game {
     // queue is gone, or their rebuild would go with it — and nothing is sown
     // round them (`autoSow` plants every bare cell it may)
     if (this.foliage) { if (dataMap && dataMap.foliage) this._applyMapFoliage(dataMap); else this.foliage.autoSow(false); }
+    if (this.foliage && this.foliage.unsowRoofed) this.foliage.unsowRoofed(this.structures);   // (round 118) nothing grows under a roof (grass118)
     // (round 113) …and then the theatre's own plants on what was sown or
     // painted: its crops field by field, wildflowers in the grass, bulrush in
     // the reeds, willowherb on the rubble (assets/foliage.js `flora`).
@@ -72671,6 +72781,12 @@ Game.prototype.fxSmoke118 = false;    // smoke screens: fuller puffs that erode 
 // (round 118) DESTRUCTIBILITY: trees fall and lie as logs (`Obstacles.fellTree`); `destroy118` reserved for the rest
 Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 118 destructibility)
 Game.prototype.destroy118 = false;
+// (round 118, second effects pass) the pool evicts by visibility, a burst's flash stays local to a first-person eye,
+// tracers are instanced streaks by the belt mix
+Game.prototype.fxPool118 = false;
+Game.prototype.fpvExpo118 = false;
+Game.prototype.fxTracer118 = false;
+const TRACER_EVERY = { axis: 4, allied: 5, soviet: 5, british: 4 };   // MG42/34 one in 3-5, Browning one in 5, Bren/Vickers one in 4
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);
 

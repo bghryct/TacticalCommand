@@ -321,7 +321,8 @@
     var c = hexc(GROUND118[kind] || GROUND118.farm, 0.96 + ((seed >>> 5) % 9) * 0.01), e = 0.012 * S;
     B.box(cx, y + e * 0.5, cz, T, e, T, 0, 0, 0, c.r, c.g, c.b, 16);
   }
-  var FURN118 = { oak: 0x2e2014, pine: 0x553e25, iron: 0x161514, linen: 0x8f877a, lime: 0xb3ac9e, hay: 0x9a8146, crate: 0x6b5133, olive: 0x353f27 };
+  var FURN118 = { oak: 0x2e2014, pine: 0x553e25, iron: 0x161514, linen: 0x8f877a, lime: 0xb3ac9e, hay: 0x9a8146, crate: 0x6b5133, olive: 0x353f27,
+                 stone: 0x8a8478, soot: 0x0c0b0a, brass: 0x6b5a2a };
   /** What stands against the inside of the SOLID edge `e` of a room's cell, by
    *  what the house is (`_kindAt`) and the storey: within a metre and a half of
    *  that wall, clear of the cell's middle and of the doorways (at the middle
@@ -429,6 +430,82 @@
       for (var n3 = 0; n3 < 4; n3++) bx(wA * (span - 0.4 - (n3 >> 1) * 0.8), 0.03, (n3 & 1) * 0.32, 0.7, 0.3, 0.42, F.olive, 1 - (n3 & 1) * 0.06);
       for (var t3 = 0; t3 < 2; t3++) { bx(bk, 0.03, 0.35 + t3 * 0.9, 1.95, 0.08, 0.85, F.crate); bx(bk, 0.06, 0.43 + t3 * 0.9, 1.85, 0.1, 0.75, F.linen, 0.8); }
       for (var p3 = -1; p3 <= 1; p3 += 2) for (var q3 = 0; q3 < 2; q3++) bx(bk + p3 * 0.95, 0.03 + q3 * 0.8, 0, 0.06, 1.75, 0.06, F.iron);
+    }
+  }
+  var RUG118 = [0x5a1e14, 0x2e3a52, 0x4a3a1e, 0x3a4a30], PAINT118 = [0x3a4a3a, 0x4a3a2a, 0x2a3a4a, 0x5a4a2a, 0x6a5a3a];
+  /** (round 118) a box in metres about a point, `u` along X when `alongX`
+   *  (else along Z), `v` across; `cloth` marks it with a short normal, which
+   *  the shader reads as "leave the colour plain": a rug, bedding, a canvas,
+   *  a book is not boards or stone (assets/fabric.js, `fbCloth`). */
+  function fbox118(B, wx, y, wz, alongX, u, v, y0, lu, ly, lv, hex, k, cloth) {
+    var MU = T / 6, cc = hexc(hex, k || 1), n0 = B.n;
+    B.box(wx + (alongX ? u : v) * MU, y + (y0 + ly * 0.5) * MU, wz + (alongX ? v : u) * MU,
+      (alongX ? lu : lv) * MU, ly * MU, (alongX ? lv : lu) * MU, 0, 0, 0, cc.r, cc.g, cc.b, 31);
+    if (cloth) for (var q = n0 * 3; q < B.n * 3; q++) B.nrm[q] *= 0.5;
+  }
+  /** The middle of a living room: a table on a rug, four chairs, backs out. */
+  function centre118(B, wx, y, wz, alongX, W, h) {
+    fbox118(B, wx, y, wz, alongX, 0, 0, 0.05, 2.6, 0.012, 1.8, RUG118[h % 4], 1, true);
+    fbox118(B, wx, y, wz, alongX, 0, 0, 0.71, 1.5, 0.04, 0.85, W, 1.06);
+    for (var s = -1; s <= 1; s += 2) for (var t = -1; t <= 1; t += 2) {
+      fbox118(B, wx, y, wz, alongX, s * 0.68, t * 0.36, 0, 0.05, 0.71, 0.05, W, 0.85);
+      var cu = s * 0.4, cv = t * 0.7;
+      fbox118(B, wx, y, wz, alongX, cu, cv, 0.42, 0.42, 0.04, 0.42, W);
+      fbox118(B, wx, y, wz, alongX, cu, cv + t * 0.19, 0.46, 0.42, 0.5, 0.04, W, 0.95);
+      fbox118(B, wx, y, wz, alongX, cu - 0.18, cv, 0, 0.03, 0.42, 0.36, W, 0.85);
+      fbox118(B, wx, y, wz, alongX, cu + 0.18, cv, 0, 0.03, 0.42, 0.36, W, 0.85);
+    }
+  }
+  var SOLID118 = { shop: 1, pech: 1, bench: 1 };   // too wide for the pier between two windows
+  /** One piece against the inside of edge `e` of the cell centred at (cx, cz),
+   *  centred on the wall's middle. Metres; `b` out from the wall's face. */
+  function piece118(B, cx, y, cz, e, what, W, h) {
+    var MU = T / 6, d = EDGE_D[e], horiz = (e === 0 || e === 2), inner = (T * 0.5 - WALL_TH * 0.5) / MU, F = FURN118;
+    var ceil = (FLOOR_H - FLOOR_TH) / MU, rr = h >>> 0;
+    function r(n) { rr = (Math.imul(rr, 1103515245) + 12345) >>> 0; return (rr >>> 9) % n; }
+    function bx(a, b, y0, la, ly, lb, hex, k, cloth) {
+      fbox118(B, cx, y, cz, horiz, a, (horiz ? d[1] : d[0]) * (inner - b - lb * 0.5), y0, la, ly, lb, hex, k, cloth);
+    }
+    if (what === 'dresser') {
+      bx(0, 0.02, 0, 1.3, 0.88, 0.5, W); bx(0, 0, 0.88, 1.3, 1.1, 0.04, W, 0.85);
+      for (var s = 1; s <= 2; s++) { bx(0, 0.04, 0.88 + s * 0.36, 1.3, 0.03, 0.26, W);
+        for (var p = -1; p <= 1; p++) bx(p * 0.4, 0.05, 0.91 + s * 0.36, 0.25, 0.25, 0.03, F.linen, 1.25, true); }
+    } else if (what === 'range') {
+      bx(0, 0.02, 0, 0.95, 0.82, 0.62, F.iron); bx(0, 0, 0.82, 0.99, 0.04, 0.66, F.iron, 1.3);
+      bx(0.25, 0.12, 0.86, 0.14, Math.max(0.5, ceil - 0.86), 0.14, F.iron, 0.9);
+    } else if (what === 'fire') {
+      bx(0, 0, 0, 1.6, 0.04, 0.7, F.stone, 0.9);
+      bx(-0.66, 0, 0.04, 0.28, 1.06, 0.4, F.stone); bx(0.66, 0, 0.04, 0.28, 1.06, 0.4, F.stone);
+      bx(0, 0, 0.04, 1.04, 0.9, 0.05, F.soot, 1, true);
+      bx(0, 0, 1.1, 1.62, 0.1, 0.46, W);
+      bx(0, 0, 1.2, 1.36, Math.max(0.3, ceil - 1.2), 0.3, F.lime, 0.95);
+      bx(-0.4, 0.33, 1.2, 0.12, 0.22, 0.12, F.brass); bx(0.4, 0.33, 1.2, 0.12, 0.22, 0.12, F.brass);
+    } else if (what === 'shelf') {
+      for (var s2 = 0; s2 < 2; s2++) bx(0, 0, 1.4 + s2 * 0.38, 1.2, 0.03, 0.24, W);
+      for (var b2 = 0; b2 < 7; b2++) bx(-0.5 + b2 * 0.16, 0.03, 1.43 + (b2 > 3 ? 0.38 : 0), 0.08, 0.2 + (b2 % 3) * 0.03, 0.17, PAINT118[r(5)], 1, true);
+    } else if (what === 'picture') {
+      bx(0, 0, 1.4, 0.62, 0.48, 0.03, W, 0.9); bx(0, 0.005, 1.45, 0.52, 0.38, 0.03, PAINT118[r(5)], 1, true);
+    } else if (what === 'bed') {
+      bx(0, 0.03, 0, 1.4, 0.34, 2.0, W); bx(0, 0.08, 0.34, 1.3, 0.16, 1.9, F.linen, 1, true);
+      bx(0, 0.15, 0.5, 1.1, 0.13, 0.36, F.linen, 1.1, true); bx(0, 0.75, 0.5, 1.36, 0.05, 1.2, RUG118[r(4)], 1.15, true);
+      bx(0, 0, 0, 1.42, 1.05, 0.06, W, 0.9); bx(0, 2.0, 0, 1.42, 0.62, 0.06, W, 0.9);
+    } else if (what === 'wardrobe') {
+      bx(0, 0.02, 0, 1.2, 1.95, 0.6, W); bx(0, 0, 1.95, 1.3, 0.08, 0.66, W, 0.88);
+    } else if (what === 'chest') {
+      bx(0, 0.03, 0, 0.9, 0.5, 0.48, W, 0.95);
+    } else if (what === 'chair') {
+      bx(0, 0.1, 0.42, 0.42, 0.04, 0.42, W); bx(0, 0.1, 0.46, 0.42, 0.5, 0.04, W, 0.95);
+      bx(-0.18, 0.13, 0, 0.03, 0.42, 0.36, W, 0.85); bx(0.18, 0.13, 0, 0.03, 0.42, 0.36, W, 0.85);
+    } else if (what === 'pech') {
+      bx(0, 0, 0, 1.9, 1.55, 1.6, F.lime); bx(0, 0, 1.55, 1.9, 0.3, 0.75, F.lime, 0.94);
+    } else if (what === 'bench') {
+      bx(0, 0.03, 0.42, 1.9, 0.05, 0.38, F.pine); bx(-0.85, 0.06, 0, 0.05, 0.42, 0.3, F.pine, 0.85); bx(0.85, 0.06, 0, 0.05, 0.42, 0.3, F.pine, 0.85);
+    } else if (what === 'shop') {
+      bx(0, 0, 0, 2.4, 2.2, 0.03, W, 0.85);
+      for (var s3 = 0; s3 < 5; s3++) bx(0, 0.03, 0.15 + s3 * 0.46, 2.4, 0.03, 0.32, W);
+      bx(-1.19, 0.03, 0, 0.04, 2.2, 0.32, W, 0.9); bx(1.19, 0.03, 0, 0.04, 2.2, 0.32, W, 0.9);
+      for (var g3 = 0; g3 < 8; g3++) bx(-0.95 + (g3 % 4) * 0.63, 0.06, 0.18 + (g3 > 3 ? 3 : 1) * 0.46, 0.3, 0.26, 0.22, PAINT118[r(5)]);
+      bx(0, 1.05, 0, 2.2, 0.95, 0.6, W); bx(0, 1.02, 0.95, 2.3, 0.04, 0.66, F.pine, 1.1);
     }
   }
   function kitPieces() {
@@ -2673,6 +2750,99 @@
     for (var k = 0; k < 5; k++) { var v = t.heightAt(cx + (k === 1 ? q : k === 2 ? -q : 0), cz + (k === 3 ? q : k === 4 ? -q : 0)); if (v > m) m = v; }
     return Math.min(m, y + 0.06 * S);
   };
+  /** A room: the cells of one house joined to this one at storey L with no
+   *  wall between (a doorway divides rooms), flooded, marked in `vis`. */
+  Structures.prototype._room118 = function (gx, gz, L, vis) {
+    var hid = this._houseOf ? this._houseOf(gx, gz) : 0, q = [gx, gz], cells = [], minI = Infinity;
+    vis[this.li(gx, gz, L)] = 1;
+    for (var h = 0; h < q.length && cells.length < 96; h += 2) {
+      var x = q[h], z = q[h + 1], ci = z * G.GRID + x;
+      cells.push(x, z); if (ci < minI) minI = ci;
+      for (var e = 0; e < 4; e++) {
+        var nx = x + EDGE_D[e][0], nz = z + EDGE_D[e][1];
+        if (!this.inb(nx, nz, L)) continue;
+        var ni = this.li(nx, nz, L);
+        if (vis[ni] || !this.mask[nz * G.GRID + nx] || !this._roomAt(nx, nz, L) || (L > 0 && !this.floorM[ni])) continue;
+        if (this._wallOf118(x, z, L, e) !== -1) continue;
+        if (hid && this._houseOf(nx, nz) !== hid) continue;
+        vis[ni] = 1; q.push(nx, nz);
+      }
+    }
+    return { cells: cells, minI: minI };
+  };
+  /** A cell nothing may stand in: a flight or a ladder, the well over one, a flight's foot, its landing. */
+  Structures.prototype._busy118 = function (x, z, L) {
+    var i = this.li(x, z, L);
+    if (this.feat[i] || (L > 0 && this.feat[this.li(x, z, L - 1)])) return true;
+    for (var e0 = 0; e0 < 4; e0++) {
+      var ax = x + EDGE_D[e0][0], az = z + EDGE_D[e0][1];
+      if (!this.inb(ax, az, L)) continue;
+      var f0 = this.feat[this.li(ax, az, L)], f1 = L > 0 ? this.feat[this.li(ax, az, L - 1)] : 0;
+      if ((f0 & 7) === F_STAIR && ((f0 >> 3) & 3) === e0) return true;
+      if ((f1 & 7) === F_STAIR && ((f1 >> 3) & 3) === ((e0 + 2) & 3)) return true;
+    }
+    return false;
+  };
+  /** A lived-in room: the table and its chairs on a rug in the middle (in a
+   *  shop, upstairs in a small room, or in a Russian house, none); against the
+   *  walls — solid walls first, then the piers between window pairs — what a
+   *  room of its kind and storey keeps. The house's own dice, from its cells. */
+  Structures.prototype._furnishRoom118 = function (B, cells, kind, L) {
+    var n = cells.length >> 1, free = [], slots = [], sx = 0, sz = 0, half = G.GRID * T * 0.5;
+    var mnx = 1e9, mxx = -1e9, mnz = 1e9, mxz = -1e9, x, z, e;
+    var h = ((cells[0] * 73856093) ^ (cells[1] * 19349663) ^ ((L + 1) * 83492791)) >>> 0, rr = h;
+    function r(m) { rr = (Math.imul(rr, 1103515245) + 12345) >>> 0; return (rr >>> 9) % m; }
+    for (var c = 0; c < n; c++) {
+      x = cells[c * 2]; z = cells[c * 2 + 1];
+      if (this._busy118(x, z, L)) continue;
+      free.push(x, z); sx += G.cellCenter(x); sz += G.cellCenter(z);
+      if (x < mnx) mnx = x; if (x > mxx) mxx = x; if (z < mnz) mnz = z; if (z > mxz) mxz = z;
+      for (e = 0; e < 4; e++) {
+        var wk = this._wallOf118(x, z, L, e);
+        if (wk === K_SOLID) slots.push(x, z, e, 0); else if (wk === K_WINDOW && pairs()) slots.push(x, z, e, 1);
+      }
+    }
+    var nf = free.length >> 1;
+    if (!nf) return;
+    var W = r(2) ? FURN118.oak : FURN118.pine, y = this.floorY(free[0], free[1], L);
+    var shop = kind === 'town' && L === 0 && r(3) === 0;
+    // the middle: a table on a rug and its chairs in every run of two cells
+    // along the room (a storey of a block house is one room twenty metres
+    // long); upstairs in every other run of two or more cells
+    if (!shop && kind !== 'hut') {
+      var ax = (mxx - mnx) >= (mxz - mnz), bins = {}, kb = 0;
+      for (var f = 0; f < nf; f++) { var fx = free[f * 2], fz = free[f * 2 + 1], key = (ax ? fx - mnx : fz - mnz) >> 1; (bins[key] || (bins[key] = [])).push(fx, fz); }
+      for (var bk in bins) {
+        var bc = bins[bk], bn = bc.length >> 1, mx = 0, mz = 0, inRoom = false;
+        if (L > 0 && ((kb++ & 1) || bn < 2)) continue;
+        for (var q = 0; q < bn; q++) { mx += G.cellCenter(bc[q * 2]); mz += G.cellCenter(bc[q * 2 + 1]); }
+        mx /= bn; mz /= bn;
+        var ccx = Math.floor((mx + half) / T), ccz = Math.floor((mz + half) / T);
+        for (var q2 = 0; q2 < bn; q2++) if (bc[q2 * 2] === ccx && bc[q2 * 2 + 1] === ccz) inRoom = true;
+        if (!inRoom) { mx = G.cellCenter(bc[0]); mz = G.cellCenter(bc[1]); }
+        centre118(B, mx, y, mz, ax, W, (h + kb * 7 + (bk | 0) * 13) >>> 0);
+      }
+    }
+    var list = kind === 'hut' ? (L === 0 ? ['pech', 'bench', 'shelf', 'picture'] : ['bed', 'chest'])
+      : L === 0 ? (shop ? ['shop', 'shelf', 'picture'] : ['dresser', kind === 'farm' || r(2) ? 'fire' : 'range', 'shelf', 'picture', 'chest', 'picture'])
+      : ['bed', 'wardrobe', 'picture', 'chest', nf > 2 ? 'bed' : 'chair', 'shelf'];
+    // …and once the first pieces are placed, the rest of the walls (four in five) from the filler
+    var fill = kind === 'hut' ? ['shelf', 'bench', 'chest', 'picture'] : L === 0 ? ['picture', 'shelf', 'chest', 'dresser', 'chair', 'picture', 'wardrobe']
+      : ['bed', 'picture', 'chest', 'wardrobe', 'chair', 'picture'];
+    var ns = slots.length >> 2, used = {}, start = ns ? r(ns) : 0, want = Math.max(list.length, Math.ceil(ns * 0.8));
+    for (var p = 0; p < want; p++) {
+      if (p >= list.length) list.push(fill[(p - list.length) % fill.length]);
+      var pick = -1;
+      for (var pass = 0; pass < 2 && pick < 0; pass++) for (var t = 0; t < ns && pick < 0; t++) {
+        var s = (start + t) % ns;
+        if (used[s] || slots[s * 4 + 3] !== pass || (pass && SOLID118[list[p]])) continue;
+        pick = s;
+      }
+      if (pick < 0) break;
+      used[pick] = 1;
+      piece118(B, G.cellCenter(slots[pick * 4]), y, G.cellCenter(slots[pick * 4 + 1]), slots[pick * 4 + 2], list[p], W, (h ^ Math.imul(p + 1, 2654435761)) >>> 0);
+    }
+  };
   Structures.prototype._wallOf118 = function (gx, gz, L, e) {
     if (this.wallMat(gx, gz, L, e)) return this.wallKind(gx, gz, L, e);
     var nx = gx + EDGE_D[e][0], nz = gz + EDGE_D[e][1], o = (e + 2) & 3;
@@ -2681,7 +2851,7 @@
   Structures.prototype._furnishChunk = function (k) {
     var c = this.chunks[k], self = this;
     c.innerOk = true;
-    var B = this._Bi || (this._Bi = new Builder(1024));
+    var B = this._Bi || (this._Bi = new Builder(1024)), vis = {};
     B.reset();
     var x0 = c.cx * CHUNK, z0 = c.cz * CHUNK, x1 = Math.min(G.GRID, x0 + CHUNK), z1 = Math.min(G.GRID, z0 + CHUNK);
     for (var gz = z0; gz < z1; gz++) for (var gx = x0; gx < x1; gx++) {
@@ -2691,6 +2861,14 @@
         if (!this._roomAt(gx, gz, L)) break;
         var i = this.li(gx, gz, L);
         if (L > 0 && !this.floorM[i]) continue;
+        // (round 118) a living room is furnished as a ROOM — its middle, then its walls — by the
+        // chunk that holds its first cell; barns, halls and works keep the cell-by-cell storage
+        if (!kind) kind = this._kindAt(gx, gz);
+        if (kind === 'farm' || kind === 'timber' || kind === 'town' || kind === 'hut') {
+          if (!vis[i]) { var rm = this._room118(gx, gz, L, vis), mx0 = rm.minI % G.GRID, mz0 = (rm.minI / G.GRID) | 0;
+            if (mx0 >= x0 && mx0 < x1 && mz0 >= z0 && mz0 < z1) this._furnishRoom118(B, rm.cells, kind, L); }
+          continue;
+        }
         if (this.feat[i] || (L > 0 && this.feat[this.li(gx, gz, L - 1)])) continue;
         var near = false;
         for (var e0 = 0; e0 < 4 && !near; e0++) {

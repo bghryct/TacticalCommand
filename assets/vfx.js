@@ -619,6 +619,11 @@
     this.dirx = new Float32Array(C); this.dirz = new Float32Array(C);   // a muzzle flash's bore
     this.flip = new Uint8Array(C);
     this.fin = new Float32Array(C); this.gnd = new Float32Array(C);      // (round 114) drawn from the simulated smoke sheet; the ground under it
+    // (round 118, `game.fxPool118`) WHAT THE PLAYER CAN SEE OF EACH PARTICLE, scored once a frame in `update`
+    // (priority x size / distance, behind the camera or off its axis in first person counting little), so a full
+    // pool evicts the least visible and a spawn nobody could see is the one dropped — not a random wisp.
+    this.vis = new Float32Array(C); this._camX = 0; this._camY = 0; this._camZ = 0; this._ve = null; this._fpv = 0;
+    this._ring = new Int32Array(48).fill(-1); this._ringN = 0;          // the last smoke/dust spawns, for merging
     this.n = 0;                          // live count; [0, n) is live, compacted
 
     var sh = sheets(), bk = BAKED;
@@ -651,7 +656,7 @@
     // Reusable sort scratch for the alpha layer (back-to-front).
     this._order = new Int32Array(C);
     this._depth = new Float32Array(C);
-    this.stats = { live: 0, spawned: 0, dropped: 0, draws: 0 };
+    this.stats = { live: 0, spawned: 0, dropped: 0, draws: 0, droppedBy: new Uint32Array(16), evicted: 0, merged: 0 };
     this._t = 0;
   }
 
@@ -660,8 +665,23 @@
     /** Claim a slot. Past the cap, evict the lowest-priority, oldest particle
      *  rather than dropping the new one — so a blast is never swallowed by a
      *  field of drifting smoke. Returns an index, or -1 if nothing gave way. */
-    _slot: function (kind) {
+    _slot: function (kind, o) {
       if (this.n < this.cap) return this.n++;
+      if (o && F118('fxPool118')) {
+        // (round 118) THE LEAST VISIBLE GOES, and that may be the newcomer: a rifle puff forty units behind the camera
+        // never displaces a column in front of it. A burst near the camera always gets in.
+        var cx = this._fxD ? this._ox + (o.x - this._ox) * this.K : o.x, cy = this._fxD ? this._oy + (o.y - this._oy) * this.K : o.y;
+        var cz = this._fxD ? this._oz + (o.z - this._oz) * this.K : o.z, csz = (o.size || 1) * (this._fxD ? this.K : 1);
+        var mine = this._visOf(kind, cx, cy, cz, csz), lo = -1, loV = Infinity;
+        for (var q = 0; q < 32; q++) {
+          var j = (crand() * this.n) | 0, v = this.vis[j];
+          if (v < loV) { loV = v; lo = j; }
+        }
+        var burst = kind === K.BOOM || kind === K.FBALL || kind === K.FLASH || kind === K.MFLASH;
+        var ddx = cx - this._camX, ddz = cz - this._camZ, near = burst && ddx * ddx + ddz * ddz < 3600;
+        if (lo >= 0 && (near || mine > loV)) { this.stats.evicted++; return lo; }
+        this.stats.dropped++; this.stats.droppedBy[kind & 15]++; return -1;
+      }
       var want = PRIO[kind] || 1, worst = -1, worstScore = want;
       // Sample rather than scan: 24 probes finds a weaker particle with
       // near-certainty when one exists, and costs nothing when it doesn't.
@@ -687,14 +707,45 @@
         this.stretch[i] = this.stretch[last]; this.drag[i] = this.drag[last]; this.grav[i] = this.grav[last];
         this.dirx[i] = this.dirx[last]; this.dirz[i] = this.dirz[last];
         this.flip[i] = this.flip[last]; this.fin[i] = this.fin[last]; this.gnd[i] = this.gnd[last];
+        this.vis[i] = this.vis[last];
       }
+    },
+
+    /** How much of a particle the player can see: its eviction priority times its size, over its distance to the
+     *  camera; next to nothing behind the camera, and in first person weighted toward the eye's own axis. */
+    _visOf: function (kind, x, y, z, size) {
+      var dx = x - this._camX, dy = y - this._camY, dz = z - this._camZ;
+      var d = Math.sqrt(dx * dx + dy * dy + dz * dz) + 2, ve = this._ve, f = 1;
+      if (ve) {
+        var ahead = -(ve[2] * dx + ve[6] * dy + ve[10] * dz);          // view-space depth of the offset
+        if (ahead < 0) f = 0.12; else if (this._fpv) f = 0.35 + 0.65 * (ahead / d);
+      }
+      return (PRIO[kind] || 1) * Math.max(0.05, size) * f / d;
     },
 
     /** The one entry point. `o` carries whatever the behaviour needs; anything
      *  omitted takes the behaviour's own default. */
     spawn: function (kind, o) {
-      var i = this._slot(kind);
+      var merge = (kind === K.SMOKE || kind === K.DUST) && this.n > this.cap * 0.85 && F118('fxPool118');
+      if (merge) {
+        // (round 118) NEARBY SMALL PUFFS MERGE: with the pool nearly full, a puff born inside a recent one of its
+        // kind swells that one instead (size, a little alpha, life) — the same cloud for one particle fewer.
+        var mx = this._fxD ? this._ox + (o.x - this._ox) * this.K : o.x, my = this._fxD ? this._oy + (o.y - this._oy) * this.K : o.y;
+        var mz = this._fxD ? this._oz + (o.z - this._oz) * this.K : o.z, ms = (o.size || 1) * (this._fxD ? this.K : 1);
+        for (var ri = 0; ri < this._ring.length; ri++) {
+          var rj = this._ring[ri];
+          if (rj < 0 || rj >= this.n || this.kind[rj] !== kind) continue;
+          var rr = Math.max(ms, this.sz[rj]) * 0.6;
+          if (Math.abs(this.px[rj] - mx) < rr && Math.abs(this.pz[rj] - mz) < rr && Math.abs(this.py[rj] - my) < rr) {
+            this.sz[rj] += ms * 0.25; this.alpha[rj] = Math.min(1, this.alpha[rj] + (o.a !== undefined ? o.a : 1) * 0.25);
+            this.life[rj] = Math.max(this.life[rj], (o.life || 1) * 0.8); this.stats.merged++;
+            return rj;
+          }
+        }
+      }
+      var i = this._slot(kind, o);
       if (i < 0) return -1;
+      if (merge) { this._ring[this._ringN] = i; this._ringN = (this._ringN + 1) % this._ring.length; }
       this.stats.spawned++;
       var R = crand;
       this.px[i] = o.x; this.py[i] = o.y; this.pz[i] = o.z;
@@ -744,6 +795,9 @@
       var T = this.terrain;
       // the view matrix, for laying a muzzle flash along its bore on screen
       var ve = camera ? camera.matrixWorldInverse.elements : null;
+      var pool = F118('fxPool118');
+      if (camera) { this._camX = camera.position.x; this._camY = camera.position.y; this._camZ = camera.position.z; this._ve = ve; }
+      var G = typeof window !== 'undefined' ? window.game : null; this._fpv = G && G.fpv ? 1 : 0;
 
       for (var i = 0; i < this.n; i++) {
         this.life[i] -= dt;
@@ -865,6 +919,7 @@
         } else if (k === K.DEBRIS || k === K.GIB) {
           a *= Math.min(1, t * 4);
         }
+        if (pool) this.vis[i] = this._visOf(k, this.px[i], this.py[i], this.pz[i], sx) * (0.4 + 0.6 * t);   // the old fade first
         if (a <= 0.003) continue;
 
         // -- pack ----------------------------------------------------------
