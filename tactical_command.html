@@ -26041,7 +26041,7 @@ class Obstacles {
       // (round 118) A FELLED TREE'S CELLS (`fellTree`, `game.treeFall118`): a trunk length lying along `rot`,
       // and at the base cell (`_logBase`) the stump. The crown is the tree's own mesh, re-hung under the base
       // cell's group and laid over by `_updateFalls`, so the batcher instances it with the standing trees.
-      const lk = this._logKit(), lm = this.mat.wood;        // shared geometry and the kit's wood: nothing per tree
+      const lk = this._logKit(), lm = this.mat.hedge;       // shared geometry on the trunks' own bark material: nothing per tree
       const seg = new THREE.Mesh(lk.log, lm); seg.position.y = 0.42; seg.castShadow = true; seg.receiveShadow = true; group.add(seg);
       if (this._logBase) {
         const st = new THREE.Mesh(lk.stump, lm);
@@ -26307,10 +26307,26 @@ class Obstacles {
   /** The two shared geometries of a felled tree's cells, built once: a trunk length along +Z and a stump. */
   _logKit() {
     if (!this._logKitG) {
-      this._logKitG = { log: new THREE.CylinderGeometry(0.42, 0.46, TILE / K_PROP * 1.04, 8).rotateX(Math.PI / 2),
-                        stump: new THREE.CylinderGeometry(0.34, 0.42, 1.1, 8) };
+      // the props kit, as the woodpile (`_logVariant`): bark on the sides (kind WOOD, the trunks' own procedural
+      // grain from position and normal), the sawn ends pale end grain — on `mat.hedge`, no material of its own
+      const BARK = [0.25, 0.20, 0.15], CUT = [0.60, 0.48, 0.32], L = TILE / K_PROP * 0.52;
+      let K = this._kit(); K.cyl([0, 0.42, -L], [0, 0.42, L], 0.44, 0.42, 8, BARK, K.WOOD, CUT);
+      const log = K.geo();
+      K = this._kit(); K.cyl([0, -0.02, 0], [0, 1.1, 0], 0.42, 0.36, 8, BARK, K.WOOD, CUT);
+      this._logKitG = { log, stump: K.geo() };
     }
     return this._logKitG;
+  }
+  /** A felled crown must not sway: the same geometry with the canopy's sway weight (`hedge.y`) zeroed, one copy per
+   *  source geometry, so every fallen tree of a variant still instances together (no program, no material of its own). */
+  _stillGeo(geo) {
+    this._stillGeos = this._stillGeos || new WeakMap();
+    let s = this._stillGeos.get(geo);
+    if (s) return s;
+    s = geo.clone(); const h = s.getAttribute('hedge');
+    if (h) { for (let i = 0; i < h.count; i++) h.setY(i, 0); h.needsUpdate = true; }
+    this._stillGeos.set(geo, s);
+    return s;
   }
   fellTree(o, from) {
     const gx = o.gx, gz = o.gz, cx = cellCenter(gx), cz = cellCenter(gz);
@@ -26334,6 +26350,7 @@ class Obstacles {
     G.add(g); g.position.set((g.position.x - G.position.x) * k, 0, (g.position.z - G.position.z) * k);
     // the base group already turns to `yaw`: the child tips about ITS x, so the crown goes down the log's own line
     g.scale.multiplyScalar(k); g.rotation.set(0, 0, 0, 'YXZ'); g.updateMatrix();
+    g.traverse(m => { if (m.isMesh && m.geometry && m.geometry.getAttribute('hedge')) m.geometry = this._stillGeo(m.geometry); });   // no sway down
     (this.falling || (this.falling = [])).push({ g, base, t: 0, T: 1.4 + lenU * 0.3, yaw, fx, fz, lenU, cx, cz, y: G.position.y });
     return base;
   }
@@ -72652,7 +72669,7 @@ Game.prototype.fxFire118 = true;      // fires: taller tongues, a wider glow (ON
 Game.prototype.fxImpact118 = false;   // bullets into the ground: a puff in the colour of the surface
 Game.prototype.fxSmoke118 = false;    // smoke screens: fuller puffs that erode later
 // (round 118) DESTRUCTIBILITY: trees fall and lie as logs (`Obstacles.fellTree`); `destroy118` reserved for the rest
-Game.prototype.treeFall118 = false;
+Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 118 destructibility)
 Game.prototype.destroy118 = false;
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);
