@@ -1,4 +1,4 @@
-/* (round 118) THE TRENCH KIT, laid along smooth paths — `game.trenchKit118` (default OFF; needs `trench118`).
+/* (round 118) THE TRENCH KIT, laid along smooth paths — `game.trenchKit118` (default ON; needs `trench118`).
  *
  * The owner: "can the trenches also have organic curves, gunpits that actually protect but allow fire from
  * guns out, better sandbags, better bunker structures, concrete trenches, wood trenches, dirt trenches".
@@ -25,8 +25,13 @@
   const S = { group: null, hidden: [], mat: null, stats: null };
   const SECT = 4;
 
+  // DEFAULT ON (round 118): seeded battles identical with it (null control, 3 seeds x 3 maps), +0.23 ms with trenches
+  // in view at 2,035 men, judged from captures on turf, snow, desert and a dark field. `game.trenchKit118 = false`
+  // draws the old pieces exactly as before.
+  const TRENCHKIT118_ON = true;
   function on(g) {
-    if (!(g && g.trenchKit118) || !window.TRENCHKIT118 || !window.THREE) return false;
+    const want = g && g.trenchKit118 != null ? !!g.trenchKit118 : TRENCHKIT118_ON;
+    if (!want || !window.TRENCHKIT118 || !window.THREE) return false;
     try { return typeof trench118On !== 'function' || trench118On(); } catch (e) { return false; }
   }
 
@@ -45,11 +50,27 @@
     // the kit is not shown until both sheets have decoded (a frame drawn before that is black)
     S.ready = Promise.all([map, nrm].map(t => new Promise(res => { const im = t.image; if (im.complete && im.naturalWidth) res(); else { im.addEventListener('load', res); im.addEventListener('error', res); } })))
       .then(() => { S.loaded = true; if (S.group) S.group.visible = true; });
-    // a little fill from the sky over the cut (the ditch lies in the terrain's shadow), from the albedo itself
-    S.mat = new T.MeshPhongMaterial({ map, normalMap: nrm, vertexColors: true, specular: 0x0b0b0b, shininess: 12,
-                                      emissive: 0x303030, emissiveMap: map });
+    // no emissive fill: a constant term glowed at night (measured on The Dunkirk Perimeter's dark field); the cut is lit
+    // by the scene's own sky and fill, as every other prop
+    S.mat = new T.MeshPhongMaterial({ map, normalMap: nrm, vertexColors: true, specular: 0x0b0b0b, shininess: 12 });
     S.mat.polygonOffset = true; S.mat.polygonOffsetFactor = -1; S.mat.polygonOffsetUnits = -2;
     S.mat.name = 'trenchKit118';
+    // THE PLACE'S GROUND. The sheet's spoil is Normandy's: fresh loam grassing over. On sand, stone, ash and snow it is
+    // recoloured to the map's commonest ground (`Obstacles._spoilPal`), its texture kept (the texel's own light and
+    // dark times the ground's colour), and snow lies on whatever faces up, by the canopy's own snow (`Canopy.snow`).
+    S.u = { uSnowTK: (window.Canopy && Canopy.snow) || { value: 0 }, uSpoilTK: { value: new T.Color(1, 1, 1) }, uSpoilMixTK: { value: 0 } };
+    S.mat.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, S.u);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vUpTK;')
+        .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n  vUpTK = objectNormal.y;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vUpTK;\nuniform float uSnowTK; uniform vec3 uSpoilTK; uniform float uSpoilMixTK;')
+        .replace('#include <map_fragment>', `#include <map_fragment>
+  { float sp = step(${(K.bands.spoil[0]).toFixed(4)}, vUv.y) * step(vUv.y, ${(K.bands.spoil[1]).toFixed(4)});
+    float l = dot(diffuseColor.rgb, vec3(0.30, 0.59, 0.11));
+    diffuseColor.rgb = mix(diffuseColor.rgb, l * uSpoilTK, sp * uSpoilMixTK);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.82, 0.86), smoothstep(0.45, 0.85, vUpTK) * uSnowTK * 0.9); }`);
+    };
+    S.mat.customProgramCacheKey = () => 'trenchKit118-ground-v1';
     return S.mat;
   }
 
@@ -360,6 +381,10 @@
     // one mesh a sector
     const T = THREE, grp = new T.Group(); grp.name = 'trenchKit118';
     const mat = material();
+    // the spoil in the colour of the map's commonest ground (turf: as drawn), divided by the sheet's spoil luminance (~0.23)
+    const GROUND = { turf: [1, 1, 1, 0], sand: [0.52, 0.45, 0.31, 0.9], stone: [0.36, 0.35, 0.33, 0.7], ash: [0.20, 0.19, 0.18, 0.8], snow: [0.80, 0.82, 0.86, 0.85] };
+    const pal = obs._spoilPal ? obs._spoilPal() : 'turf', gk = GROUND[pal] || GROUND.turf;
+    S.u.uSpoilTK.value.setRGB(gk[0] / 0.23, gk[1] / 0.23, gk[2] / 0.23); S.u.uSpoilMixTK.value = gk[3]; st.ground = pal;
     for (const [, b] of B) {
       if (!b.p.length) continue;
       const geo = new T.BufferGeometry();
@@ -395,6 +420,15 @@
   // from `Math.random`, so building the kit on the seeded stream shifted every seeded battle on a map with trenches
   // (measured: Sedan and Dunkirk, all three seeds). The batcher and `Obstacles.add` are wrapped the same way.
   const C = f => function () { return typeof cosmeticScope === 'function' ? cosmeticScope(f, this, arguments) : f.apply(this, arguments); };
-  window.TrenchKit118 = { prepare: C(prepare), build: C(build), unbake: C(unbake), on, stats: () => S.stats, group: () => S.group,
+  /** A trench cell gone (shelled out, or deleted): its piece is not put back on unbake, and the kit is redrawn at the
+   *  next rebake check (`Obstacles.maybeRebake`, every 8 s), so a destroyed trench is not still drawn. */
+  function lost(o) {
+    const i = S.hidden.findIndex(h => h.o === o);
+    if (i < 0) return;                       // not one of the kit's (a foxhole, or the kit is not laid)
+    S.hidden.splice(i, 1);
+    if (S.group) S.dirty = true;
+  }
+  function dirty() { const d = !!S.dirty; S.dirty = false; return d; }
+  window.TrenchKit118 = { prepare: C(prepare), build: C(build), unbake: C(unbake), on, stats: () => S.stats, group: () => S.group, lost, dirty,
     _runs: runs, _curve: curve, ready: C(() => { material(); return S.ready; }) };
 })();

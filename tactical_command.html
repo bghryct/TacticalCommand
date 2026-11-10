@@ -1570,7 +1570,7 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/ui117.js"></script>
 <script src="assets/editfps118.js"></script>
 <!-- (round 118) the trench kit, built in Blender (tools/blender/trench_kit.py), and its layer along smooth runs:
-     `game.trenchKit118`, default OFF. Drawing only; the simulation keeps its trench cells. -->
+     `game.trenchKit118`, default ON (false: the old pieces). Drawing only; the simulation keeps its trench cells. -->
 <script src="assets/trenchkit118.pack.js"></script>
 <script src="assets/trenchkit118.js"></script>
 <script>
@@ -21342,13 +21342,17 @@ function trench118On() { const g = window.game; return g && g.trench118 != null 
 // duckboards; poured concrete (the Atlantic Wall); or bare earth, its walls leaning back. Chosen per trench in the
 // editor (`o.rev`, saved as `v`), else by the map: concrete on the Channel coast, timber in the East, earth elsewhere.
 const REV118 = ['wood', 'concrete', 'dirt'];
-// (round 118) `game.gunpit118` (default OFF): A GUN AT REST BESIDE A GUN PIT IS IN IT. The 647 `gunpit`s (and the
+// (round 118) `game.gunpit118` (default ON since the kit's pass; see below): A GUN AT REST BESIDE A GUN PIT IS IN IT. The 647 `gunpit`s (and the
 // `emplacement`s) were walls a gun stood next to, open to everything. A towed or anti-tank gun that has stopped
 // within a cell of one nobody holds claims it (`Unit._pitTick118`): its crew are dug in (`dugin` 0.85: 'dug',
 // cover 0.80, the hole's defilade), and its trail can be swung only `half` either side of the way it faced
 // when it came into the pit, so it fires out of the pit's mouth and nowhere else (its own traverse on top).
 // The gun is not moved into the pit's cell (a wall to the vehicle search, which could not path out of it).
-const GUNPIT118 = { half: 50 * Math.PI / 180, deploy: 40, deployT: 2 }, GUNPIT118_ON = false;   // `deploy` cells: the maps lay their pits 15-30 cells from the guns
+// (round 118, the kit's pass) DEFAULT ON, measured by STAGED contact (tools/probe_trenchkit118.js `TK118.pit`): a PaK 40 by a pit on
+// Village's open ground, a rifle section and a .30 cal 200 m off and a mortar at 290 m, seeds 7/11/23, 180 s, each arm repeated
+// identically. In the open / in the pit: the gun lasted 18.4, 18.9, 32.0 s / 25.2, 63.3, 24.7 s; crew lost 3 / 1 of 12; attackers
+// killed 1 / 15 of 27. The piece itself still dies to the mortar's HE (the pit protects its crew, not its hit points).
+const GUNPIT118 = { half: 50 * Math.PI / 180, deploy: 40, deployT: 2 }, GUNPIT118_ON = true;   // `deploy` cells: the maps lay their pits 15-30 cells from the guns
 // (round 118) `game.trenchCurve118` (default OFF): A TRENCH DRAWN AS A CURVE over the grid it is laid on. Each
 // piece is turned to the line through its neighbours, diagonals included (a step round a traverse becomes a chord
 // across the corner), and drawn a quarter of a cell toward their middle (`Obstacles._curveTrenches118`, at bake).
@@ -25525,6 +25529,7 @@ class Obstacles {
     this._rebakeT = (this._rebakeT || 0) - dt;
     if (this._rebakeT > 0) return;
     this._rebakeT = 8;
+    if (window.TrenchKit118 && TrenchKit118.dirty()) TrenchKit118.build(this);   // (round 118) a trench cell was destroyed
     // SELF-HEALING. `setMode('play')` bakes, but it early-returns when the mode
     // has not actually changed — so loading a new map while already in play
     // left two thousand props unbatched and the frame at 1,745 draw calls
@@ -26379,6 +26384,7 @@ class Obstacles {
     const i = this.list.findIndex(o => o.gx === gx && o.gz === gz);
     if (i < 0) return false;
     const o = this.list[i];
+    if (window.TrenchKit118 && TRENCH118[o.type]) TrenchKit118.lost(o);   // (round 118) the kit stops drawing it
     if (o.garrison && o.garrison.length && this.game) {   // building destroyed: flush everyone inside
       for (const u of o.garrison.slice()) this.game._collapseOnGarrison(u);
     }
@@ -30301,8 +30307,10 @@ class Projectiles {
     // a ball mount low in the glacis; drawn from the main gun's muzzle, its
     // rounds started wherever the turret happened to be pointing and crossed
     // in front of the hull to reach their target — through the escort.
+    // (round 118) the player's round on foot from his eye (`_fpvAimPoint`, `_fpvEye118`): point blank is a shot
+    const eye118 = opts && opts.player && this.game.hitbox118 !== false && shooter._fpvEye118 && this.game.fpv && this.game.fpv.unit === shooter ? shooter._fpvEye118 : null;
     const s = opts && opts.origin ? new THREE.Vector3(opts.origin.x, opts.origin.y, opts.origin.z)
-      : this._gunOrigin(shooter, target.pos.x, target.pos.z);
+      : eye118 ? eye118.clone() : this._gunOrigin(shooter, target.pos.x, target.pos.z);
     const e = target.pos.clone(); e.y += target.def.size * 0.55;
     // (round 116) AT WHAT SHOWS of the man in first person: his middle if it is in the open, else
     // his head where it shows over the wall or round the corner (`peek116`)
@@ -30310,7 +30318,8 @@ class Projectiles {
     let headOnly = false;
     if (P116 && P116.unit === target && target !== shooter && P116.mode === 'foot' && P116.eyeAt && this.game.peek116 !== false
         && !this.game.sightClear(s.x, s.y, s.z, e.x, e.y, e.z, null, true)) { e.set(P116.eyeAt.x, P116.eyeAt.y - FPV_HEAD_DROP, P116.eyeAt.z); headOnly = true; }
-    const winAt = this._windowFire(shooter, target, s, e);
+    // (round 118) the player lays his own round through a window or into the wall: it is not moved to the opening
+    const winAt = (opts.player && this.game.hitbox118 !== false) ? null : this._windowFire(shooter, target, s, e);
     const d = s.distanceTo(e);
     const led = (shooter._ledUntil > this.game.time) ? 0.8 : 1;   // officer command = steadier aim
     const wound = (shooter.healthState === HEALTH.WOUNDED) ? (1 + COMBAT.woundAim) : 1;   // wounded men shake
@@ -30386,7 +30395,7 @@ class Projectiles {
       // real answer is ten centimetres. Both now come off the weapon's own
       // muzzle velocity and the equation in `flatShot`.
       ...sol,
-      dmg: opts.dmg, shooter, grace: 0.05, heavy: opts.heavy, sniper: opts.sniper, ap: opts.ap, pen: opts.pen,
+      dmg: opts.dmg, shooter, grace: geo118 ? 0 : 0.05, heavy: opts.heavy, sniper: opts.sniper, ap: opts.ap, pen: opts.pen,   // (round 118) swept from the eye
       winTarget: winAt,
       headOnly,                 // (round 116) all that shows of him is his head: see the hit's chance
       geo118,                   // (round 118) the player's: it meets men as drawn (`Unit._bodyHit118`)
@@ -31413,7 +31422,15 @@ class Projectiles {
         // round 104), and the round stops at the point on the plate it entered,
         // which is what decides turret, hull or tracks and which plate. The
         // nearest along the segment wins — it took the first in the unit list.
-        if (!impact) {
+        // (round 118) A MAN IN FRONT OF THE WALL IS HIT BEFORE IT. Men were tested only when nothing solid
+        // had stopped the round in this step, so a wall, a hedge or a crest further along the same step (up
+        // to 3 u of a rifle round) took the round before the man in front of it was asked. With a solid
+        // impact the men on the way to it are tested too, and the nearer wins: the player's rounds always
+        // (`hitbox118`), small-arms rounds of the computer's with `game.wallOrder118` (default on). Measured in
+        // staged 60 s fights, 3 seeds: once a battle on Village in 2 of 3 seeds, never on Hedgerow Hell; the
+        // casualties within one man; each arm as reproducible as the other.
+        const solid118 = !!impact && p.kind === 'bullet' && (p.geo118 || game.wallOrder118 !== false);
+        if (!impact || solid118) {
           const ax = prevPos.x, az = prevPos.z, sdx = pos.x - ax, sdz = pos.z - az;
           const segLen2 = sdx * sdx + sdz * sdz;
           let bestT = Infinity, bestU = null, bestHit = null, bx = 0, by = 0, bz = 0, gU = null, gLoc = null, gPart = null;
@@ -31433,7 +31450,7 @@ class Projectiles {
               // within rounding: half the time just past it, and the round
               // burst in the air in front of the tank it was laid on.
               let k = 1;
-              if (done) k = 1 + 0.6 / (hyp3(pos.x - prevPos.x, pos.y - prevPos.y, pos.z - prevPos.z) || 1);
+              if (done && !solid118) k = 1 + 0.6 / (hyp3(pos.x - prevPos.x, pos.y - prevPos.y, pos.z - prevPos.z) || 1);
               const h = vehSegHit(u, prevPos.x, prevPos.y, prevPos.z,
                 prevPos.x + (pos.x - prevPos.x) * k, prevPos.y + (pos.y - prevPos.y) * k, prevPos.z + (pos.z - prevPos.z) * k);
               if (!h) continue;
@@ -31447,7 +31464,7 @@ class Projectiles {
             // his surface, `_fpvAimPoint`), the first part it enters; no cylinder, no roll
             if (p.geo118 && u.rig && u.rig.hips) {
               if ((cx - u.pos.x) ** 2 + (cz - u.pos.z) ** 2 > HIT118_REACH * HIT118_REACH) continue;
-              const k = done ? 1 + HIT118_ON / (hyp3(pos.x - prevPos.x, pos.y - prevPos.y, pos.z - prevPos.z) || 1) : 1;
+              const k = done && !solid118 ? 1 + HIT118_ON / (hyp3(pos.x - prevPos.x, pos.y - prevPos.y, pos.z - prevPos.z) || 1) : 1;
               const h = u._bodyHit118(prevPos.x, prevPos.y, prevPos.z,
                 prevPos.x + (pos.x - prevPos.x) * k, prevPos.y + (pos.y - prevPos.y) * k, prevPos.z + (pos.z - prevPos.z) * k);
               if (!h || h.t * k >= bestT) continue;
@@ -31462,7 +31479,7 @@ class Projectiles {
             if (tt >= bestT) continue;
             bestT = tt; bestU = u; bestHit = null; bx = cx; by = cy; bz = cz;
           }
-          if (bestU) { impact = 'unit'; p.hitUnit = bestU; p.hitPart = bestHit; pos.set(bx, by, bz); p.loc118 = bestU === gU ? gLoc : null; p.part118 = bestU === gU ? gPart : null; }
+          if (bestU) { if (solid118) game._wo118n = (game._wo118n || 0) + 1; impact = 'unit'; p.hitUnit = bestU; p.hitPart = bestHit; pos.set(bx, by, bz); p.loc118 = bestU === gU ? gLoc : null; p.part118 = bestU === gU ? gPart : null; }
         }
       }
       // Nothing solid on the way in: the round arrives where it was aimed —
@@ -51004,6 +51021,9 @@ class Game {
     // rather than tested at every step — same answer, and it stays cheap now
     // that the ray is twenty times longer.
     let hitUnit = null, hitT = R;
+    // (round 118) POINT BLANK (`game.hitbox118`, on foot): the sight looked for men from 1.2 u (4.8 m) and the
+    // round left 0.7 u (2.8 m) ahead of the eye, so a man nearer than that could not be shot; both from the eye now
+    const near118 = this.hitbox118 !== false && f.mode === 'foot' ? 0.02 : 1.2;
     for (const v of this.units) {
       if (!v.alive || v.embarkedIn || v === u || v.downed) continue;
       // A VEHICLE IS ITS BOXES (round 104): the crosshair on the turret ring
@@ -51028,12 +51048,12 @@ class Game {
       if (this.hitbox118 !== false && v.rig && v.rig.hips) {
         const qx = v.pos.x - eye.x, qy = v.pos.y + 0.2 * K_FIG - eye.y, qz = v.pos.z - eye.z;
         const al = qx * dir.x + qy * dir.y + qz * dir.z;
-        if (al <= 1.2 - HIT118_REACH || al - HIT118_REACH >= hitT) continue;
+        if (al <= near118 - HIT118_REACH || al - HIT118_REACH >= hitT) continue;
         if (qx * qx + qy * qy + qz * qz - al * al > (HIT118_REACH + 0.3 * K_FIG) ** 2) continue;
         const h = v._bodyHit118(eye.x, eye.y, eye.z, eye.x + dir.x * hitT, eye.y + dir.y * hitT, eye.z + dir.z * hitT);
         if (!h) continue;
         const tt = h.t * hitT;
-        if (tt <= 1.2 || tt >= hitT) continue;
+        if (tt <= near118 || tt >= hitT) continue;
         hitUnit = v; hitT = tt;
         continue;
       }
@@ -51048,7 +51068,7 @@ class Game {
     // …and the ground stops it sooner. Marched, because a heightfield has no
     // closed form, with the step opening up as it goes: near the muzzle you
     // want the crest resolved, out at a kilometre you do not.
-    let t = 1.2, step = 1.4;
+    let t = near118 < 1 ? 0.05 : 1.2, step = near118 < 1 ? 0.12 : 1.4;
     while (t < hitT) {
       p.copy(eye).addScaledVector(dir, t);
       if (p.y <= this.terrain.heightAt(p.x, p.z)) { hitUnit = null; break; }
@@ -51063,6 +51083,8 @@ class Game {
     const lead = f.mode === 'foot' ? 0.7 : Math.max(1.4, (u.def.size || 2) * 0.75);
     if (!u._fpvMuzzle) u._fpvMuzzle = new THREE.Vector3();
     u._fpvMuzzle.copy(eye).addScaledVector(dir, lead);
+    // (round 118) …and a small-arms round leaves from the eye down this ray (`fireBullet`), tested from there
+    if (near118 < 1) (u._fpvEye118 || (u._fpvEye118 = new THREE.Vector3())).copy(eye); else u._fpvEye118 = null;
     return { x: p.x, y: p.y, z: p.z, dist: t, unit: hitUnit, dir };
   }
 

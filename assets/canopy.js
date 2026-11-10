@@ -429,6 +429,25 @@
    *  0.22 — weathered limestone and granite, measured in the prop gallery
    *  (tools/probe_propgallery.js). */
   C.stoneGamma = { value: 1.8 };
+  /** (round 118, `game.fpvNear118`) THE SKY ON A PROP IN SHADE, NEAR THE EYE.
+   *  Every fence in first person drew solid black, and so did the shaded side
+   *  of every crate, cart, trunk and hedge within a few metres. Measured
+   *  (r118near s1): not this file's shading (a plain Lambert with the same
+   *  vertex colours is as dark: 80% of fence pixels under 30/255 against 85%),
+   *  not the shadow receive, not the fog; the albedo is right (untoned
+   *  178/255). It is the fault round 98 found in the buildings
+   *  (assets/fabric.js `sky`): Lambert sums the sun, the sky fill and the
+   *  bounce per vertex and multiplies the lot by the SUN's shadow mask, so a
+   *  face turned from the sun keeps only ambient + hemisphere — a white face
+   *  85/255, a 0.45 wood 24/255 after the grade. Buildings got their sky back
+   *  (x3.6); the props never did, and at the playing camera nobody sees the
+   *  side of a fence. This gives it back WHERE THE SUN DOES NOT REACH (the
+   *  direct light that survived the shadow mask, against the sky) and NEAR
+   *  THE EYE (faded out by world distance, so the playing camera is the old
+   *  picture): x, solid (wood, bark, stone, earth); y, leaves and blades; z..w,
+   *  the fade in world units. `near` is live: 0 is the old drawing exactly. */
+  C.near = { get value() { var g = root.game; return g && g.fpvNear118 ? 1 : 0; } };
+  C.nearSky = { value: [3.6, 2.0, 12.0, 36.0] };
 
   C.hedgerow = function (mat, opts) {
     if (!mat || mat._hedgerow) return false;
@@ -476,6 +495,7 @@
       function rep(src, from, to) { if (src.indexOf(from) < 0) { ok = false; return src; } return src.replace(from, to); }
       sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.uWind; sh.uniforms.uHgSway = { value: o.sway };
       sh.uniforms.uHgSnow = C.snow; sh.uniforms.uHgStoneGamma = C.stoneGamma;
+      sh.uniforms.uHgNear = C.near; sh.uniforms.uHgNearSky = C.nearSky;
       sh.vertexShader = rep(sh.vertexShader, '#include <common>',
         '#include <common>\n' + HEAD + 'attribute vec3 hedgeRim;\nattribute vec2 hedgeUP;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;');
       // `vHgPH`: one number per PROP, from where it stands — a wood is a range of
@@ -507,7 +527,7 @@
         '#include <project_vertex>\nvHgVP = -mvPosition.xyz;');
 
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
-        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
+        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nuniform float uHgNear;\nuniform vec4 uHgNearSky;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
         '\nfloat hgBlade(float u, float n, float o){ float b = u * n + o; float h = 0.42 + 0.58 * fract(sin(floor(b) * 12.9898 + o) * 43758.5453); return h * pow(1.0 - abs(fract(b) - 0.5) * 2.0, 0.55); }');
       sh.fragmentShader = rep(sh.fragmentShader, '#include <clipping_planes_fragment>', [
         '#include <clipping_planes_fragment>',
@@ -594,6 +614,26 @@
         '    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.82, 0.86), hgSn);',
         '  }',
       ].join('\n'));
+      // (round 118, `C.near`) after the direct light has met the shadow mask:
+      // the share of sky a face in shade lost with its fill, given back near
+      // the eye. Lambert only (the line is its own); skipped whole when off.
+      var hgDL = 'reflectedLight.directDiffuse *= BRDF_Diffuse_Lambert( diffuseColor.rgb ) * getShadowMask();';
+      if (sh.fragmentShader.indexOf(hgDL) >= 0) {
+        sh.fragmentShader = sh.fragmentShader.replace(hgDL, hgDL + [
+          '',
+          '\tif (uHgNear > 0.0) {',
+          '\t\tvec3 hgLw = vec3(0.2126, 0.7152, 0.0722);',
+          '\t\tfloat hgSunR = dot(reflectedLight.directDiffuse, hgLw) / max(dot(reflectedLight.indirectDiffuse, hgLw), 1e-5);',
+          // the sky fill is not under the sun's mask on a thin prop, so a face
+          // in shade still has a little direct light: only the SUN's share
+          // (several times the sky's) counts as sunlit
+          '\t\tfloat hgShd = 1.0 - smoothstep(2.0, 6.0, hgSunR);',
+          '\t\tfloat hgNr = 1.0 - smoothstep(uHgNearSky.z, uHgNearSky.w, hgD);',
+          '\t\tfloat hgSk = (vHgK.x > 0.5 && vHgK.x < 2.5) ? uHgNearSky.y : uHgNearSky.x;',
+          '\t\treflectedLight.indirectDiffuse *= 1.0 + (hgSk - 1.0) * hgShd * hgNr * uHgNear;',
+          '\t}',
+        ].join('\n'));
+      }
       if (!ok) { C.failed = (C.failed || 0) + 1; }
     };
     mat.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : '') + '|hedgerow8|' + o.freq + '|' + o.cut + '|' + o.edgeCut + '|' + o.perProp + '|' + (o.deciduous ? 'D' : '') + '|' + C.k; };
