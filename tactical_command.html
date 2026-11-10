@@ -3676,7 +3676,12 @@ const FOX_SINK = TRUE_SCALE ? 0.65 / METERS_PER_UNIT : 0;
 // one-man dish before, with the hit model calling him dug in).
 const DIG117 = { depth: TRUE_SCALE ? 1.25 / METERS_PER_UNIT : 0, step: 0.30 / METERS_PER_UNIT, k: [1.25, 0.70, 1.25],
                  pit: TRUE_SCALE ? 1.0 / METERS_PER_UNIT : 0, kPit: [2.3, 1.1, 2.3],
-                 shown: { fire: 0.79, crouch: 0.19, flat: 0.21 }, floor: 0.02 };
+                 shown: { fire: 0.79, crouch: 0.19, flat: 0.21 }, floor: 0.02,
+                 // (round 117) `game.digHE117`, the hole against a burst (`Unit._holeHE117`), in METRES: the hole's
+                 // inside radius and its lip (the mean round the ring: 0.23 in front, 0.10-0.12 at the sides, 0.05
+                 // behind), the width of rim that is no shield, the blast in a hole, a man kneeling / flat
+                 he: { rFox: 0.56, lipFox: 0.13, rPit: 1.0, lipPit: 0.2, rim: 0.5, floor: 0.02, manKneel: 1.44, manFlat: 0.86 },
+                 heOn: false };
 // A defending section's counter-attack, assault or withdrawal stands this
 // long before the defence calls it back to hold (`_aiSquadDoctrine` (2b)).
 const DEF_ORDER_STANDS = 90;
@@ -10006,6 +10011,7 @@ const AIMSEE_CELL  = 6;       // cache granularity, in cells — see the note
 // The two-element section: how often a gun group may go looking for a line, and
 // how long the leg to it is committed. See `Game._squadGunLine`.
 const GUNLINE_EVERY = 8.0;
+const SUP117_KNOWN_S = 30;   // (round 117) `_holdGunLine117`: an enemy the side saw this recently is one the gun is there to cover
 const GUNLINE_HOLD  = 5.0;
 // (round 111) The gun team goes firm together (`Game._gunTeamJoin`): a man of
 // it further than GUN_TEAM_R from the team's first claim takes a place beside
@@ -41872,12 +41878,16 @@ class Unit {
       // only shield the side they are actually on, then clear it again — the
       // AI's own calls want the undirected "how good is this spot" answer.
       this._coverFrom = opts.from || (source && source.pos) || null;
-      if (!opts.melee && !opts.flame) dmg *= (1 - this._coverValue() * (opts.sniper ? 0.35 : COMBAT.coverMax));
+      // (round 117) `game.digHE117`: in a foxhole or a mortar's pit, what covers him from a burst is the hole,
+      // by its geometry (`_holeHE117`), not the cover table and the defilade below; -1 = the old rule
+      const he117 = opts.explosion && !opts.flame && opts.bx117 != null ? this._holeHE117(opts) : -1;
+      if (!opts.melee && !opts.flame && he117 < 0) dmg *= (1 - this._coverValue() * (opts.sniper ? 0.35 : COMBAT.coverMax));
       this._coverFrom = null;
       // DEFILADE — see the note above `takeDamage`. Fragments fly flat, so
       // getting below the plane of the burst is worth more against HE than any
       // amount of stuff to hide behind.
-      if (opts.explosion && !opts.flame) {
+      if (he117 >= 0) dmg *= he117;
+      else if (opts.explosion && !opts.flame) {
         let defilade = 0;
         if (this.dugin) defilade = COMBAT.defiladeHole * this.dugin;
         else if (this.posture === 'prone' || this._proneReflex
@@ -43905,6 +43915,58 @@ class Unit {
     if (this.suppState !== 'Suppressed' && this.posture !== 'hide'
         && (this.target || this.groundAtk || this.aimT > 0)) return S.fire;
     return S.crouch;
+  }
+  /** (round 117) `game.digHE117` (default `DIG117.heOn`): HOW MUCH OF A BURST
+   *  REACHES A MAN IN HIS HOLE, from the hole's geometry: a multiplier on the
+   *  burst's dose, or -1 where the old rule stands (the switch off, not in a
+   *  foxhole or a mortar's pit, in a building, `dig117` off). The old rule was
+   *  backwards: the hole counted as cover (x0.32) under a bomb that burst IN
+   *  it, and `plungeDefeat` halved the hole's worth against every bomb at any
+   *  range: a bomb in the hole hit 62%, one 4 m off still 41%. Here a burst
+   *  inside the hole's radius finds him whole. Outside it, fragments come in
+   *  over the near lip on straight lines and reach the middle of the hole no
+   *  lower than `y0`; what of him is above that is what is hit, as a share of
+   *  his height. A ground burst's sheaf goes over a man crouched below the lip
+   *  and finds a man stood to fire by his head and shoulders; an airburst's
+   *  comes down into the hole. Within `rim` of the edge the edge is no shield.
+   *  Every input is the simulation's: where he is, what he does, the burst. */
+  /** (round 117) What a man in a hole is doing, as far as a burst is concerned: 'fire' (stood to), 'crouch'
+   *  (down in it) or 'flat'. `Game.explode` takes it BEFORE the burst's own suppression (`_heWas117`): its
+   *  blast clears his aim and pins him before the fragments are scored. */
+  _heStance117() {
+    if (this.suppState === 'Pinned' || this.posture === 'prone' || this.posture === 'ambush') return 'flat';
+    if (this.suppState !== 'Suppressed' && this.posture !== 'hide' && (this.target || this.groundAtk || this.aimT > 0)) return 'fire';
+    return 'crouch';
+  }
+  _holeHE117(opts) {
+    const on = this.game.digHE117 != null ? this.game.digHE117 : DIG117.heOn;
+    if (!on || !(this.dugin > 0) || this.garrison) return -1;
+    const kind = this._holeKind117();
+    if (!kind) return -1;
+    const H = DIG117.he, M = METERS_PER_UNIT;
+    // his stance BEFORE this burst: its own suppression is applied first (`Game.explode`), and a man is hit by
+    // the fragments of the bomb that makes him duck, not after he has ducked (measured: every man firing in his
+    // hole was scored as a man down in it, 0% hit at 1-4 m)
+    const st = this._heWas117 || this._heStance117();
+    this._heWas117 = undefined;
+    let r, lip, shown, seat;
+    if (kind === 'pit') {
+      r = H.rPit; lip = H.lipPit; seat = DIG117.pit * M;
+      shown = (st === 'flat' ? H.manFlat : H.manKneel) - seat;
+    } else {
+      const S = DIG117.shown;
+      r = H.rFox; lip = H.lipFox;
+      if (st === 'flat') { shown = S.flat; seat = FOX_SINK * M; }
+      else if (st === 'fire') { shown = S.fire; seat = (DIG117.depth - DIG117.step) * M; }
+      else { shown = S.crouch; seat = DIG117.depth * M; }
+    }
+    const dx = this.pos.x - opts.bx117, dz = this.pos.z - opts.bz117;
+    const dh = Math.sqrt(dx * dx + dz * dz) * M;
+    if (dh <= r) return 1;
+    const hb = Math.max(0, (opts.by117 - this.game.terrain.heightAt(this.pos.x, this.pos.z)) * M);
+    const y0 = lip - (hb - lip) * r / (dh - r);
+    const e = Math.max((shown - Math.max(y0, -seat)) / (shown + seat), (r + H.rim - dh) / H.rim, H.floor);
+    return e > 1 ? 1 : e;
   }
   /** (round 117) The pool hole's scale for this man: his own size (`DIG117.k`). */
   _foxK117(F) {
@@ -53609,6 +53671,63 @@ class Game {
    *  A test of infantry section tactics on a tank map measures nothing.
    *
    *  Returns true if the gun element is on, or on its way to, a gun line. */
+  /** (round 117) A GUN THAT CANNOT SEE IS MOVED UNTIL IT CAN (`game.support117`).
+   *
+   *  Every army sited its machine guns, and its snipers, for their field of
+   *  fire first and everything else second, with alternate positions to go
+   *  to. Censused on Longstop Hill and Village (seeds 23 and 37), 38 of the
+   *  48 support weapons never fired; 14 of them had an enemy inside their
+   *  reach — the Breda on Longstop for 1,073 s at 74 u — and never one
+   *  sightline. They stood where their section's hold put them: the circle
+   *  round the point, or the hole the map dug. The gun line (`_squadGunLine`)
+   *  only ever ran for a section on a `fire` task.
+   *
+   *  So, for the computer's sections holding a position: a machine gunner or
+   *  sniper who is not walking, with an enemy his side saw in the last
+   *  SUP117_KNOWN_S inside his reach and not one he can see, takes the
+   *  nearest place that does see it (`_gunLineNear`: verified by a sightline,
+   *  inside his reach, no further from the enemy) and claims it as his gun
+   *  spot, which the formation and the prepared position leave alone and
+   *  `_squadTask` releases when the section's job changes. Arrived, he goes
+   *  firm. One search per section per GUNLINE_EVERY. Towed guns are not
+   *  moved; the player's men are his. No dice. */
+  _holdGunLine117(rec) {
+    const live = rec.live, sq = rec.sq;
+    if (!live.length) return;
+    const T = live[0].team;
+    if (T === this.playerTeam || !(T > 0)) return;
+    const now = this.time;
+    const gunner = u => !u.def.vehicle && !u.def.towed && (u.def.kind === 'hmg' || u.def.heavyMg || u.def.kind === 'sniper')
+      && !u.garrison && !u._assault && u._strSpot == null && !u.embarkedIn && !u.downed;
+    for (const u of live) {
+      if (!u._gunSpot || !gunner(u) || u.path.length || u.hold) continue;
+      if (hyp(u.pos.x - u._gunSpot.x, u.pos.z - u._gunSpot.z) < 2.2) { u.hold = true; u.posture = 'defend'; u.anchor.copy(u.pos); }
+    }
+    if (now - (sq._gl117T == null ? -99 : sq._gl117T) < GUNLINE_EVERY) return;
+    sq._gl117T = now;
+    for (const u of live) {
+      if (u._gunSpot || !gunner(u) || u.path.length) continue;
+      const reach = u.def.rng || 0;
+      let e = null, bd = Infinity, sees = false;
+      for (const v of this.units) {
+        if (!v.alive || v.downed || v.embarkedIn || !areHostile(T, v.team)) continue;
+        const ct = v._contactT && v._contactT[T];
+        if (ct == null || now - ct > SUP117_KNOWN_S) continue;
+        const d = hyp(v.pos.x - u.pos.x, v.pos.z - u.pos.z);
+        if (d > reach) continue;
+        if (this.hasLOS(u, v)) { sees = true; break; }
+        if (d < bd) { bd = d; e = v; }
+      }
+      if (sees || !e) continue;
+      const ty = this.terrain.heightAt(e.pos.x, e.pos.z) + MARK_H;
+      const spot = this._gunLineNear(u, { x: e.pos.x, z: e.pos.z }, { pos: { x: e.pos.x, y: ty, z: e.pos.z } });
+      if (!spot) continue;
+      u._gunSpot = spot; u.hold = false;
+      u._setPathTo(spot.x, spot.z); u._commitMove(GUNLINE_HOLD); u.state = 'advance';
+      break;                                   // one gun a section a search, as `_squadGunLine` does
+    }
+  }
+
   _squadGunLine(rec, t, ax, az) {
     if (this._twoElem === false) return false;
     // WHY THIS ALMOST NEVER RUNS, MEASURED — and it is not the mechanism.
@@ -54777,8 +54896,10 @@ class Game {
     // faces the enemy, and fights; a man caught out of one digs where he is.
     if (t.kind === 'hold' && t.inPlace) {
       sq.task = 'Holding ' + (t.label || 'its position');
+      if (this.support117 === true) this._holdGunLine117(rec);
       for (const u of live) {
         if (u._assault || u.garrison || u.embarkedIn || u._strSpot != null) continue;
+        if (this.support117 === true && u._gunSpot != null) continue;   // (round 117) a gun gone to where it can see
         if (!u.hold) { u.hold = true; if (u.posture !== 'ambush') u.posture = 'defend'; if (!u.path.length) u.anchor.copy(u.pos); }
         if (!u.dugin && !u.digT && !u.path.length && !u.def.vehicle && !u.def.towed && u.suppression < 0.6
             && Math.random() < 0.02 * D.dig) u.orderDigIn();
@@ -54862,6 +54983,7 @@ class Game {
       // -------------------------------------------------------------- hold --
       case 'hold': {
         sq.task = 'Holding ' + (t.label || 'the position');
+        if (this.support117 === true) this._holdGunLine117(rec);
         const r = t.r || AICFG.vpRadius;
         // A HOUSE ON THE POSITION IS THE POSITION.
         //
@@ -64274,6 +64396,8 @@ class Game {
       if (d <= radius && u !== opts.hitUnit && this.frag115 !== false && !u.def.vehicle && this.structures && this.structures.any) slabCut *= this._fragWall(wx, wy, wz, u);
       // (round 116) …and a low line between them: sandbags, a low wall (`_fragLine116`)
       if (d <= radius && u !== opts.hitUnit && this.mortar116 !== false && this.line116 !== false && !u.def.vehicle) slabCut *= this._fragLine116(wx, wy, wz, u);
+      // (round 117) `digHE117` reads the stance he was in when the bomb burst, not the one its blast puts him in
+      if (this.digHE117 != null ? this.digHE117 : DIG117.heOn) u._heWas117 = u._heStance117();
       if (d <= supR) u.applySuppression(supPow * (1 - d / supR) * (slabCut < 1 ? 0.6 : 1));   // near-misses rattle infantry
       if (d > radius) continue;
       // FALLOFF. Blast pressure and fright fall off roughly linearly; FRAGMENTS
@@ -64333,7 +64457,7 @@ class Game {
       }
       const heDmg = (!u.def.vehicle && opts.filler != null) ? heDamage(opts.filler) : dmg;
       u.takeDamage(heDmg * lethal, source, { explosion: true, shell: opts.shell, mortar: opts.mortar, ap: opts.ap, heat: opts.heat, flame: opts.flame,
-        plunge: opts.plunge, blastFrac: fall, blastR: radius, filler: opts.filler,
+        plunge: opts.plunge, blastFrac: fall, blastR: radius, filler: opts.filler, bx117: wx, by117: wy, bz117: wz,
         dir: struckPlate ? opts.dir : null, pen: struckPlate ? opts.pen : null,
         sub: opts.sub || null, core: opts.core,
         hitPart: struckPlate && opts.hitUnit === u ? opts.hitPart : null,
