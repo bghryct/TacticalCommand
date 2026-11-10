@@ -6766,7 +6766,7 @@ const COVER_DOODAD = {
   pine: 0.28, oak: 0.40, scrub: 0.20, hedge: 0.50, building: 0.70,
   // Batch F destructible cover
   sandbagwall: 0.60, tankwreck: 0.65, wreckedcar: 0.45, haystack: 0.35, cart: 0.32,
-  statue: 0.42, pillbox: 0.72, logstack: 0.48, ammocrates: 0.40, lowwall: 0.35,
+  statue: 0.42, pillbox: 0.72, logstack: 0.48, ammocrates: 0.40, lowwall: 0.35, log: 0.35,
 };
 for (const k in UNIT_DEFS) UNIT_DEFS[k]._key = k;      // so a def can find its own tables
 for (const k in RTT_ARMOR) if (UNIT_DEFS[k]) UNIT_DEFS[k].plates = RTT_ARMOR[k];
@@ -21214,6 +21214,8 @@ const OBS_DEF = {
   logstack:   { hp: 90,  height: 1.1, color: 0x5a4530 },                 // stacked timber
   ammocrates: { hp: 40,  height: 1.0, color: 0x6a6142, explosive: true, aoe: 5.0, dmg: 60 },  // cooks off
   lowwall:    { hp: 90,  height: 1.0, color: 0x7a756a },                 // knee-high wall (partial cover)
+  // (round 118, `game.treeFall118`) a felled tree lying along its cells: a low wall of wood that sight passes over
+  log:        { hp: 70,  height: 0.75, color: 0x5a4a30, seethrough: true, passthrough: 0.6 },
   // ---- Multi-floor building (garrisonable, elevated sightlines) ----------
   building:   { hp: 520, height: 6.6, color: 0x968a70, garrison: 6, floors: 3, big: true },
 };
@@ -21256,10 +21258,13 @@ const HEDGE_FOOT_SLOW = 0.35;
  *  (`Obstacles.lineOf`): the mesh's own run (local X turned by its rotation) through
  *  its centre. `cost` is cells of walking (a hedge is 5), `slow` the pace within
  *  LINE_BAND of the line, `thick` half its depth. Vehicles: unchanged (still a wall). */
+// (round 118) how long a felled tree lies, by type (m): the median drawn tree (`PROP_VARIANT_H`)
+const TREE_FALL_M = { tree: 9.5, oak: 14.5, pine: 19, deadtree: 8.3 };
 const LINE_CROSS = {
   fence:    { code: 4, cost: 1.2, slow: 0.6,  thick: 0.1 / METERS_PER_UNIT },
   sandbags: { code: 5, cost: 2.5, slow: 0.45, thick: 0.3 / METERS_PER_UNIT },
   lowwall:  { code: 6, cost: 3.2, slow: 0.4,  thick: 0.25 / METERS_PER_UNIT },
+  log:      { code: 6, cost: 3.2, slow: 0.4,  thick: 0.7 / METERS_PER_UNIT },     // (round 118) vaulted like a low wall
 };
 const FOOT_CROSS_COST = new Float64Array(8), FOOT_CROSS_SLOW = new Float64Array(8).fill(1);
 FOOT_CROSS_COST[3] = HEDGE_FOOT_COST; FOOT_CROSS_SLOW[3] = HEDGE_FOOT_SLOW;
@@ -21291,6 +21296,11 @@ const REV118 = ['wood', 'concrete', 'dirt'];
 // when it came into the pit, so it fires out of the pit's mouth and nowhere else (its own traverse on top).
 // The gun is not moved into the pit's cell (a wall to the vehicle search, which could not path out of it).
 const GUNPIT118 = { half: 50 * Math.PI / 180 }, GUNPIT118_ON = false;
+// (round 118) `game.trenchCurve118` (default OFF): A TRENCH DRAWN AS A CURVE over the grid it is laid on. Each
+// piece is turned to the line through its neighbours, diagonals included (a step round a traverse becomes a chord
+// across the corner), and drawn a quarter of a cell toward their middle (`Obstacles._curveTrenches118`, at bake).
+// The cells stay the grid; the ditch a man stands in (`lineOf`) follows the drawn piece.
+function trenchCurve118On() { const g = window.game; return !!(g && g.trenchCurve118) && trench118On(); }
 function gunpit118On() { const g = window.game; return g && g.gunpit118 != null ? !!g.gunpit118 : GUNPIT118_ON; }
 function trenchRevDefault118() {
   const m = window.game && window.game.mapDef, s = m ? ((m.name || '') + ' ' + (m.terrain || '') + ' ' + (m.era || '')) : '';
@@ -21488,7 +21498,7 @@ const OBS_VEHICLE = {
   barrel: { w: 10 }, oildrum: { w: 10 }, ammocrates: { w: 12 }, haystack: { w: 8 },
   // Timber and foliage: a shove, and you feel the tank lean into it.
   deadtree: { w: 18 }, tree: { w: 26 }, pine: { w: 26 }, oak: { w: 34 },
-  cart: { w: 14 }, logstack: { w: 26, r: 0.10 },
+  cart: { w: 14 }, logstack: { w: 26, r: 0.10 }, log: { w: 30, r: 0.05 },   // (round 118) a felled trunk: armour grinds over it
   // THE BOCAGE BANK IS NOT A HEDGE.
   //
   // It is an earth wall a thousand years old with a hedge growing out of the
@@ -25380,7 +25390,32 @@ class Obstacles {
   }
   /** Collapse the static scenery into instanced draw calls. Call once the map
    *  has stopped changing — `setMode('play')` does. */
-  bakeProps() { this._rebakeDebt = 0; this._rebakeT = 8; this._orientHedges(); return this.batcher.bake(this.list, this.fires); }
+  bakeProps() { this._rebakeDebt = 0; this._rebakeT = 8; this._orientHedges(); if (trenchCurve118On()) this._curveTrenches118(); return this.batcher.bake(this.list, this.fires); }
+  /** (round 118) `trenchCurve118`: each trench piece turned to the line through its neighbours and drawn toward them. */
+  _curveTrenches118() {
+    const isT = (x, z) => { const p = inGrid(x, z) ? this.at(x, z) : null; return !!p && (p.type === 'trench' || p.type === 'trenchseg'); };
+    for (const o of this.list) {
+      if ((o.type !== 'trench' && o.type !== 'trenchseg') || !o.mesh) continue;
+      let bx = 0, bz = 0, mx = 0, mz = 0, n = 0, len = 0, ex = 0, ez = 0;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        if ((!dx && !dz) || !isT(o.gx + dx, o.gz + dz)) continue;
+        const l = Math.hypot(dx, dz); let ux = dx / l, uz = dz / l;
+        ex = ux; ez = uz;
+        if (ux * bx + uz * bz < 0) { ux = -ux; uz = -uz; }
+        bx += ux; bz += uz; mx += dx; mz += dz; n++; len += l;
+      }
+      if (!n || (Math.abs(bx) < 1e-9 && Math.abs(bz) < 1e-9)) continue;
+      // a piece with neighbours both ways is open at both ends; the last one is shut at its far end (+X), and
+      // a piece reaching a diagonal neighbour is drawn long enough to meet it
+      const a = n === 1 ? Math.atan2(ez, -ex) : Math.atan2(-bz, bx) + (o.mesh.userData.hedgeFlip ? Math.PI : 0), k = n >= 2 ? 0.25 : 0;
+      const body = o.mesh.children[0];
+      if (body && body.isMesh && o.mesh.userData.lineVar != null) { const gq = this._trenchVariant(o.mesh.userData.lineVar, n >= 2 ? false : true, o.rev); if (body.geometry !== gq) body.geometry = gq; }
+      o.mesh.scale.x = Math.max(1, len / n);
+      o.mesh.rotation.y = a;
+      o.mesh.position.x = cellCenter(o.gx) + (mx / n) * TILE * k; o.mesh.position.z = cellCenter(o.gz) + (mz / n) * TILE * k;
+      o.mesh.updateMatrix(); o._line = null;
+    }
+  }
   unbakeProps() { this._rebakeDebt = 0; this.batcher.unbake(this.list); }
   /** Shelling knocks props out of the batch one at a time (see `damage`), so a
    *  long fight drifts back toward a draw call per tree. Once enough have
@@ -26002,6 +26037,17 @@ class Obstacles {
       const m = new THREE.Mesh(this._fortVariant('pillbox'), this.mat.hedge);
       m.scale.set(1.0, 1.2, 1.0); m.castShadow = true; m.receiveShadow = true; group.add(m);
       group.rotation.y = rng() * Math.PI * 2;
+    } else if (type === 'log') {
+      // (round 118) A FELLED TREE'S CELLS (`fellTree`, `game.treeFall118`): a trunk length lying along `rot`,
+      // and at the base cell (`_logBase`) the stump. The crown is the tree's own mesh, re-hung under the base
+      // cell's group and laid over by `_updateFalls`, so the batcher instances it with the standing trees.
+      const lk = this._logKit(), lm = this.mat.wood;        // shared geometry and the kit's wood: nothing per tree
+      const seg = new THREE.Mesh(lk.log, lm); seg.position.y = 0.42; seg.castShadow = true; seg.receiveShadow = true; group.add(seg);
+      if (this._logBase) {
+        const st = new THREE.Mesh(lk.stump, lm);
+        st.position.y = 0.5; st.castShadow = true; group.add(st);
+      }
+      group.rotation.y = rot || 0;
     } else if (type === 'logstack') {
       // Round 98: a woodpile on chocks, barked, the sawn ends pale (`_logVariant`).
       const m = new THREE.Mesh(this._logVariant(Math.floor(rng() * 2), true), this.mat.hedge);
@@ -26241,6 +26287,8 @@ class Obstacles {
     o._bakedFrom = null;
     this.list.splice(i, 1);
     if (this._byCell.get(gz * GRID + gx) === o) this._byCell.delete(gz * GRID + gx);
+    if (o.logCells) for (const c of o.logCells) if (c !== o) this.remove(c.gx, c.gz);          // (round 118) the whole trunk goes
+    if (o.logOf && o.logOf !== o) this.remove(o.logOf.gx, o.logOf.gz);
     if (PROP_LINE_KIND[o.type] && this._lineSimReady) this._lineSimHeights(gx, gz);
     const fi = this.fires.indexOf(o);
     if (fi >= 0) this.fires.splice(fi, 1);
@@ -26251,6 +26299,61 @@ class Obstacles {
     return true;
   }
 
+  /** (round 118, `game.treeFall118`) A TREE THAT IS HIT FALLS. It goes down away from what hit it — the burst,
+   *  or the tank that pushed it over — pivoting at its base, and leaves a stump and a LOG lying along its
+   *  true length: `log` obstacles in the cells under the trunk (vaulted on foot like a low wall, ground over by
+   *  armour, cover 0.35, sight over it). THE DIRECTION AND THE CELLS ARE BATTLE DATA, decided here on the sim
+   *  stream (`rand`); the tipping-over (`_updateFalls`, from `_loop`) and the leaves are the picture. */
+  /** The two shared geometries of a felled tree's cells, built once: a trunk length along +Z and a stump. */
+  _logKit() {
+    if (!this._logKitG) {
+      this._logKitG = { log: new THREE.CylinderGeometry(0.42, 0.46, TILE / K_PROP * 1.04, 8).rotateX(Math.PI / 2),
+                        stump: new THREE.CylinderGeometry(0.34, 0.42, 1.1, 8) };
+    }
+    return this._logKitG;
+  }
+  fellTree(o, from) {
+    const gx = o.gx, gz = o.gz, cx = cellCenter(gx), cz = cellCenter(gz);
+    let dx = from ? cx - from.x : 0, dz = from ? cz - from.z : 0;
+    const L = hyp(dx, dz);
+    if (L < 0.05) { const a = rand(0, Math.PI * 2); dx = Math.sin(a); dz = Math.cos(a); } else { dx /= L; dz /= L; }
+    const jit = rand(-0.3, 0.3), ca = Math.cos(jit), sa = Math.sin(jit);
+    const fx = dx * ca + dz * sa, fz = -dx * sa + dz * ca, yaw = Math.atan2(fx, fz);
+    const lenU = (TREE_FALL_M[o.type] || 9.5) / METERS_PER_UNIT;
+    const g = o.mesh;                                   // unparked by `damage`'s release: in the scene
+    this.remove(gx, gz);
+    this._logBase = true; const base = this.add(gx, gz, 'log', yaw); this._logBase = false;
+    if (!base) return null;
+    const cells = [base];
+    for (let k = 1; k * TILE < lenU; k++) {
+      const c = this.add(worldToCell(cx + fx * k * TILE), worldToCell(cz + fz * k * TILE), 'log', yaw);
+      if (c) { c.logOf = base; cells.push(c); }
+    }
+    base.logCells = cells; base._noBatch = true;        // unbatched while it moves; batched with the trees once down
+    const G = base.mesh, k = 1 / (G.scale.x || 1);      // the base group is scaled K_PROP: undo it on the child
+    G.add(g); g.position.set((g.position.x - G.position.x) * k, 0, (g.position.z - G.position.z) * k);
+    // the base group already turns to `yaw`: the child tips about ITS x, so the crown goes down the log's own line
+    g.scale.multiplyScalar(k); g.rotation.set(0, 0, 0, 'YXZ'); g.updateMatrix();
+    (this.falling || (this.falling = [])).push({ g, base, t: 0, T: 1.4 + lenU * 0.3, yaw, fx, fz, lenU, cx, cz, y: G.position.y });
+    return base;
+  }
+  /** The picture of the fall: from `_loop`, never the sim. An accelerating tip to 90 degrees with a short settle. */
+  _updateFalls(dt) {
+    const F = this.falling; if (!F || !F.length) return;
+    for (let i = F.length - 1; i >= 0; i--) {
+      const f = F[i];
+      if (!f.g.parent) { F.splice(i, 1); continue; }    // the map went
+      f.t += dt;
+      const s = Math.min(1, f.t / f.T), e = Math.min(1, s * s * (2.3 - 1.3 * s));
+      f.g.rotation.x = Math.PI / 2 * e; f.g.updateMatrix();
+      if (this.game && this.game._treeFallFx && s < 1 && vrandom() < 0.6) this.game._treeFallFx(f, e);
+      if (s >= 1) {
+        // a tree down is a draw call until the next rebake (`maybeRebake` folds at 60 debt): count it as six
+        F.splice(i, 1); f.base._noBatch = false; this._rebakeDebt = (this._rebakeDebt || 0) + 6;
+        if (this.game && this.game._treeLandFx) this.game._treeLandFx(f);
+      }
+    }
+  }
   /** Campfire flicker + flames; called every frame (even paused — it's scenery). */
   ambient(dt, effects) {
     this._fireT = (this._fireT || 0) - dt;
@@ -26270,7 +26373,7 @@ class Obstacles {
     }
   }
 
-  damage(gx, gz, dmg) {
+  damage(gx, gz, dmg, from) {
     const o = this.at(gx, gz);
     if (!o) return false;
     if (o._batch) { this.batcher.release(o); this._rebakeDebt = (this._rebakeDebt || 0) + 1; }
@@ -26295,6 +26398,11 @@ class Obstacles {
     if (o.hp <= 0) {
       const y = this.terrain.height(gx, gz) * HSCALE;
       const def = OBS_DEF[o.type];
+      if (TREE_FALL_M[o.type] && window.game && window.game.treeFall118) {   // (round 118) a tree falls, it does not vanish
+        this.effects.debris(cellCenter(gx), y + 1 * K_FX, cellCenter(gz), 5, def.color);
+        this.fellTree(o, from);
+        return true;
+      }
       this.effects.debris(cellCenter(gx), y + 1 * K_FX, cellCenter(gz), 14, def.color);
       this.remove(gx, gz);
       // Explosive barrels go up — slight delay makes chain reactions readable
@@ -44065,7 +44173,7 @@ class Unit {
       }
       return;
     }
-    if (moving || !this.alive) return;
+    if (moving || !this.alive || !gunpit118On()) return;
     const gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z), ci = gz * GRID + gx;
     if (this._pitCell118 === ci) return;            // looked round this cell already
     this._pitCell118 = ci;
@@ -50153,7 +50261,6 @@ class Game {
     const ang = Math.atan2(wx - cx, wz - cz);
     const sq = this._selectionSquad();
     const slots = this._formationSlots(sel.length, wx, wz, ang, sq ? sq.formation : this.formation);
-    if (this.cover118 === true && !append) this._snapSlots118(slots);   // (round 118) each man onto cover near his place
     // COMBINED ARMS: in a mixed selection the formation is layered by role —
     // armour takes the leading slots, riflemen march in its lee, and the
     // support weapons (MGs, guns, tubes, snipers) bring up the rear. Slots are
@@ -50168,7 +50275,10 @@ class Game {
     // Slots are generated front row first. When layered, each role takes its
     // CONTIGUOUS block of slots in that order — armour owns the leading slots
     // outright — with greedy-nearest INSIDE the block so units don't cross.
-    const issue = (u, s) => { if (append) u.queueMove(s.x, s.z, mode, 'move'); else u.orderMove(s.x, s.z, false, mode); };
+    // (round 118) `game.coverOrders118` (default on): each man's own slot, once he has been matched to it, onto the
+    // nearest trench or cover cell within COVER118_SNAP (`_snapSlot118`), never another slot's cell, one man a cell
+    const snap118 = !append && this.coverOrders118 !== false, used118 = new Set(), own118 = snap118 ? new Set(slots.filter(Boolean).map(s => worldToCell(s.z) * GRID + worldToCell(s.x))) : null;
+    const issue = (u, s) => { if (snap118) s = this._snapSlot118(s, used118, own118); if (append) u.queueMove(s.x, s.z, mode, 'move'); else u.orderMove(s.x, s.z, false, mode); };
     let cursor = 0, gi = 0;
     while (gi < order.length) {
       let ge = gi;
@@ -53988,6 +54098,32 @@ class Game {
   /** (round 118) A player's move order (`commandMove`, `game.cover118`): each formation slot moves to the
    *  nearest trench cell, or cell the sim counts as cover (>= 0.35), within COVER118_SNAP of it, one man to a
    *  cell. The order is still his: the men go where he sent them, each onto the cover nearest his place. */
+  /** (round 118) `_snapSlots118` for ONE man's slot, used by `commandMove` after the formation has been matched to
+   *  its men, so no two men swap places. A slot already on a trench, on cover, inside a building (`structures.insideAt`)
+   *  or on a cell nobody can stand on (a building's footprint) is where the player sent him and stays. A candidate may
+   *  not be a cell another man's slot is on (`own`) or one already taken (`used`); the cell he ends on is marked taken. */
+  _snapSlot118(s, used, own) {
+    const O = this.obstacles, gx0 = worldToCell(s.x), gz0 = worldToCell(s.z), k0 = gz0 * GRID + gx0, R = Math.ceil(COVER118_SNAP / TILE);
+    const S = this.structures;
+    const keep = !inGrid(gx0, gz0) || O.occupied[k0] === 7 || this._coverAtCell(gx0, gz0) >= 0.35 || !this.pathfinder.passable(gx0, gz0)
+      || (S && S.any && S.has(gx0, gz0) && S.insideAt(gx0, gz0, 0) >= 0.2);
+    if (!keep) {
+      let best = null, bd = Infinity;
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        const gx = gx0 + dx, gz = gz0 + dz, k = gz * GRID + gx;
+        if (!inGrid(gx, gz) || used.has(k) || (k !== k0 && own.has(k))) continue;
+        const trench = O.occupied[k] === 7;
+        if (!trench && this._coverAtCell(gx, gz) < 0.35) continue;
+        if (!this.pathfinder.passable(gx, gz) && !(O.footThrough(gx, gz) && this.terrain.typePassable(gx, gz))) continue;
+        const x = cellCenter(gx), z = cellCenter(gz), raw = hyp(x - s.x, z - s.z), dd = raw - (trench ? 1.5 : 0);
+        if (raw > COVER118_SNAP || dd >= bd) continue;
+        bd = dd; best = { x, z, k };
+      }
+      if (best) { used.add(best.k); return { x: best.x, z: best.z }; }
+    }
+    used.add(k0);
+    return s;
+  }
   _snapSlots118(slots) {
     const O = this.obstacles, used = new Set(), R = Math.ceil(COVER118_SNAP / TILE);
     for (const s of slots) {
@@ -64320,7 +64456,7 @@ class Game {
       this.structures.damagePiece(hit.s, hit.s.maxHp * power / work * dt, {});
     } else {
       const def = OBS_DEF[hit.o.type];
-      this.obstacles.damage(hit.o.gx, hit.o.gz, def.hp * power / work * dt);
+      this.obstacles.damage(hit.o.gx, hit.o.gz, def.hp * power / work * dt, { x: u.pos.x, z: u.pos.z });   // (round 118) …and along the tank's travel
     }
     u._crushT = (u._crushT || 0) + dt;
     if (u._crushT > 0.18) {
@@ -64911,7 +65047,7 @@ class Game {
           if (opts.ap && !opts.heat) take = (dmg * 0.35 + (opts.pen || 0) * 0.6) * (1 - d / bR);
           else if (opts.heat) take *= 0.16;
         }
-        this.obstacles.damage(x, z, take);
+        this.obstacles.damage(x, z, take, { x: wx, z: wz });   // (round 118) a tree falls away from the burst
       }
     }
     // Buildings: the blast works on every piece in reach, walls and slabs and
@@ -69046,6 +69182,19 @@ class Game {
    *  runs when the CAMERA is near and the particle pool has room, so its dice
    *  came off the simulation's stream in some battles and not others: where
    *  the player looked changed the battle. On the cosmetic stream now. */
+  /** (round 118) leaves and twigs shed as a felled tree comes over (cosmetic; `f` from `Obstacles.falling`). */
+  _treeFallFx(f, e) {
+    const h = f.lenU * vrand(0.35, 0.95), th = Math.PI / 2 * e;
+    this.effects.debris(f.cx + f.fx * h * Math.sin(th), f.y + h * Math.cos(th), f.cz + f.fz * h * Math.sin(th), 2, 0x3b5a2a, 0.7);
+  }
+  /** …and the dust along the trunk where it lands. */
+  _treeLandFx(f) {
+    for (let k = 0; k <= 3; k++) {
+      const d = f.lenU * k / 3, x = f.cx + f.fx * d, z = f.cz + f.fz * d;
+      this.effects.dust(x, this.terrain.heightAt(x, z) + 0.15 * K_FX, z, 2, { scale: 0.7, color: { r: 0.5, g: 0.42, b: 0.3 }, throw: 0.6, rise: 0.5 });
+    }
+    this.effects.debris(f.cx + f.fx * f.lenU * 0.8, f.y + 0.3, f.cz + f.fz * f.lenU * 0.8, 8, 0x3b5a2a, 0.8);
+  }
   _fireFx(f, camD) {
     const near = camD < 70 ? 1 : 0.45;
     f.emitT = 0.08 / near;
@@ -72416,6 +72565,7 @@ class Game {
     this._updateWeatherFront(dt);                // …and deciding to send another
     this._updateWeather(dt);                     // rain/snow drift (always)
     this._updateDebris(dt);                      // launched turrets tumble & land
+    if (this.obstacles && this.obstacles._updateFalls) this.obstacles._updateFalls(dt);   // (round 118) felled trees come down
     this._updateBlood(dt);                       // pools spread, wounds soak (round 106)
     // ONE WIND. The weather already drives the volumetric clouds' drift and
     // the foliage's sway; every particle spawned out of them stood still in
@@ -72494,12 +72644,16 @@ cosmeticClass(Game, ['_spawnStrikePlane', '_craterLip', '_mineMesh', '_makeSmoke
   '_updateSmokeInstanced', '_fireFx', '_structureFireFx',
   // (round 113) the three kinds of cloud the emitter now draws
   '_smokeBank', '_smokeColumn', '_smokeDust']);
+cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);   // (round 118) a felled tree's leaves and dust
 // (round 118) THE EFFECTS SWITCHES — each OFF is the round-114 picture exactly. Read by
 // `VFX.burst`/`fire`/`strike` (assets/vfx.js), `Projectiles` (the ground strike) and `_smokeBank`.
 Game.prototype.fxBlast118 = true;     // HE: flash, hot core and a dust skirt on the baked ground burst (ON: better in every capture, no frame cost)
 Game.prototype.fxFire118 = true;      // fires: taller tongues, a wider glow (ON: better in the captures, no extra particles)
 Game.prototype.fxImpact118 = false;   // bullets into the ground: a puff in the colour of the surface
 Game.prototype.fxSmoke118 = false;    // smoke screens: fuller puffs that erode later
+// (round 118) DESTRUCTIBILITY: trees fall and lie as logs (`Obstacles.fellTree`); `destroy118` reserved for the rest
+Game.prototype.treeFall118 = false;
+Game.prototype.destroy118 = false;
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);
 

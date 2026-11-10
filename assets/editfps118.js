@@ -80,6 +80,8 @@
       'body.u8-edfps #u8EdHud span { font-size: 12px; font-weight: 700; color: var(--u7-text, #cbd5e1); }',
       'body.u8-edfps #u8EdHud i { font-style: normal; }',
       'body.u8-edfps #tooltip { display: none !important; }',
+      '#editorPanel .tool-btn .swatch.u8-th { width: 56px !important; height: 42px !important; border: 0 !important; border-radius: 0 !important; margin: 0 auto 3px !important; background-repeat: no-repeat; }',
+      'body.ui117.u7e #editorPanel .tool-btn.u8-tight { font-size: 9.5px; letter-spacing: -0.15px; }',
     ].join('\n');
     D.head.appendChild(st);
 
@@ -98,6 +100,168 @@
     B.appendChild(hud);
     var what = hud.querySelector('#u8EdWhat');
     btn.addEventListener('click', function (e) { e.stopPropagation(); toggle(); });
+
+
+    /* ---- THE PROP AS THE MAP BUILDS IT, WITHOUT PUTTING IT ON THE MAP ----
+     * Obstacles.add builds a prop's group (seeded per cell) and then registers it. It is run
+     * here on a SHADOW of the layer: the same prototype, materials and geometry, but its own
+     * lists, maps and per-cell arrays (the real `occupied` is shared with the WebAssembly
+     * pathfinder) and a scene of its own. So the ghost and the thumbnails are the real model,
+     * and the map, the pathfinder and a seeded battle never see them (cosmeticScope). */
+    var SH = null, SHT = [], thumbScene = null;
+    function shadow() {
+      if (SH) return SH;
+      var real = G.obstacles;
+      if (!real) return null;
+      var noop = new Proxy(function () {}, { get: function (t, k) { return (k === Symbol.toPrimitive || k === 'then') ? undefined : noop; }, apply: function () { return undefined; } });
+      SH = Object.create(Object.getPrototypeOf(real));
+      Object.keys(real).forEach(function (k) {
+        var v = real[k];
+        if (ArrayBuffer.isView(v)) { SH[k] = new v.constructor(v.length); SHT.push(SH[k]); }
+        else if (Array.isArray(v)) SH[k] = [];
+        else if (v instanceof Map) SH[k] = new Map();
+        else if (v instanceof Set) SH[k] = new Set();
+        else if (v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) SH[k] = Object.assign({}, v);
+        else SH[k] = v;
+      });
+      thumbScene = new THREE.Scene();
+      SH.scene = thumbScene; SH.effects = noop; SH.batcher = noop;
+      return SH;
+    }
+    function shReset() { var sh = SH; if (!sh) return; if (sh.list) sh.list.length = 0; if (sh._byCell && sh._byCell.clear) sh._byCell.clear(); for (var i = 0; i < SHT.length; i++) SHT[i].fill(0); }
+    function buildProp(type, rot) {
+      var sh = shadow(), BX = Math.floor(GRID / 2), BZ = Math.floor(GRID / 2), o = null;
+      if (!sh) return null;
+      shReset();
+      var run = function () { return sh.add(BX, BZ, type, rot || 0); };
+      try { o = (typeof cosmeticScope === 'function') ? cosmeticScope(run) : run(); } catch (err) { F.buildErr = type + ': ' + String(err && err.message || err); o = null; }
+      var grp = o && o.mesh;
+      shReset();
+      if (!grp) return null;
+      if (grp.parent) grp.parent.remove(grp);
+      grp.traverse(function (m) { m.matrixAutoUpdate = true; });   // the layer freezes a placed prop's matrices; this copy moves
+      grp.userData.u8off = [grp.position.x - cellCenter(BX), grp.position.z - cellCenter(BZ)];
+      return grp;
+    }
+
+    /* ---- the ghost: that model, translucent, at true size where it will land; red where it cannot ---- */
+    var ghost = { grp: null, want: '', cache: {}, ok: null, bad: null };
+    function safeGhost() { try { ghostUpdate(); } catch (err) { F.ghostErr = String(err && err.message || err); ghost.want = G.editor.tool + '|' + G.editor.propRot; ghostHide(); } }   // never break the frame
+    function ghostHide() { if (ghost.grp && ghost.grp.parent) ghost.grp.parent.remove(ghost.grp); ghost.grp = null; }
+    function ghostUpdate() {
+      var tool = G.editor.tool, deg = G.editor.propRot;
+      ghost.want = tool + '|' + deg;
+      var def = (typeof OBS_DEF === 'object' && OBS_DEF) ? OBS_DEF[tool] : null;
+      if (!F.on || !def || F.gx == null) { ghostHide(); return; }
+      var key = tool + '|' + (deg == null ? 'auto' : deg), grp = ghost.cache[key];
+      if (!grp) {
+        var rot = (deg == null || !G.editor._propRad) ? 0 : G.editor._propRad();
+        grp = buildProp(tool, rot);
+        if (!grp) { ghostHide(); return; }
+        if (!ghost.ok) {
+          ghost.ok = new THREE.MeshBasicMaterial({ color: 0xf0e3bd, transparent: true, opacity: 0.42, depthWrite: false });
+          ghost.bad = new THREE.MeshBasicMaterial({ color: 0xe0503c, transparent: true, opacity: 0.5, depthWrite: false, depthTest: false });   // seen through what it collides with
+        }
+        grp.traverse(function (m) { if (m.isMesh) { m.material = ghost.ok; m.castShadow = m.receiveShadow = false; m.renderOrder = 5; } });
+        grp.userData.u8bad = false;
+        ghost.cache[key] = grp;
+      }
+      if (ghost.grp !== grp) { ghostHide(); G.scene.add(grp); ghost.grp = grp; }
+      var gx = F.gx, gz = F.gz, off = grp.userData.u8off || [0, 0];
+      grp.position.set(cellCenter(gx) + off[0], G.terrain.height(gx, gz) * HSCALE, cellCenter(gz) + off[1]);
+      var bad = !!(G.obstacles.blocked(gx, gz) || (G.structures && G.structures.has && G.structures.has(gx, gz)) || (G.terrain.typePassable && !G.terrain.typePassable(gx, gz)));
+      if (grp.userData.u8bad !== bad) { grp.userData.u8bad = bad; var mm = bad ? ghost.bad : ghost.ok; grp.traverse(function (m) { if (m.isMesh) m.material = mm; }); }
+      F.ghostBad = bad;
+    }
+
+    /* ---- TOOL ICONS (game.editIcons118): each prop, building and tree rendered once, the first
+     * time the Props page is shown, into one atlas: the shadow-built model at a fixed 3/4 view,
+     * in the renderer's own encoding. Nothing a frame, and nothing in a battle. ---- */
+    var icons = G.editIcons118 !== false, TH = { done: false, url: '', idx: {}, cols: 8, rows: 1 };
+    function thumbs() {
+      if (TH.done || !icons) return applyThumbs();
+      var grid = D.getElementById('obstacleTools'); if (!grid || typeof OBS_DEF !== 'object') return;
+      var btns = [].slice.call(grid.querySelectorAll('.tool-btn[data-tool]')).filter(function (b) { return OBS_DEF[b.dataset.tool]; });
+      if (!btns.length) return;
+      TH.done = true;
+      var t0 = performance.now(), R = G.renderer, W = 96, H = 72, cols = TH.cols = 8, rows = TH.rows = Math.ceil(btns.length / cols);
+      var cvs = D.createElement('canvas'); cvs.width = cols * W; cvs.height = rows * H; var c2 = cvs.getContext('2d');
+      var rt = new THREE.WebGLRenderTarget(W * 2, H * 2); rt.texture.encoding = R.outputEncoding;
+      var cam = new THREE.PerspectiveCamera(28, W / H, 0.01, 2000);
+      if (!shadow()) { TH.done = false; return; }
+      var hemi = new THREE.HemisphereLight(0xeef2f6, 0x4a4234, 1.0), sun = new THREE.DirectionalLight(0xfff1dc, 1.2);
+      sun.position.set(3, 5, 2.5); thumbScene.add(hemi); thumbScene.add(sun);
+      var prevRT = R.getRenderTarget(), prevC = R.getClearColor(new THREE.Color()).clone(), prevA = R.getClearAlpha();
+      var buf = new Uint8Array(W * H * 16), img = c2.createImageData(W, H);
+      var box = new THREE.Box3(), ctr = new THREE.Vector3(), size = new THREE.Vector3(), dir = new THREE.Vector3(1, 0.72, 1.35).normalize();
+      btns.forEach(function (b, i) {
+        var tool = b.dataset.tool, grp = buildProp(tool, 0); if (!grp) return;
+        grp.position.set(0, 0, 0); thumbScene.add(grp); grp.updateMatrixWorld(true);
+        // frame the model, not its helpers: visible meshes only, and none five times the size of the rest
+        // (a ground splat or a crater lip would leave the prop a speck in the middle of the tile)
+        var parts = [];
+        grp.traverse(function (m) { if (m.isMesh && m.visible !== false && m.geometry) { var bb = new THREE.Box3().setFromObject(m); if (!bb.isEmpty()) parts.push(bb); } });
+        var sz2 = parts.map(function (bb) { return bb.getSize(new THREE.Vector3()).length(); }).sort(function (a, b) { return a - b; });
+        var med = sz2.length ? sz2[sz2.length >> 1] : 0;
+        box.makeEmpty();
+        parts.forEach(function (bb) { if (!med || bb.getSize(new THREE.Vector3()).length() <= med * 5) box.union(bb); });
+        if (box.isEmpty()) box.setFromObject(grp);
+        box.getCenter(ctr); box.getSize(size);
+        var r = Math.max(size.x, size.y * 1.15, size.z) * 0.6 || 1, d = r / Math.tan(cam.fov * Math.PI / 360) * 1.05;
+        cam.position.copy(ctr).addScaledVector(dir, d); cam.near = d / 60; cam.far = d * 4; cam.lookAt(ctr); cam.updateProjectionMatrix();
+        R.setRenderTarget(rt); R.setClearColor(0x000000, 0); R.clear(true, true, true); R.render(thumbScene, cam);
+        R.readRenderTargetPixels(rt, 0, 0, W * 2, H * 2, buf);
+        for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+          var o = ((H - 1 - y) * W + x) * 4, s0 = ((y * 2) * W * 2 + x * 2) * 4, s1 = s0 + W * 8;
+          for (var k = 0; k < 4; k++) img.data[o + k] = (buf[s0 + k] + buf[s0 + 4 + k] + buf[s1 + k] + buf[s1 + 4 + k]) >> 2;
+        }
+        c2.putImageData(img, (i % cols) * W, Math.floor(i / cols) * H);
+        thumbScene.remove(grp);
+        TH.idx[tool] = i;
+      });
+      R.setRenderTarget(prevRT); R.setClearColor(prevC, prevA);
+      thumbScene.remove(hemi); thumbScene.remove(sun); rt.dispose();
+      TH.url = cvs.toDataURL('image/png'); TH.ms = performance.now() - t0; TH.n = Object.keys(TH.idx).length;
+      applyThumbs();
+    }
+    function applyThumbs() {
+      if (!TH.url) return;
+      var grid = D.getElementById('obstacleTools'); if (!grid) return;
+      [].forEach.call(grid.querySelectorAll('.tool-btn[data-tool]'), function (b) {
+        var i = TH.idx[b.dataset.tool], sw = b.querySelector('.swatch');
+        if (i == null || !sw || sw.classList.contains('u8-th')) return;
+        sw.classList.add('u8-th');
+        sw.style.backgroundColor = 'transparent';
+        sw.style.backgroundImage = 'url(' + TH.url + ')';
+        sw.style.backgroundSize = (TH.cols * 100) + '% ' + (TH.rows * 100) + '%';
+        sw.style.backgroundPosition = (TH.cols > 1 ? (i % TH.cols) / (TH.cols - 1) * 100 : 0) + '% ' + (TH.rows > 1 ? Math.floor(i / TH.cols) / (TH.rows - 1) * 100 : 0) + '%';
+      });
+    }
+    F.thumbs = thumbs; F.TH = TH; F.ghost = ghost; F.buildProp = buildProp;
+
+    /* ---- LABELS: a whole word, never a broken one. The full name is the tooltip; a name too long
+     * for its tile at 10.5 px is set at 9.5 px, once, when its page is shown (never a frame). ---- */
+    function fitLabels() {
+      if (!panel || !B.classList.contains('u7e')) return;
+      var pg = panel.querySelector('.ed-page.on'); if (!pg) return;
+      [].forEach.call(pg.querySelectorAll('.tool-btn'), function (b) {
+        if (!b.title) b.title = b.textContent.replace(/\s+/g, ' ').trim();
+        if (!b.offsetWidth || b.classList.contains('u8-tight')) return;
+        var cs = getComputedStyle(b), inner = b.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), rg = D.createRange(), wmax = 0;
+        rg.selectNodeContents(b);
+        [].forEach.call(rg.getClientRects(), function (r) { if (r.width > wmax) wmax = r.width; });   // the widest line, the icon included
+        if (wmax > inner - 2.5) b.classList.add('u8-tight');   // a little room: the clip sweep measures the font its own way
+      });
+    }
+    F.fitLabels = fitLabels;
+    if (panel) {
+      panel.addEventListener('click', function (e) {
+        var t = e.target && e.target.closest ? e.target.closest('.ed-tab') : null;
+        if (!t) return;
+        setTimeout(function () { fitLabels(); if (t.dataset.page === 'props') { thumbs(); fitLabels(); } }, 0);
+      });
+      panel.addEventListener('input', function (e) { if (e.target && e.target.classList && e.target.classList.contains('ed-search')) setTimeout(fitLabels, 0); });
+    }
 
     /* ---- input, only while walking ---- */
     function onDownC(e) {
@@ -154,10 +318,22 @@
         var L = Math.sqrt(fw * fw + st * st), spd = ((k.ShiftLeft || k.ShiftRight) ? RUN : WALK) / mpu * dt / L;
         var sy = Math.sin(F.yaw), cy = Math.cos(F.yaw);
         var dx = (-sy * fw + cy * st) * spd, dz = (-cy * fw - sy * st) * spd;
+        // A FLOOR IS WALKABLE THROUGH THE PATHFINDER'S LINK TO THE BUILDINGS (passableL -> structures.standable).
+        // In a battle it is there; in the editor it may not be yet, and then no flight could be climbed. It is
+        // lent for this one step and put back, so the pathfinder outside it is exactly as it was.
+        var pf = G.pathfinder, keepS = pf ? pf.structures : null, lent = !!(pf && !keepS && G.structures);
+        if (lent) pf.structures = G.structures;
         try { G._fpvStep(av, dx, dz, dt); } catch (err) { av.pos.x += dx; av.pos.z += dz; F.stepErr = String(err && err.message || err); }
+        finally { if (lent) pf.structures = keepS; }
+        F.lent = lent;
         F.moved = true;
       }
-      av.pos.y = G.terrain.heightAt(av.pos.x, av.pos.z);
+      var S = G.structures, climb;
+      if (S && S.any) {
+        try { climb = (typeof Unit === 'function' && Unit.prototype._fpvOnTreads && G.stair115 !== false) ? Unit.prototype._fpvOnTreads.call(av) : undefined; } catch (err) { climb = undefined; }
+        av.lvl = S.resolveLevel(av.pos.x, av.pos.z, av.lvl | 0, av.pos.y);
+      } else av.lvl = 0;
+      av.pos.y = G.groundYAt ? G.groundYAt(av.pos.x, av.pos.z, av.lvl, climb) : G.terrain.heightAt(av.pos.x, av.pos.z);
       var cam = G.camera;
       cam.position.set(av.pos.x, av.pos.y + F.eyeH, av.pos.z);
       cam.rotation.order = 'YXZ'; cam.rotation.set(F.pitch, F.yaw, 0);
@@ -169,13 +345,15 @@
           var gx = worldToCell(p.x), gz = worldToCell(p.z), key = gx + ',' + gz;
           if (key !== F.cell) {
             F.cell = key; F.hit = p;
-            G.updateBrushRing(gx, gz);                       // the editor's own ghost, on the crosshair
+            G.updateBrushRing(gx, gz);                       // the editor's own ring, on the crosshair
+            F.gx = gx; F.gz = gz; safeGhost();
             if (inp.lmbDown) inp.onMove(c);                  // a held click paints along where you look
             label(p);
           }
         }
       }
       if (G.editor.tool !== F.tool) label(F.hit);
+      if (F.gx != null && ghost.want !== G.editor.tool + '|' + G.editor.propRot) safeGhost();
     }
     function label(p) {
       F.tool = G.editor.tool;
@@ -190,7 +368,7 @@
       var t = rig.target, c = G.camera.position;
       var fx = t.x - c.x, fz = t.z - c.z;
       F.yaw = (fx * fx + fz * fz > 1e-6) ? Math.atan2(-fx, -fz) : 0; F.pitch = -0.05;
-      F.av = { def: UNIT_DEFS[TYPE], type: TYPE, pos: new THREE.Vector3(t.x, G.terrain.heightAt(t.x, t.z), t.z), lvl: 0, face: 0 };
+      F.av = { game: G, def: UNIT_DEFS[TYPE], type: TYPE, pos: new THREE.Vector3(t.x, G.groundYAt ? G.groundYAt(t.x, t.z, 0) : G.terrain.heightAt(t.x, t.z), t.z), lvl: 0, face: 0 };
       F.eyeH = eyeHeight(); F.cell = ''; F.tool = ''; F.moved = true; F.stepErr = null;
       saved = { fov: G.camera.fov, near: G.camera.near };
       G.camera.fov = G._fpvFov116 ? G._fpvFov116() : 70; G.camera.near = 0.06; G.camera.updateProjectionMatrix();
@@ -223,6 +401,7 @@
       F.locked = false;
       if (saved) { G.camera.fov = saved.fov; G.camera.near = saved.near; G.camera.updateProjectionMatrix(); }
       if (F.av) rig.target.set(F.av.pos.x, 0, F.av.pos.z);        // the top-down view comes back where you stood
+      ghostHide(); F.gx = null;
       B.classList.remove('u8-edfps'); btn.classList.remove('on');
       return true;
     }
@@ -235,6 +414,7 @@
       if (!allowed) exit();
       B.classList.toggle('u8-ef', allowed);
     }
+    Object.defineProperty(G, 'editIcons118', { configurable: true, enumerable: true, get: function () { return icons; }, set: function (v) { icons = !!v; } });
     Object.defineProperty(G, 'editFps118', { configurable: true, enumerable: true, get: function () { return allowed; }, set: setAllowed });
     setAllowed(allowed);
   };

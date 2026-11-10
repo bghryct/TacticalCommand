@@ -291,8 +291,9 @@ body.ui117.u7e #editorPanel .ed-search:focus { border-color: var(--u7-khaki-dim)
 body.ui117.u7e #editorPanel .ed-note { font-size: var(--u7-t-sm); line-height: 1.45; color: var(--u7-dim); }
 body.ui117.u7e #editorPanel .ed-note b { color: var(--u7-text); }
 body.ui117.u7e #editorPanel .tool-grid { gap: 4px; }
-body.ui117.u7e #editorPanel .tool-btn { min-width: 0; padding: 6px 2px 5px; font-size: var(--u7-t-sm); line-height: 1.2; border: 1px solid var(--u7-line); border-radius: 2px;
-  background: var(--u7-raise); color: var(--u7-text); overflow-wrap: break-word; hyphens: auto; }
+body.ui117.u7e #editorPanel .tool-btn { min-width: 0; padding: 6px 3px 5px; font-size: 10.5px; line-height: 1.2; border: 1px solid var(--u7-line); border-radius: 2px;
+  background: var(--u7-raise); color: var(--u7-text); overflow: hidden; overflow-wrap: normal; word-break: normal; hyphens: manual; }
+body.ui117.u7e #editorPanel #obstacleTools, body.ui117.u7e #editorPanel #foliageTools, body.ui117.u7e #editorPanel #unitTools, body.ui117.u7e #editorPanel #squadTools { grid-template-columns: repeat(3, 1fr); }
 body.ui117.u7e #editorPanel .tool-btn:hover { background: var(--u7-raise2); border-color: var(--u7-khaki-dim); color: #fff; }
 body.ui117.u7e #editorPanel .tool-btn.selected { background: #2e2917; border-color: var(--u7-khaki); color: #f0e3bd; font-weight: 700; box-shadow: inset 0 0 0 1px var(--u7-khaki); }
 body.ui117.u7e #editorPanel .tool-btn .swatch { width: 18px; height: 10px; border-radius: 1px; border-color: rgba(0,0,0,0.55); margin-bottom: 4px; }
