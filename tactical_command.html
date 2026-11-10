@@ -1528,6 +1528,8 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/wasmpath.js"></script>
 <script src="assets/muzzles.js"></script>
 <script src="assets/postfx.js"></script>
+<!-- ROUND 117: the baked sky (one dome, a scattering table, a cloud tile), behind game.sky117 -->
+<script src="assets/sky117.js"></script>
 <script src="assets/boxart.js"></script>
 <!-- The baked flipbooks the particle engine draws with (Cycles volumes: the shell
      burst, the fireball, smoke, flame and side-on muzzle plumes) - tools/blender/vfx_bake.py,
@@ -1563,6 +1565,7 @@ body.fpv #tacMap { display: none !important; }
 <!-- BATTLE SETUP (round 111): before every battle, each side's army, units
      and fire support. Exposes window.BattleSetup. Builds on assets/squads.js. -->
 <script src="assets/battlesetup.js"></script>
+<script src="assets/ui117.js"></script>
 <script>
 'use strict';
 /* ============================================================================
@@ -3648,6 +3651,32 @@ const HOLE_SEAT = 0.7;
 // 0.65 m, crouched, so his head and shoulders clear a 0.4 m parapet (round
 // 106: his soles now stand ON the ground, ten centimetres higher than before).
 const FOX_SINK = TRUE_SCALE ? 0.65 / METERS_PER_UNIT : 0;
+// (round 117) THE HOLE AT A MAN'S SIZE. Measured against the drawn rifleman
+// (1.75 m standing, 1.44 crouched) the dug-in hole was a dish 2.7 m across
+// with a 0.43 m lip, and its man sat 0.65 m down: waist deep, helmet 0.78 m
+// over the ground whatever he was doing. A foxhole is 1.25 m deep and a man
+// wide: crouched in it he is below the lip, stood to and firing he shows his
+// head and shoulders. `depth` is how far his soles go down (flat on the floor
+// of it he keeps the old 0.65, or he would be out of the picture altogether);
+// `k` the hole's own scale (1.1 m across inside, a 0.23 m lip of spoil in
+// front); `shown` what each drawn stance leaves over the ground, in metres,
+// which is what the hit model now reads (`Unit._presentedFrac`): the table's
+// 'dug' figure IS head and shoulders over the parapet, so that stance keeps
+// it and a man down in the hole shows less. `game.dig117 = false` is the old
+// hole; `game.digExposure117 = false` the old flat figure with the new drawing.
+// THE FIRE STEP: the drawn rifleman holds his rifle 1.24-1.29 m over his
+// soles, so at the floor of the hole it lay IN the spoil (measured: 0.19 m
+// over the ground where the lip's crest was 0.28). A man who fires stands up
+// `step` (0.30 m) and the lip is 0.23 m: the rifle clears it by a hand and he
+// shows 0.79 m, head and shoulders, which is what the old drawing showed of
+// him at all times (0.78) and the figure the hit table was tuned on. Crouched
+// he shows 0.19 m, under the lip. A MORTAR'S PIT is 2 m
+// across and a metre deep (`pit`, `kPit`): the tube's mouth at the lip, the
+// man kneeling at it a head over the ground (he stood on the surface in a
+// one-man dish before, with the hit model calling him dug in).
+const DIG117 = { depth: TRUE_SCALE ? 1.25 / METERS_PER_UNIT : 0, step: 0.30 / METERS_PER_UNIT, k: [1.25, 0.70, 1.25],
+                 pit: TRUE_SCALE ? 1.0 / METERS_PER_UNIT : 0, kPit: [2.3, 1.1, 2.3],
+                 shown: { fire: 0.79, crouch: 0.19, flat: 0.21 }, floor: 0.02 };
 // A defending section's counter-attack, assault or withdrawal stands this
 // long before the defence calls it back to hold (`_aiSquadDoctrine` (2b)).
 const DEF_ORDER_STANDS = 90;
@@ -10671,9 +10700,13 @@ const SQUAD_TETHER = {
 //
 // Every number is a MULTIPLIER on the shared AICFG baseline, so tuning the
 // common doctrine still tunes both sides together.
+// (round 117) `Unit._openingHold117`: how long one man's shot (or one man hit) frees his section to fire at will,
+// the suppression that counts as having been found, and the tasks on which a section is attacking, not standing.
+const OPEN117_S = 20, OPEN117_SUPP = 0.12, OPEN117_ATTACK = { fire: 1, assault: 1, bound: 1, counter: 1, move: 1, withdraw: 1 };
 const DOCTRINE = {
   allied: {
     name: 'US Army, 1944', bloc: 'allied',
+    openFire: 1.15, openFireMg: 1.15,   // (round 117) x effective range at which the defence opens: FM 7-10's five hundred yards, the readiest of them
     baseFirst:    1.30,  // ×AICFG.suppressFirst — how soft the objective must be first
     overwatch:    1.35,  // ×AICFG.overwatchMin — how much of the force shoots while the rest moves
     commit:       1.05,  // ×AICFG.commitAdv — the odds it insists on
@@ -10691,6 +10724,7 @@ const DOCTRINE = {
   },
   axis: {
     name: 'Wehrmacht, 1944', bloc: 'axis',
+    openFire: 0.85, openFireMg: 1.00,   // (round 117) the Gruppe's fire is its MG; the rifles join late, as a Feuerueberfall
     baseFirst:    0.85,
     overwatch:    0.95,
     commit:       0.90,
@@ -10710,6 +10744,7 @@ const DOCTRINE = {
   },
   soviet: {
     name: 'Red Army, 1944', bloc: 'soviet',
+    openFire: 0.80, openFireMg: 0.80,   // (round 117) dagger fire: the Maxim silent until the attacker is close
     baseFirst:    0.70, overwatch: 0.80, commit: 0.80, flankWide: 0.80,
     counterAttack: 0.70, fireFirst: 1.20, bound: 1.20, boundTime: 3.0,
     depth: 0.55, dig: 1.05, supportLead: 0.9, frontage: 0.70,
@@ -10724,6 +10759,7 @@ const DOCTRINE = {
   // PIAT was a hundred-metre weapon and was used as one.
   british: {
     name: 'British Army, 1944', bloc: 'allied',
+    openFire: 1.00, openFireMg: 1.00,   // (round 117) the section commander's fire control order, at effective range
     baseFirst:    1.45,  // the fire plan first, and thoroughly
     overwatch:    1.30,
     commit:       1.15,  // the odds, and then some
@@ -10747,6 +10783,7 @@ const DOCTRINE = {
   // 24/29 as the German Gruppe was round the MG.
   french: {
     name: 'Armée française, 1940', bloc: 'allied',
+    openFire: 1.00, openFireMg: 1.15,   // (round 117) the plan of fires: automatic weapons bar the front from further out
     baseFirst:    1.55,  // nobody moves until the fire has done its work
     overwatch:    1.40,
     commit:       1.30,  // the most cautious commander on the list
@@ -10770,6 +10807,7 @@ const DOCTRINE = {
   // were steadier in defence than their reputation.
   italian: {
     name: 'Regio Esercito, 1942', bloc: 'axis',
+    openFire: 1.00, openFireMg: 1.00,   // (round 117)
     baseFirst:    0.80,
     overwatch:    0.85,
     commit:       0.95,
@@ -10794,6 +10832,7 @@ const DOCTRINE = {
   // knee mortar went forward with the riflemen.
   japanese: {
     name: 'Imperial Japanese Army', bloc: 'axis',
+    openFire: 0.60, openFireMg: 0.70,   // (round 117) held until the attacker is on the position
     baseFirst:    0.55,
     overwatch:    0.70,
     commit:       0.65,  // attacks at odds nobody else would
@@ -26568,6 +26607,22 @@ const FRAG_WALL_MASONRY = 0.08;
 // count against a way out (`_fleeFire`).
 const STACK_R = 16, STACK_OFF = 0.36, STACK_STEP = 0.24, STACK_GAP = 1.2, NADE_ROOM_WAIT = 2.2, STACK_MAX = 25, STACK_ARRIVE = 0.3;
 const STACK_GAP_IN = 0.5, STACK_MAX_IN = 6;   // (round 115) at an inner door
+// (round 117) assault117. The stack's grenade is cooked to burst A117_COOK s
+// after it is thrown, through the doorway A117_DEEP of a cell into the room, and
+// the stack goes in NADE_ENTER117 s after it BURSTS (on the burst, heads still
+// down — not after), A117_GAP apart. A way in the defenders'
+// windows see: the section holds A117_COVER_S where it is while every man who
+// can see a watching window lays fire on it, then A117_MOVERS go for the wall
+// and the rest keep the windows down until the first is at it (+A117_BOF_LAG);
+// nobody waits longer than A117_WAIT_MAX. A wall blown by a charge costs
+// A117_BREACH_COST cells of walk in the choice (the time it takes), burns an
+// A117_FUSE s fuse and opens A117_HOLE of the wall's hole cells. A house is
+// left only by a way out whose dash to cover (A117_COVER by `_coverAtCell`, or
+// another house) is within A117_DASH cells and out of the sight of every enemy
+// the side knows of within A117_SEE_R.
+const NADE_ENTER117 = 0.15, A117_COOK = 1.4, A117_DEEP = 0.6, A117_GAP = 0.5, A117_COVER_S = 2.5, A117_MOVERS = 3, A117_BOF_LAG = 1.0, A117_WAIT_MAX = 12,
+  A117_BREACH_COST = 4, A117_FUSE = 3.0, A117_HOLE = 3, A117_DASH = 5, A117_COVER = 0.35, A117_SEE_R = 60, A117_HELD_S = 45,
+  A117_CANDS = 6, A117_SEEN = 6, A117_DETOUR = 6, A117_NEAR = 5;
 const FLEE_FOE_R = 10;
 // (round 115) how far above a storey's floor a man is on a flight's treads, not on the floor (u)
 const STAIR_STEP = 0.12;
@@ -26777,7 +26832,7 @@ function crowdFigure(pose) {
 function crowdPoseOf(u, t) {
   if (!u.alive || u.downed) return 4;
   const moving = !!(u.path && u.path.length) && (u._simSpd || 0) > ANIM_MOVE_MIN;
-  const st = u._stance(moving && !u._pinned());
+  const st = u._stanceDrawn117(moving && !u._pinned());   // (round 117) the drawn one: a man stood to in his hole
   if (st === 'prone' || st === 'crawl' || st === 'down') return 4;
   if (st === 'kneel' || st === 'crouch' || st === 'dig') return 3;
   if (st === 'walk' || st === 'run' || st === 'sneak') return (((t * 2.6 + (u.id | 0) * 0.37) | 0) & 1) ? 1 : 2;
@@ -30277,10 +30332,16 @@ class Projectiles {
   }
 
   /** Hand grenade: pineapple or stielhandgranate, tumbling in flight. */
-  fireGrenade(shooter, tx, tz, gDef, cook, from) {
+  fireGrenade(shooter, tx, tz, gDef, cook, from, tight) {
     // `from`: the player's throwing hand in first person (`Game._fpvHand`)
     const s = from ? from.clone() : shooter.pos.clone(); if (!from) s.y += shooter.def.size * 1.1;
-    const e = new THREE.Vector3(tx + rand(-1, 1), 0, tz + rand(-1, 1));
+    // (round 117) `tight`: a grenade put through a doorway from beside it lands
+    // within a tenth of its throw of where it was meant to, not anywhere in a
+    // unit either way — a room is a cell and a half across, and the scatter of a
+    // throw across the street put three in four of them against the wall beside
+    // the door, at the feet of the men who threw them (same draws, scaled)
+    const sc = tight ? clamp(hyp(tx - s.x, tz - s.z) * 0.12, 0.04, 1) : 1;
+    const e = new THREE.Vector3(tx + rand(-1, 1) * sc, 0, tz + rand(-1, 1) * sc);
     e.y = this.game.terrain.heightAt(e.x, e.z);
     const d = s.distanceTo(e);
     const mesh = this._grenadeMesh(gDef);
@@ -36480,7 +36541,7 @@ class Unit {
     const clips = this.mesh.userData.tcmClips;
     if (!clips || !rig._rest) return;
     const fpv = this.game.fpv && this.game.fpv.unit === this;
-    const st = this._stance(moving && !this._pinned());
+    const st = this._stanceDrawn117(moving && !this._pinned());
 
     // -- pick the clip, with a fallback chain so a half-authored rig still moves
     const pick = n => clips[n] || null;
@@ -36765,7 +36826,7 @@ class Unit {
   _poseInfantry(dt, moving) {
     const r = this.rig;
     const fpv = this.game.fpv && this.game.fpv.unit === this;
-    let st = this._stance(moving && !this._pinned());
+    let st = this._stanceDrawn117(moving && !this._pinned());
     if (st === 'prone' && r.plantedTube && !moving) st = 'kneel';   // a mortar man kneels at his tube
     let want = INFPOSE[st] || INFPOSE.stand;
     // A Forge model may override individual pose channels for itself, so a
@@ -37693,7 +37754,7 @@ class Unit {
       }
 
       // Rifle infantry lob a grenade when the enemy is in the sweet spot
-      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive && !(this._stack && (this.game.room115 === true || this.game.nadeHold116 === true) && this.nades <= 1)) {
+      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive && !this.game._holdNade(this)) {
         const gDef = this.def.grenade;
         const gd = dist2(this.pos, this.target.pos);
         // Not with one of ours inside the burst. A grenade is the shortest
@@ -43407,13 +43468,18 @@ class Unit {
    *  An old hand holds a time-fused grenade a second or so before he lets it
    *  go, so that it bursts as it lands rather than lying there to be thrown
    *  back; a recruit throws it the moment the pin is out. */
-  _throwGrenade(tx, tz) {
+  _throwGrenade(tx, tz, burstIn, from) {
     const g = this.def.grenade;
     if (!g || this.grenadeCd > 0 || !(this.nades > 0)) return false;
     const reach = this._throwReach(), dx = tx - this.pos.x, dz = tz - this.pos.z, dd = hyp(dx, dz);
     if (dd > reach && dd > 0) { tx = this.pos.x + dx * reach / dd; tz = this.pos.z + dz * reach / dd; }
-    const cook = g.fuse ? clamp(this.aExp * 1.6 - 0.2, 0, 1.4) * rand(0.6, 1) : 0;
-    this.game.projectiles.fireGrenade(this, tx, tz, g, cook);
+    let cook = g.fuse ? clamp(this.aExp * 1.6 - 0.2, 0, 1.4) * rand(0.6, 1) : 0;
+    // (round 117) `burstIn`: a grenade for the room beside him is held until it
+    // has that long left — two seconds of a Mills bomb's four counted off before
+    // it goes through the door, so nobody inside has the time to throw it back
+    // or to leave, and the man at the door the time to go in on its burst
+    if (burstIn > 0 && g.fuse) cook = Math.max(cook, g.fuse - burstIn);
+    this.game.projectiles.fireGrenade(this, tx, tz, g, cook, from || undefined, !!from);   // (round 117) `from`: his hand round the jamb
     if (this.nades !== Infinity) this.nades--;
     this.grenadeCd = (g.cd || NADE_READY) * rand(0.9, 1.15);
     this.attackPlayT = 0.35; this._throwT = 0.55;
@@ -43784,11 +43850,68 @@ class Unit {
    *  legs and the parapet the rest. Not a crew-served weapon (the gun stands
    *  on the lip), not a gun, and not the man the player is looking out of. */
   _holeSink() {
-    if (!this.dugin || !TRUE_SCALE || !this.alive || this.downed) return 0;
-    const d = this.def, k = d.kind;
-    if (d.vehicle || d.towed || k === 'atgun' || k === 'artillery' || k === 'hmg' || k === 'mortar') return 0;
+    if (!this.dugin || !TRUE_SCALE) return 0;
+    if (!this.alive || this.downed) {
+      // (round 117) a man hit in his hole comes up out of it as he falls: 1.2 m in one frame was a jump
+      if (this.game.dig117 === false || !(this._sink117 > 0)) return 0;
+      const s = this._sink117 * 0.8;
+      return (this._sink117 = s < 0.004 ? 0 : s);
+    }
+    const d = this.def, k = d.kind, hole = this._holeKind117();
+    if (d.vehicle || d.towed || k === 'atgun' || k === 'artillery' || k === 'hmg' || (k === 'mortar' && hole !== 'pit')) return 0;
     if (this.game.fpv && this.game.fpv.unit === this) return 0;
-    return FOX_SINK;
+    if (this.game.dig117 === false) return FOX_SINK;
+    // (round 117) to the floor of a 1.25 m hole (up on the fire step to fire; a
+    // mortar's pit a metre), eased so a man going flat or standing to does not
+    // jump (a picture's own state: nothing reads it back)
+    const st = this._stanceDrawn117(false);
+    const want = hole === 'pit' ? DIG117.pit
+      : (st === 'prone' || st === 'crawl' || st === 'down') ? FOX_SINK
+      : st === 'aim' ? DIG117.depth - DIG117.step : DIG117.depth;
+    let s = this._sink117 || 0;
+    s += (want - s) * 0.2;
+    if (Math.abs(want - s) < 0.002) s = want;
+    return (this._sink117 = s);
+  }
+  /** (round 117) Is his hole the one-man foxhole (`DIG117`)? A man on foot
+   *  with his own weapon; not a gun's pit, an MG's or a mortar's. */
+  _inFoxhole117() { return this.dugin > 0 && this._holeKind117() === 'fox'; }
+  /** (round 117) Which hole this unit digs: 'fox' (a man on foot with his own
+   *  weapon), 'pit' (a mortar's), or null: a gun's pit and an MG's are as they
+   *  were, and so is everything with `game.dig117 = false`. */
+  _holeKind117() {
+    if (this.game.dig117 === false || !TRUE_SCALE) return null;
+    const d = this.def, k = d.kind;
+    if (k === 'mortar') return (d.vehicle || d.towed) ? null : 'pit';
+    return (d.vehicle || d.towed || k === 'atgun' || k === 'artillery' || k === 'hmg') ? null : 'fox';
+  }
+  /** (round 117) THE STANCE HE IS DRAWN IN. `_stance` is the simulation's (the
+   *  bore it fires from reads it, `_boreAt`), and it has a dug-in man crouched
+   *  whatever he does. In a hole dug to the chest a man who is firing stands
+   *  to: head and shoulders up, the rifle over the parapet. Drawing only. */
+  _stanceDrawn117(moving) {
+    const st = this._stance(moving);
+    if (st === 'crouch' && this.suppState !== 'Suppressed' && this.posture !== 'hide' && this._inFoxhole117()
+        && (this.target || this.groundAtk || this.aimT > 0 || this.recoilT > 0)) return 'aim';
+    return st;
+  }
+  /** (round 117) What a man in a foxhole shows over the ground, in metres, from
+   *  the simulation's own state (never the picture's): -1 where the rule does
+   *  not apply (a pit that is not a foxhole, or `game.digExposure117 = false`). */
+  _dugShown117() {
+    if (this.game.digExposure117 === false || !this._inFoxhole117()) return -1;
+    const S = DIG117.shown;
+    if (this.suppState === 'Pinned' || this.posture === 'prone' || this.posture === 'ambush' || this._proneReflex) return S.flat;
+    if (this.suppState !== 'Suppressed' && this.posture !== 'hide'
+        && (this.target || this.groundAtk || this.aimT > 0)) return S.fire;
+    return S.crouch;
+  }
+  /** (round 117) The pool hole's scale for this man: his own size (`DIG117.k`). */
+  _foxK117(F) {
+    const hole = this._holeKind117();
+    if (hole === 'pit') return F.kPit117 || (F.kPit117 = new THREE.Vector3(DIG117.kPit[0], DIG117.kPit[1], DIG117.kPit[2]).multiplyScalar(K_FIG));
+    if (hole !== 'fox') return F.k;
+    return F.k117 || (F.k117 = new THREE.Vector3(DIG117.k[0], DIG117.k[1], DIG117.k[2]).multiplyScalar(K_FIG));
   }
   _foxClaim() {
     const F = this._foxholes();
@@ -43800,7 +43923,7 @@ class Unit {
     // the spoil (the model's +Z) thrown the way he faced when he dug — it
     // was a random turn from the SIMULATION's generator, a picture taking the
     // sim's dice (and this method is on the cosmetic stream now besides)
-    F.kv.copy(F.k).multiplyScalar(this._pitScale());
+    F.kv.copy(this._foxK117(F)).multiplyScalar(this._pitScale());
     F.m.makeRotationY(this.face || 0).scale(F.kv);
     F.m.setPosition(this.pos.x, this.game.terrain.heightAt(this.pos.x, this.pos.z), this.pos.z);
     this._foxFace = this.face || 0; this._foxX = this.pos.x; this._foxZ = this.pos.z; this._foxShown = true;
@@ -43822,7 +43945,7 @@ class Unit {
     if (!F || !(this._foxSlot >= 0)) return;
     this._foxShown = want;
     if (!want) { F.rim.setMatrixAt(this._foxSlot, F.zero); F.rim.instanceMatrix.needsUpdate = true; return; }
-    F.kv.copy(F.k).multiplyScalar(this._pitScale());
+    F.kv.copy(this._foxK117(F)).multiplyScalar(this._pitScale());
     F.m.makeRotationY(this._foxFace != null ? this._foxFace : (this.face || 0)).scale(F.kv);
     F.m.setPosition(this._foxX != null ? this._foxX : this.pos.x, this.game.terrain.heightAt(this._foxX != null ? this._foxX : this.pos.x, this._foxZ != null ? this._foxZ : this.pos.z), this._foxZ != null ? this._foxZ : this.pos.z);
     F.rim.setMatrixAt(this._foxSlot, F.m);
@@ -43861,6 +43984,7 @@ class Unit {
   _clearDigIn() {
     if (this.digT > 0) this.digT = -1;
     this.dugin = 0;
+    this._sink117 = 0;
     this._foxRelease();
   }
 
@@ -44692,7 +44816,44 @@ class Unit {
       }
       return !spring;
     }
-    return false;
+    return this.game.openFire117 === true && this._openingHold117(target, d);
+  }
+
+  /** (round 117) FIRE HELD UNTIL IT WILL KILL. Every army's defence taught it
+   *  in its own words: the section commander names the range and nobody
+   *  shoots before it. A man who opens at the limit of his weapon hits
+   *  nothing and shows the attacker where the position is — `_stealthMul`
+   *  already prices that (a man who has just fired is seen at 1.25x his
+   *  range; dug in and still, at about 0.43x) — and until now every standing
+   *  man of the computer's opened the moment he had a target.
+   *
+   *  So a man of the COMPUTER's who is standing on a position (holding or dug
+   *  in, not walking; his section on a `hold` task, or his side the map's
+   *  defender and the section not itself attacking) keeps his target and
+   *  holds his fire until it is inside `_effectiveRange` x his army's
+   *  `DOCTRINE.openFire` (`openFireMg` for a machine gun or the section
+   *  automatic). He is released the moment he is hit or under fire (found:
+   *  nothing left to hide), and a section opens TOGETHER: one man firing
+   *  inside the range, or one man found, frees the rest for OPEN117_S.
+   *  The player's men are his to order; mortars, guns, snipers and rocket
+   *  men keep the rules they have (`atAmbush`). Nothing is rolled, and the
+   *  only state is `squad._open117`, which dies with the battle's squads.
+   *  `game.openFire117` off: every man opens at the limit of his weapon. */
+  _openingHold117(target, d) {
+    const G = this.game, def = this.def;
+    if (!target || def.vehicle || this.team === G.playerTeam || !(this.team > 0)) return false;
+    const k = def.kind;
+    if (k === 'mortar' || k === 'artillery' || k === 'atgun' || k === 'sniper' || k === 'rocket') return false;
+    if (this.path.length || !(this.hold || this.dugin > 0)) return false;
+    const sq = this.squad, kind = sq && sq._task && sq._task.kind;
+    if (kind !== 'hold' && !(G._defendingSide(this.team) && !OPEN117_ATTACK[kind])) return false;
+    const now = G.time;
+    if ((this.suppression || 0) > OPEN117_SUPP || now - this._attackedT < OPEN117_S) { if (sq) sq._open117 = now; return false; }
+    if (sq && now - sq._open117 < OPEN117_S) return false;
+    const D = G._doctrineOf(this.team);
+    const K = (D && ((k === 'hmg' || def.heavyMg || def.autoRifle) ? D.openFireMg : D.openFire)) || 1;
+    if (d <= G._effectiveRange(this) * K) { if (sq) sq._open117 = now; return false; }
+    return true;
   }
 
   /** Cover 0..1 from terrain + doodads + posture (reduces incoming fire). */
@@ -44856,6 +45017,13 @@ class Unit {
    *  twenty metres is a target (`PRESENT_NEAR`). */
   _presentedFrac() {
     if (this.def.vehicle) return 1;
+    // (round 117) IN A HOLE, WHAT HE SHOWS IS WHAT IS DRAWN OVER THE GROUND:
+    // stood to and firing, the head and shoulders the table's figure was
+    // written for; crouched below the lip or flat on the floor, less.
+    if (this.dugin > 0) {
+      const s = this._dugShown117();
+      if (s >= 0) return Math.max(DIG117.floor, PRESENT.dug * s / DIG117.shown.fire);
+    }
     return PRESENT[this._postureClass()];
   }
   /** What he is showing a rifleman: 'up' (standing), 'low' (kneeling, at a
@@ -49295,6 +49463,12 @@ class Game {
     this.scene.add(this.hemiLight);
     // Procedural weather skydome, aligned to the key light (Batch N)
     this.sky = new Sky(this.scene, this.sunOffset);
+    // ROUND 117 — the baked sky (assets/sky117.js): one dome drawn last at the far plane, a scattering table
+    // re-baked as the sun moves, clouds that follow the weather and drift on the wind. Off is the Sky above,
+    // exactly: its meshes only leave the camera's layers while this is on.
+    this.sky117 = false;   // default OFF until the second version is judged in captures (see .claude/wip117/sky/NOTES.md)
+    this.skyNew = null;
+    try { if (window.Sky117 && window.Sky117.create) this.skyNew = window.Sky117.create(this); } catch (e) { console.warn('sky117', e); }
     this.fogBanks = new FogBanks(this.scene, this);
     // Base light/fog values weather scales against
     // `sun` carries a quarter more than it used to, to pay for the fill that
@@ -54517,7 +54691,7 @@ class Game {
         // throwing at a position, not at a man — so the danger test has to be
         // made against the point he actually throws at.
         const gtx = t.x + rand(-2, 2), gtz = t.z + rand(-2, 2);
-        if ((u._assault || t.kind === 'assault') && !(u._stack && (this.room115 === true || this.nadeHold116 === true) && u.nades <= 1) && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
+        if ((u._assault || t.kind === 'assault') && !this._holdNade(u) && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
             && !u._friendlyNearPoint(gtx, gtz, u._grenadeDanger(g), u._leadFor('grenade'))) {
           if (u._throwGrenade(gtx, gtz)) continue;
         }
@@ -54548,7 +54722,7 @@ class Game {
           if (u._friendlyNearPoint(e.pos.x, e.pos.z, u._grenadeDanger(g), u._leadFor('grenade'))) continue;
           bd = d; best = e;
         }
-        if (best && !(u._stack && (this.room115 === true || this.nadeHold116 === true) && u.nades <= 1) && u._throwGrenade(best.pos.x, best.pos.z)) continue;
+        if (best && !this._holdNade(u) && u._throwGrenade(best.pos.x, best.pos.z)) continue;
       }
 
       // ---- THE PANZERFAUST, AND THE BAZOOKA ------------------------------
@@ -58910,7 +59084,7 @@ class Game {
     // fewer houses in a minute than the plain entry (Ortona 7 -> 5 of 20,
     // Village 13 -> 11) — every inner door costs the section time the next
     // room uses — though it lost fewer men on Ortona
-    const inner = this.room115 === true && (!!skip || u._inRoom());
+    const inner = (this.room115 === true || this._a117p('inner')) && (!!skip || u._inRoom());
     if (u._inRoom() && !inner) return false;             // already inside
     // where his route goes in: march the legs on the ground floor
     let px = u.pos.x, pz = u.pos.z, door = null;
@@ -58930,8 +59104,9 @@ class Game {
           const se = gx > pgx ? 1 : gx < pgx ? 3 : gz > pgz ? 2 : 0;
           const isSkip = skip && skip.ox === pgx && skip.oz === pgz && skip.e === se;
           if (!isSkip && !inner && lv === 0 && roofed(gx, gz) && !roofed(pgx, pgz)) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: 0 };
-          else if (!isSkip && inner && S.insideAt(pgx, pgz, lv) >= 0.5 && S.moveSpan(pgx, pgz, lv, se, TILE * 0.5) === 2 && this._roomFoe(u.team, gx, gz)
-            && this._knownFoeAt(u.team, cellCenter(gx), cellCenter(gz), TILE * 2.5, 20)) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: lv };
+          else if (!isSkip && inner && S.insideAt(pgx, pgz, lv) >= 0.5 && S.moveSpan(pgx, pgz, lv, se, TILE * 0.5) === 2
+            && (this.room115 === true ? this._roomFoe(u.team, gx, gz) && this._knownFoeAt(u.team, cellCenter(gx), cellCenter(gz), TILE * 2.5, 20)
+              : this._held117(u.team, gx, gz) && this._a117Nades(u))) door = { ox: pgx, oz: pgz, ix: gx, iz: gz, L: lv };   // (round 117: known held, and a grenade to throw)
         }
         pgx = gx; pgz = gz;
       }
@@ -58939,34 +59114,462 @@ class Game {
       px = w.x; pz = w.z; lv = w.lvl | 0;
     }
     if (!door) return false;
-    const sx = door.ix - door.ox, sz = door.iz - door.oz, e = sx > 0 ? 1 : sx < 0 ? 3 : sz > 0 ? 2 : 0;
-    if (S.moveSpan(door.ox, door.oz, door.L, e, TILE * 0.5) !== 2) return false;   // no doorway: an open side
-    const dwx = cellCenter(door.ix), dwz = cellCenter(door.iz);
-    const foe = inner ? true : this._knownFoeAt(u.team, dwx, dwz, STACK_R, 30);
+    // (round 117) THE WAY IN IS CHOSEN, NOT TAKEN: of the house's doors, holes and
+    // breaches, the one whose approach the defenders' known windows see least
+    let exposers = null, breach = null;
+    // (round 117) whether the house is contested is asked at the door his route
+    // meets — the way in chosen may be its far side, away from the enemy
+    const foe = inner ? true : this._knownFoeAt(u.team, cellCenter(door.ix), cellCenter(door.iz), STACK_R, 30);
     if (!foe) return false;                              // nobody near: walk in
-    const Q = this._doorQs || (this._doorQs = new Map()), qk = (door.oz * GRID + door.ox) * 4 + e;
-    let q = Q.get(qk);
-    if (!q || this.time - q.made > 120) { q = { n: 0, last: -99, nadeT: 0, made: this.time, ix: door.ix, iz: door.iz, ox: door.ox, oz: door.oz, e, L: door.L, inner }; Q.set(qk, q); }
-    // beside the doorway, against the wall, out of the line through it
-    const side = (q.n & 1) ? 1 : -1, rank = q.n >> 1;
-    q.n++;
-    const horiz = e === 0 || e === 2, H = TILE * 0.5;
-    const along = clamp(H + side * (STACK_OFF + rank * STACK_STEP), MAN_CLEAR, TILE - MAN_CLEAR);
-    const ocx = cellCenter(door.ox), ocz = cellCenter(door.oz), d = SHUFFLE_EDGE[e];
-    const wx = horiz ? ocx - H + along : ocx + d[0] * (H - MAN_CLEAR * 1.3);
-    const wz = horiz ? ocz + d[1] * (H - MAN_CLEAR * 1.3) : ocz - H + along;
+    // the way in chosen first (assault117), and the door his route meets if
+    // there is no way to the wall at it
+    const tries = [];
+    // (a man already at the house — within A117_NEAR cells of the door his route
+    // meets — has made his approach; there is nothing left to choose it by)
+    if (!inner && this._a117p('entry') && hyp(cellCenter(door.ox) - u.pos.x, cellCenter(door.oz) - u.pos.z) > TILE * A117_NEAR) { const be = this._bestEntry117(u, door, tx, tz); if (be) tries.push({ door: be.door, exposers: be.exposers, breach: be.breach, be }); }
+    if (!tries.length || tries[0].door.ox !== door.ox || tries[0].door.oz !== door.oz || tries[0].door.ix !== door.ix || tries[0].door.iz !== door.iz) tries.push({ door, exposers, breach });
     const wasExp = u.explicit;
-    u.orderMove(wx, wz, false, mode === 'sneak' ? 'sneak' : 'fast', door.L);
-    // (round 115) already in the cell by the door: straight to the wall beside it
-    if (!u.path.length && worldToCell(u.pos.x) === worldToCell(wx) && worldToCell(u.pos.z) === worldToCell(wz)) {
-      u.path = [{ x: wx, z: wz, lvl: door.L }]; u.pathIdx = 0; u.state = 'move';
+    let moved = false;
+    for (const T of tries) {
+      const dr = T.door, exp = T.exposers, br = T.breach;
+      // (a section's way in is chosen for the first man's room; another man's room
+      // it does not lead on to sends him by his own door)
+      if (T.be && !this._inside117(dr.ix, dr.iz, worldToCell(tx), worldToCell(tz))) continue;
+      const sx = dr.ix - dr.ox, sz = dr.iz - dr.oz, e = sx > 0 ? 1 : sx < 0 ? 3 : sz > 0 ? 2 : 0;
+      const span = S.moveSpan(dr.ox, dr.oz, dr.L, e, TILE * 0.5);
+      if (span !== 2 && !(exp && (span === 1 || br))) continue;   // no doorway: an open side (a chosen way in excepted)
+      const Q = this._doorQs || (this._doorQs = new Map()), qk = (dr.oz * GRID + dr.ox) * 4 + e;
+      let q = Q.get(qk), made = false;
+      if (!q || this.time - q.made > 120) {
+        q = { n: 0, last: -99, nadeT: 0, made: this.time, ix: dr.ix, iz: dr.iz, ox: dr.ox, oz: dr.oz, e, L: dr.L, inner,
+          // (round 117) the room behind it is held, and the side knows it: the last grenade is kept for it
+          held: this._a117() && this._held117(u.team, dr.ix, dr.iz, !inner),
+          breach117: br && span === 0 ? { by: br, blowT: 0, done: false } : null };
+        Q.set(qk, q); made = true;
+      }
+      // beside the doorway, against the wall, out of the line through it
+      const side = (q.n & 1) ? 1 : -1, rank = q.n >> 1;
+      q.n++;
+      const horiz = e === 0 || e === 2, H = TILE * 0.5;
+      const along = clamp(H + side * (STACK_OFF + rank * STACK_STEP), MAN_CLEAR, TILE - MAN_CLEAR);
+      const ocx = cellCenter(dr.ox), ocz = cellCenter(dr.oz), d = SHUFFLE_EDGE[e];
+      const wx = horiz ? ocx - H + along : ocx + d[0] * (H - MAN_CLEAR * 1.3);
+      const wz = horiz ? ocz + d[1] * (H - MAN_CLEAR * 1.3) : ocz - H + along;
+      u.orderMove(wx, wz, false, mode === 'sneak' ? 'sneak' : 'fast', dr.L); moved = true;
+      // (round 115) already in the cell by the door: straight to the wall beside it
+      if (!u.path.length && worldToCell(u.pos.x) === worldToCell(wx) && worldToCell(u.pos.z) === worldToCell(wz)) {
+        u.path = [{ x: wx, z: wz, lvl: dr.L }]; u.pathIdx = 0; u.state = 'move';
+      }
+      if (!u.path.length || u._pathPartial) {           // no way to that wall: the next, or straight in
+        // (a chosen way in nobody can reach is given up, for everybody, and its rank given back)
+        if (T.be) { q.n--; if (made) Q.delete(qk); const h = this._entryC117 && this._entryC117.get(T.be.ck); if (h) h.v = null; }
+        continue;
+      }
+      u._strSpot = key; u.explicit = wasExp; u._pendingCover = true;
+      u._stack = { q, key, tx, tz, L, mode, sx: wx, sz: wz, at: -1 };
+      (this._stackers || (this._stackers = new Set())).add(u);
+      // (round 117) THE BASE OF FIRE FIRST. A way in the defenders' windows see is
+      // not walked up to until it has been fired on: the section holds where it is
+      // for A117_COVER_S, every man who can see a watching window (and reach it)
+      // laying fire on it and smoke going down between them and the approach;
+      // then the first A117_MOVERS go for the wall, and the rest keep the windows
+      // down until the first of them is at it, and follow (`_stackTick`)
+      if (this._a117p('bof') && exp && exp.length) {
+        // (nobody waits on a base of fire nobody can give: the hold is from the
+        // first round of it, or the smoke, and none at all without either)
+        if (!q.exp117) { q.exp117 = exp; q.goT117 = this.time; this._covered117 = (this._covered117 || 0) + 1; if (this._smoke117(u, q)) q.goT117 = this.time + A117_COVER_S; }
+        if (this._fireOn117(u, q.exp117)) q.goT117 = Math.max(q.goT117, this.time + A117_COVER_S);
+        // (and a man is held only while there is a base of fire to wait for:
+        // stopping a section for one that nobody could give cost it houses)
+        if (q.goT117 > this.time) {
+          const st = u._stack; st.wait117 = true; st.bof117 = q.n - 1 >= A117_MOVERS;
+          if (!u.groundAtk) { u.path = []; u.pathIdx = 0; u.state = 'idle'; }
+        }
+      }
+      return true;
     }
-    if (!u.path.length || u._pathPartial) {             // no way to the wall: go straight in
-      u.orderMove(tx, tz, false, mode, L); u._strSpot = key; u.explicit = wasExp; return false;
+    if (moved) { u.orderMove(tx, tz, false, mode, L); u._strSpot = key; u.explicit = wasExp; }   // no way to the wall: go straight in
+    return false;
+  }
+  /** Keep his last grenade for the room? In a stack (room115, nadeHold116), or —
+   *  assault117 — only in a stack at a door to a room the side knows is held. */
+  _holdNade(u) {
+    if (!u._stack || !(u.nades <= 1)) return false;
+    if (this.room115 === true || this.nadeHold116 === true) return true;
+    return this._a117p('nade') && !!(u._stack.q && u._stack.q.held);
+  }
+  /** (round 117) assault117 — how a squad takes a house and gives one up. */
+  _a117() { return this.assault117 === true; }
+  /** One part of it, for a probe that measures the parts apart: `game.a117off =
+   *  { entry, share, bof, nade, inner, leave, breach, yard }` turns that part off. */
+  _a117p(k) { return this._a117() && !(this.a117off && this.a117off[k]); }
+  /** Somebody in his section (or he) still has a grenade to throw into a room. */
+  _a117Nades(u) {
+    if (u.nades > 0) return true;
+    const sq = u.squad; if (!sq || !sq.members) return false;
+    for (const o of sq.members) if (o !== u && o.alive && !o.downed && o.nades > 0 && o.def.grenade) return true;
+    return false;
+  }
+  /** Which house a cell is: the generator's id, else the flood's (0: none). */
+  _house117(x, z) { const S = this.structures; return (S.bid && S.bid[z * GRID + x]) || (S._houseOf ? S._houseOf(x, z) | 0 : 0); }
+  _roofed117(x, z) { const S = this.structures; return !!(S.floorMat(x, z, 1) || S.roofMat(x, z, 0) || S.roofMat(x, z, S.topLevel(x, z))); }
+  /** The enemy this side KNOWS of near (x, z): where it last saw each man and
+   *  vehicle (`_contactAt` — the reported position, not where he is now) and an
+   *  eye there — his own while he is still where he was seen, else a man's (a
+   *  cupola's) on that floor. The nearest `cap`. */
+  _known117(team, x, z, r, age, cap) {
+    const out = [], now = this.time, r2 = r * r;
+    for (const o of this.units) {
+      if (!o.alive || o.downed || o.surrendered || o.embarkedIn || !o._contactT || !areHostile(team, o.team)) continue;
+      const t = o._contactT[team];
+      if (t == null || now - t > age) continue;
+      const at = (o._contactAt && o._contactAt[team]) || o.pos, dx = at.x - x, dz = at.z - z, d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      const there = Math.abs(o.pos.x - at.x) < TILE && Math.abs(o.pos.z - at.z) < TILE;
+      const fy = there ? o.pos.y : this.groundYAt(at.x, at.z, o.lvl | 0);
+      out.push({ o, x: at.x, z: at.z, y: fy + EYE_H * (o.def.vehicle ? 1.6 : o._eyeStat()), d2 });
     }
-    u._strSpot = key; u.explicit = wasExp; u._pendingCover = true;
-    u._stack = { q, key, tx, tz, L, mode, sx: wx, sz: wz, at: -1 };
-    (this._stackers || (this._stackers = new Set())).add(u);
+    if (out.length > cap) { out.sort((a, b) => a.d2 - b.d2); out.length = cap; }
+    return out;
+  }
+  /** Of `foes`, those whose eye has an exact sightline (walls, roofs, smoke and
+   *  standing crops all count: `sightClear`) to a man's mark at any of `pts`;
+   *  `one`: stop at the first. */
+  _seers117(foes, pts, one) {
+    const out = [];
+    for (const p of pts) if (p.y == null) p.y = this.groundYAt(p.x, p.z, 0) + MARK_H;
+    for (const f of foes) for (const p of pts) {
+      if (this.sightClear(f.x, f.y, f.z, p.x, p.y, p.z)) { out.push(f); if (one) return out; break; }
+    }
+    return out;
+  }
+  /** A man of his section who carries a demolition charge. */
+  _carrier117(u) {
+    if (u.engSatchel > 0) return u;
+    const sq = u.squad; if (!sq || !sq.members) return null;
+    for (const o of sq.members) if (o.alive && !o.downed && o.engSatchel > 0) return o;
+    return null;
+  }
+  /** A room of this house the side knows is held: an enemy last seen in a roofed
+   *  cell of the same house within two cells of (ix, iz), in the last A117_HELD_S
+   *  — a man in a house stays put, and a section that saw him go in knows it
+   *  for longer than it knows where a man in the open is. */
+  _held117(team, ix, iz, house) {
+    const b = this._house117(ix, iz);
+    if (!b) return false;
+    // `house`: the house at its street door — anybody known in it, or in a room
+    // within three cells of the door (a block's houses join behind their fronts)
+    for (const f of this._known117(team, cellCenter(ix), cellCenter(iz), TILE * (house ? 8 : 2.5), A117_HELD_S, 8)) {
+      const fx = worldToCell(f.x), fz = worldToCell(f.z);
+      if (!this._roofed117(fx, fz)) continue;
+      if (this._house117(fx, fz) === b || (house && Math.abs(fx - ix) <= 3 && Math.abs(fz - iz) <= 3)) return true;
+    }
+    return false;
+  }
+  /** THE WAY IN. Every ground-floor way into the house `door` belongs to —
+   *  doorway, arch, rubble gap, shell hole and, where his section carries a
+   *  charge, any solid stretch of wall it could blow — scored by how many of the
+   *  defenders the side knows of see its approach (`_approach117`, by the exact
+   *  sightline), then by the walk, a blown wall costing A117_BREACH_COST cells.
+   *  One choice per section (per order, for men with none) for 4 s. */
+  _bestEntry117(u, door, tx, tz) {
+    const S = this.structures, tgx = worldToCell(tx), tgz = worldToCell(tz);
+    // the house he is sent to (his route may cross another's doorway first)
+    const tb = inGrid(tgx, tgz) && S.has(tgx, tgz) && this._roofed117(tgx, tgz) ? this._house117(tgx, tgz) : 0;
+    const b = tb || this._house117(door.ix, door.iz);
+    if (!b) return null;
+    // ONE WAY IN FOR THE SECTION: the men of one order each have a room of their
+    // own, and on a block those rooms are in different houses — chosen per house,
+    // a section of six went in by three doors, two men to each
+    const C = this._entryC117 || (this._entryC117 = new Map()), ck = !this._a117p('share') ? u.team * 4096 + b : u.squad ? 's' + u.squad.id : 't' + u.team + '@' + this.time, hit = C.get(ck);
+    if (hit && this.time - hit.t < 4) return hit.v;
+    const reach = this._reach117(u, 14);
+    const foes = this._known117(u.team, cellCenter(door.ix), cellCenter(door.iz), STACK_R * 2, 20, 12);
+    const carrier = this._a117p('breach') ? this._carrier117(u) : null, K = window.Structures;
+    const cand = [];
+    for (let dz = -8; dz <= 8; dz++) for (let dx = -8; dx <= 8; dx++) {
+      const x = door.ix + dx, z = door.iz + dz;
+      if (!inGrid(x, z) || !S.has(x, z) || this._house117(x, z) !== b || !this._roofed117(x, z) || S.insideAt(x, z, 0) < 0.35) continue;
+      for (let e = 0; e < 4; e++) {
+        const d = SHUFFLE_EDGE[e], ox = x + d[0], oz = z + d[1];
+        if (!inGrid(ox, oz) || this._roofed117(ox, oz) || !reach.has(oz * GRID + ox)) continue;
+        let blow = false;
+        if (S.moveSpan(x, z, 0, e, TILE * 0.5) === 0) {
+          if (!carrier || !S.wallMat(x, z, 0, e) || S.wallKind(x, z, 0, e) !== K.K_SOLID) continue;
+          blow = true;
+        }
+        const route = x === door.ix && z === door.iz && ox === door.ox && oz === door.oz;
+        if (!route && !this._inside117(x, z, tgx, tgz)) continue;   // a room that does not lead on to where he is going
+        cand.push({ x, z, ox, oz, d, blow, route, dd: hyp(cellCenter(ox) - u.pos.x, cellCenter(oz) - u.pos.z) / TILE });
+      }
+    }
+    // THE WALK ITSELF: the nearest few by the crow, then by the route the search
+    // gives him (a straight line from across the street to a side door cuts
+    // through the house and past the front windows unseen); a route through
+    // the house to its own yard is no approach. Scored by the defenders who
+    // see any of it or the wall beside the opening, A117_SEEN cells each, and
+    // the walk; nothing further than A117_DETOUR cells beyond the door his
+    // route meets.
+    cand.sort((p, q) => (q.route - p.route) || (p.dd - q.dd));
+    const gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z);
+    let best = null, bs = Infinity, routeWalk = Infinity;
+    for (let k = 0; k < cand.length && k < A117_CANDS; k++) {
+      const c = cand[k];
+      const path = this.pathfinder.find(gx, gz, c.ox, c.oz, u.def.floats, climbOf(u.def), u.lvl | 0, 0, u._crushPower(), u.def.amphib);
+      if (!path.length || this.pathfinder.lastPartial) continue;
+      const pts = [];
+      let px = u.pos.x, pz = u.pos.z, walk = 0, through = false;
+      for (const w of path) {
+        const L = hyp(w.x - px, w.z - pz), n = Math.max(1, Math.ceil(L / TILE));
+        for (let i = 1; i <= n; i++) {
+          const sx = px + (w.x - px) * i / n, sz = pz + (w.z - pz) * i / n, cx = worldToCell(sx), cz = worldToCell(sz);
+          if (this._roofed117(cx, cz) && this._house117(cx, cz) === b) through = true;
+          if (pts.length < 24) pts.push({ x: sx, z: sz });
+        }
+        walk += L; px = w.x; pz = w.z;
+      }
+      if (through) continue;
+      walk = walk / TILE + (c.blow ? A117_BREACH_COST : 0);
+      if (c.route) routeWalk = walk;
+      if (walk > routeWalk + A117_DETOUR) continue;
+      for (const p of this._approach117({ pos: { x: px, z: pz } }, c.ox, c.oz, c.d)) pts.push(p);
+      const seen = foes.length ? this._seers117(foes, pts) : [];
+      const sc = seen.length * A117_SEEN + walk;
+      if (sc < bs) { bs = sc; best = { door: { ox: c.ox, oz: c.oz, ix: c.x, iz: c.z, L: 0 }, exposers: seen, breach: c.blow ? carrier : null, ck }; }
+    }
+    C.set(ck, { t: this.time, v: best });
+    if (C.size > 256) C.clear();
+    return best;
+  }
+  /** From a room by the way in to the room he is going to, without going out:
+   *  roofed cells joined by edges with a gap in them, on the ground floor (his
+   *  room's column, for a man sent upstairs). A way in that only leads round to
+   *  the street again sent the stack in and back out of the door it came by. */
+  _inside117(ix, iz, tgx, tgz) {
+    if (ix === tgx && iz === tgz) return true;
+    const S = this.structures, q = [iz * GRID + ix], seen = new Set(q);
+    for (let h = 0; h < q.length && h < 600; h++) {
+      const c = q[h], x = c % GRID, z = (c - x) / GRID;
+      for (let e = 0; e < 4; e++) {
+        const d = SHUFFLE_EDGE[e], nx = x + d[0], nz = z + d[1], k = nz * GRID + nx;
+        if (seen.has(k) || !inGrid(nx, nz) || Math.abs(nx - ix) > 14 || Math.abs(nz - iz) > 14) continue;
+        if (!this._roofed117(nx, nz) || S.moveSpan(x, z, 0, e, TILE * 0.5) === 0) continue;
+        if (nx === tgx && nz === tgz) return true;
+        seen.add(k); q.push(k);
+      }
+    }
+    return false;
+  }
+  /** The open ground he can walk to without going through a roofed cell (his
+   *  own excepted): cells within `R` of him, joined by edges with a gap in them.
+   *  A yard inside a house's walls is reached through the house, not round it. */
+  _reach117(u, R) {
+    const S = this.structures, gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z), out = new Set();
+    if (!inGrid(gx, gz)) return out;
+    const q = [gz * GRID + gx];
+    out.add(q[0]);
+    for (let h = 0; h < q.length; h++) {
+      const c = q[h], x = c % GRID, z = (c - x) / GRID;
+      for (let e = 0; e < 4; e++) {
+        const d = SHUFFLE_EDGE[e], nx = x + d[0], nz = z + d[1], k = nz * GRID + nx;
+        if (Math.abs(nx - gx) > R || Math.abs(nz - gz) > R || !inGrid(nx, nz) || out.has(k)) continue;
+        if (!this.pathfinder.passable(nx, nz) || this._roofed117(nx, nz) || S.moveSpan(x, z, 0, e, TILE * 0.5) === 0) continue;
+        out.add(k); q.push(k);
+      }
+    }
+    return out;
+  }
+  /** THE APPROACH to a way in: the straight walk from where he stands to the
+   *  wall either side of it, where the stack stands (`_entryPlan`), sampled
+   *  every cell or so. Not the line out through the opening: a man hugging the
+   *  wall beside a door is in the dead ground of the windows in that wall, and
+   *  what sees him is a window across the street or round the corner. */
+  _approach117(u, ox, oz, d) {
+    const pts = [], H = TILE * 0.5, out = H - MAN_CLEAR * 1.3, al = [d[1], d[0]];
+    for (const sd of [-1, 1]) {
+      const sx = cellCenter(ox) - d[0] * out + al[0] * sd * STACK_OFF, sz = cellCenter(oz) - d[1] * out + al[1] * sd * STACK_OFF;
+      const L = hyp(sx - u.pos.x, sz - u.pos.z), n = clamp(Math.ceil(L / TILE), 1, 8);
+      for (let i = 1; i <= n; i++) pts.push({ x: u.pos.x + (sx - u.pos.x) * i / n, z: u.pos.z + (sz - u.pos.z) * i / n });
+    }
+    return pts;
+  }
+  /** Lay fire on the first watching window he can see and reach. */
+  _fireOn117(u, exps) {
+    if (!exps || !u.def.rng || u.def.kind === 'melee' || u.def.vehicle) return false;
+    const ey = u.pos.y + EYE_H * u._eyeStat();
+    for (const f of exps) {
+      if (!f.o.alive || f.o.downed || hyp(f.x - u.pos.x, f.z - u.pos.z) > u.def.rng * 0.9) continue;
+      if (!this.sightClear(u.pos.x, ey, u.pos.z, f.x, f.y, f.z)) continue;
+      u.orderAttackGround(f.x, f.z, true);
+      if (u.groundAtk) { this._bof117 = (this._bof117 || 0) + 1; return true; }
+    }
+    return false;
+  }
+  /** Smoke between the nearest watching window and the approach, from whoever
+   *  of his section has a round of it. */
+  _smoke117(u, q) {
+    const exps = q.exp117;
+    if (!exps || !exps.length) return false;
+    const ocx = cellCenter(q.ox), ocz = cellCenter(q.oz);
+    let near = exps[0], nd = Infinity;
+    for (const f of exps) { const d = hyp(f.x - ocx, f.z - ocz); if (d < nd) { nd = d; near = f; } }
+    const men = u.squad && u.squad.members ? u.squad.members : [u];
+    for (const o of men) {
+      if (!o.alive || o.downed || !(o.smokeAmmo > 0)) continue;
+      this.projectiles.fireSmoke(o, ocx + (near.x - ocx) * 0.4, ocz + (near.z - ocz) * 0.4);
+      if (o.smokeAmmo !== Infinity) o.smokeAmmo--;
+      this._smokes117 = (this._smokes117 || 0) + 1;
+      return true;
+    }
+    return false;
+  }
+  /** THROUGH THE DOOR. From where the stack stands, a man's width off the wall
+   *  and a pace along it, no straight throw meets the opening and reaches the
+   *  room (it meets the wall beside it, or the room's side wall a foot inside);
+   *  so he reaches round the jamb: the grenade leaves his hand in front of the
+   *  middle of the opening (or the hole) and goes A117_DEEP of a cell past it,
+   *  into the middle of the room. */
+  _nadeAim117(th, q) {
+    const S = this.structures, d = SHUFFLE_EDGE[q.e], horiz = q.e === 0 || q.e === 2;
+    let mid = TILE * 0.5;
+    if (S.moveSpan(q.ox, q.oz, q.L, q.e, TILE * 0.5) === 2) mid = (S.spanLo + S.spanHi) * 0.5;
+    const cx = horiz ? cellCenter(q.ox) - TILE * 0.5 + mid : cellCenter(q.ox) + d[0] * TILE * 0.5;
+    const cz = horiz ? cellCenter(q.oz) + d[1] * TILE * 0.5 : cellCenter(q.oz) - TILE * 0.5 + mid;
+    const from = new THREE.Vector3(cx - d[0] * TILE * 0.18, th.pos.y + th.def.size * 1.1, cz - d[1] * TILE * 0.18);
+    return { x: cx + d[0] * TILE * A117_DEEP, z: cz + d[1] * TILE * A117_DEEP, from };
+  }
+  /** When the grenade he has just thrown bursts: what is left of its fuse, or
+   *  its flight for one that bursts on landing. */
+  _burstIn117(th) {
+    const L = this.projectiles.list;
+    for (let i = L.length - 1; i >= 0 && i >= L.length - 6; i--) {
+      const p = L[i];
+      if (p.kind === 'grenade' && p.shooter === th) return p.fuse > 0 ? p.fuse : p.dist / Math.max(1e-3, p.speed);
+    }
+    return NADE_ROOM_WAIT;
+  }
+  /** THE WALL BLOWN: a hole at its foot in the middle (punched the way a shell
+   *  punches one, `punchHole`, so the searches have it at once), and the room
+   *  behind it stunned and, near the wall, hurt. */
+  _blow117(q, by) {
+    const S = this.structures, d = SHUFFLE_EDGE[q.e];
+    const hx = cellCenter(q.ox) + d[0] * TILE * 0.5, hz = cellCenter(q.oz) + d[1] * TILE * 0.5, hy = S.floorY(q.ix, q.iz, 0) + 0.06;
+    const made = S.punchHole({ kind: 'wall', gx: q.ix, gz: q.iz, L: 0, e: (q.e + 2) & 3 }, A117_HOLE, hx, hy, hz);
+    this._breaches117 = (this._breaches117 || 0) + 1;
+    if (this.sfx && this.sfx.boom) this.sfx.boom({ x: hx, y: hy + 0.3, z: hz }, 1.4);
+    if (this.effects && this.effects.debris) this.effects.debris(hx, hy + 0.2, hz, 6, 0x6a5a44);
+    const b = this._house117(q.ix, q.iz), from = new THREE.Vector3(hx, hy + 0.2, hz);
+    for (const o of this.units) {
+      if (!o.alive || o.downed || o.def.vehicle || (o.lvl | 0) !== 0) continue;
+      const ox = worldToCell(o.pos.x), oz = worldToCell(o.pos.z);
+      if (Math.abs(ox - q.ix) > 1 || Math.abs(oz - q.iz) > 1 || this._house117(ox, oz) !== b || !o._inRoom()) continue;
+      const r = hyp(o.pos.x - hx, o.pos.z - hz);
+      o.applySuppression(0.7);
+      if (r < TILE * 0.8) o.takeDamage(60 * (1 - r / (TILE * 0.8)), by, { blast: true, from });
+    }
+    return made;
+  }
+  /** A known enemy in a room of this house who came in AFTER him: it is being
+   *  taken from him. (The men who came in to take it are not its holders: read
+   *  both ways, every section that got into a house it was clearing found the
+   *  enemy in it, and left by the back.) `_hb117`/`_hbT117`: the house a man is
+   *  in and since when (`_houseFallBack`). */
+  _enemyInHouse117(u) {
+    const gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z), b = this._house117(gx, gz);
+    if (!b || u._hb117 !== b) return false;
+    for (const o of this.units) {
+      if (!o.alive || o.downed || o.def.vehicle || !areHostile(u.team, o.team) || o._hb117 !== b || !(o._hbT117 > u._hbT117)) continue;
+      const ox = worldToCell(o.pos.x), oz = worldToCell(o.pos.z);
+      if (Math.abs(ox - gx) > 8 || Math.abs(oz - gz) > 8) continue;
+      const t = o._contactT && o._contactT[u.team];
+      if (t != null && this.time - t < 10) return true;
+    }
+    return false;
+  }
+  /** His room is coming down: two of its walls on his storey rubble or holed. */
+  _wrecked117(u) {
+    const S = this.structures, gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z), L = u.lvl | 0;
+    if (!S.wallK || !S.inb(gx, gz, L)) return false;
+    const i = S.li(gx, gz, L) * 4, K = window.Structures;
+    let n = 0;
+    for (let e = 0; e < 4; e++) { if (!S.wallM[i + e]) continue; const k = S.wallK[i + e]; if ((k & 7) === K.K_RUBBLE || (k & 8)) n++; }
+    return n >= 2;
+  }
+  /** A WAY OUT NOBODY SEES. The house's ground-floor ways out within 6 cells of
+   *  him, nearest first; for each, the nearest cover within A117_DASH cells of
+   *  the cell outside it — another house's room, or ground and props that give
+   *  A117_COVER, not alight — whose dash, sampled every half cell, no enemy his
+   *  side knows of can see by the exact sightline. The first such, or null:
+   *  then he stays, because a house beats the open. Cached 3 s per cell. */
+  _hiddenExit117(u) {
+    const S = this.structures, gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z), now = this.time;
+    const C = this._exitC117 || (this._exitC117 = new Map()), ck = (u.team * GRID + gz) * GRID + gx, hit = C.get(ck);
+    if (hit && now - hit.t < 3) return hit.v;
+    const b = this._house117(gx, gz), foes = this._known117(u.team, u.pos.x, u.pos.z, A117_SEE_R, 30, 12);
+    const near = S.fires && S.fires.length ? this._fireNear : null, hot = (x, z) => near ? near.has(z * GRID + x) : false;   // (`_fireNear` is left as it was when the last fire went out)
+    const exits = [];
+    for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) {
+      const x = gx + dx, z = gz + dz;
+      if (!inGrid(x, z) || !S.has(x, z) || this._house117(x, z) !== b || !this._roofed117(x, z)) continue;
+      for (let e = 0; e < 4; e++) {
+        const d = SHUFFLE_EDGE[e], ox = x + d[0], oz = z + d[1];
+        if (!inGrid(ox, oz) || this._roofed117(ox, oz) || !this.pathfinder.passable(ox, oz) || S.moveSpan(x, z, 0, e, TILE * 0.5) === 0) continue;
+        exits.push({ ox, oz, d2: dx * dx + dz * dz });
+      }
+    }
+    exits.sort((p, q) => p.d2 - q.d2);
+    let best = null;
+    for (const ex of exits) {
+      let cv = null, cd = Infinity;
+      for (let cz = -A117_DASH; cz <= A117_DASH; cz++) for (let cx = -A117_DASH; cx <= A117_DASH; cx++) {
+        const tx = ex.ox + cx, tz = ex.oz + cz, dd = cx * cx + cz * cz;
+        if (dd >= cd || dd < 1 || !inGrid(tx, tz) || !this.pathfinder.passable(tx, tz) || hot(tx, tz)) continue;
+        const room = S.has(tx, tz) && this._roofed117(tx, tz) && S.insideAt(tx, tz, 0) >= 0.35;
+        if (room ? this._house117(tx, tz) === b : this._coverAtCell(tx, tz) < A117_COVER) continue;
+        cd = dd; cv = { x: tx, z: tz };
+      }
+      if (!cv) continue;
+      const n = Math.max(2, Math.ceil(Math.sqrt(cd) * 2)), pts = [];
+      for (let i = 0; i <= n; i++) { const t = i / n; pts.push({ x: cellCenter(ex.ox) + (cellCenter(cv.x) - cellCenter(ex.ox)) * t, z: cellCenter(ex.oz) + (cellCenter(cv.z) - cellCenter(ex.oz)) * t }); }
+      if (foes.length && this._seers117(foes, pts, true).length) continue;
+      best = { ox: ex.ox, oz: ex.oz, cx: cv.x, cz: cv.z };
+      break;
+    }
+    C.set(ck, { t: now, v: best });
+    if (C.size > 512) C.clear();
+    return best;
+  }
+  /** A man of his section down in this house. */
+  _lossIn117(u) {
+    const sq = u.squad;
+    if (!sq || !sq.members) return false;
+    const b = this._house117(worldToCell(u.pos.x), worldToCell(u.pos.z));
+    for (const o of sq.members) {
+      if (o === u || (o.alive && !o.downed)) continue;
+      const x = worldToCell(o.pos.x), z = worldToCell(o.pos.z);
+      if (inGrid(x, z) && this._house117(x, z) === b && this._roofed117(x, z)) return true;
+    }
+    return false;
+  }
+  /** …and his section in the house goes with him, by the same way out — a man
+   *  left behind is pulled back in by the section's tether, and goes again. */
+  _squadLeave117(u, ex) {
+    const sq = u.squad;
+    if (!sq || !sq.members) return;
+    const b = this._house117(worldToCell(u.pos.x), worldToCell(u.pos.z));
+    for (const o of sq.members) {
+      if (o === u || !o.alive || o.downed || o.explicit || o._exit117 || (this.fpv && this.fpv.unit === o) || !o._inRoom()) continue;
+      if (this._house117(worldToCell(o.pos.x), worldToCell(o.pos.z)) !== b) continue;
+      if (this._leave117(o, ex)) { o._fellBackT = this.time; this._fellBack = (this._fellBack || 0) + 1; }
+    }
+  }
+  _leave117(u, ex) {
+    const wasAI = this._aiOrders; this._aiOrders = true;
+    u._strSpot = null; u.hold = false;
+    try { u.orderMove(cellCenter(ex.ox), cellCenter(ex.oz), false, 'fast', 0); } finally { this._aiOrders = wasAI; }
+    if (!u.path.length || u._pathPartial) return false;
+    u._exit117 = { cx: ex.cx, cz: ex.cz, ox: ex.ox, oz: ex.oz, t: this.time };
+    this._left117 = (this._left117 || 0) + 1;
     return true;
   }
   /** (round 115) The men stacked at doors: the earliest there goes in when the
@@ -58984,15 +59587,30 @@ class Game {
         set.delete(u); continue;
       }
       const q = s.q;
+      // (round 117) holding for the base of fire (or firing in it): when it is
+      // his turn, to the wall
+      if (s.wait117) {
+        const goT = s.bof117 ? (q.firstAt117 ? q.firstAt117 + A117_BOF_LAG : Infinity) : (q.goT117 || 0);
+        if (now < goT && now - q.made < A117_WAIT_MAX) continue;
+        s.wait117 = false;
+        const wasExp = u.explicit;
+        u.groundAtk = null;
+        u.orderMove(s.sx, s.sz, false, s.mode === 'sneak' ? 'sneak' : 'fast', q.L);
+        if (!u.path.length && worldToCell(u.pos.x) === worldToCell(s.sx) && worldToCell(u.pos.z) === worldToCell(s.sz)) { u.path = [{ x: s.sx, z: s.sz, lvl: q.L }]; u.pathIdx = 0; u.state = 'move'; }
+        u._strSpot = s.key; u.explicit = wasExp; u._pendingCover = true;
+        if (!u.path.length || u._pathPartial) { u._stack = null; set.delete(u); u.orderMove(s.tx, s.tz, false, s.mode, s.L); u._strSpot = s.key; u.explicit = wasExp; }
+        continue;
+      }
       if (s.at < 0) {
         if (u.path.length && hyp(u.pos.x - s.sx, u.pos.z - s.sz) > STACK_ARRIVE) continue;   // still on his way to the wall
         s.at = now; u.posture = 'defend'; u.targetFace = Math.atan2(cellCenter(q.ix) - u.pos.x, cellCenter(q.iz) - u.pos.z);
+        if (!q.firstAt117) q.firstAt117 = now;
       }
       const waited = now - s.at;
       // (round 115) inside the house the drill is quick: a short gap, a short
       // wait for the grenade, and nobody held at an inner door for long — a
       // section that stops at every door gives the next room the time it needs
-      const gap = q.inner ? STACK_GAP_IN : STACK_GAP, nadeWait = q.inner ? NADE_ROOM_WAIT * 0.6 : NADE_ROOM_WAIT;
+      const a117 = this._a117p('nade'), gap = a117 && q.burstT && now >= q.burstT ? A117_GAP : q.inner ? STACK_GAP_IN : STACK_GAP, nadeWait = q.inner ? NADE_ROOM_WAIT * 0.6 : NADE_ROOM_WAIT;
       if (waited < (q.inner ? STACK_MAX_IN : STACK_MAX)) {
         let first = true;
         for (const o of set) {
@@ -59000,11 +59618,38 @@ class Game {
           if (o !== u && os && os.q === q && os.at >= 0 && (os.at < s.at || (os.at === s.at && o.id < u.id))) { first = false; break; }
         }
         if (!first || now - q.last < gap) continue;
-        if (!q.nadeT && this._roomFoe(u.team, q.ix, q.iz)) {
+        // (round 117) A WALL BLOWN: the man with the charge sets it against the
+        // wall, the stack waits out its fuse, and the hole is the way in
+        const bq = this._a117() ? q.breach117 : null;
+        if (bq && !bq.done) {
+          if (!bq.blowT) {
+            const c = bq.by, cs = c && c._stack;
+            if (c && c.alive && !c.downed && c.engSatchel > 0 && cs && cs.q === q && cs.at >= 0) { c.engSatchel--; bq.blowT = now + A117_FUSE; }
+            else if (waited > STACK_MAX * 0.4) bq.done = true;            // the charge never came: no hole
+            continue;
+          }
+          if (now < bq.blowT) continue;
+          bq.done = true; this._blow117(q, bq.by); q.last = now;
+          continue;
+        }
+        // (round 117) the first room of a house the side knows is held is
+        // grenaded before anybody goes in; inside, the next room only when it
+        // is known to be held itself
+        if (!q.nadeT && (a117 ? this._held117(u.team, q.ix, q.iz, !q.inner) : this._roomFoe(u.team, q.ix, q.iz))) {
+          if (a117) q.held = true;
           // the grenade from whoever in the stack has one — himself first
           let th = null;
           for (const o of set) { const os = o._stack; if (os && os.q === q && os.at >= 0 && o.nades > 0 && o.def.grenade && (!th || o === u)) th = o; }
-          if (th && th._throwGrenade(cellCenter(q.ix), cellCenter(q.iz))) { q.nadeT = now; q.last = now; this._stackNades = (this._stackNades || 0) + 1; continue; }
+          // (round 117) …one whose arm is ready, where the stack has one: the first
+          // man stood at the wall ten seconds waiting for the arm of the man who
+          // had just thrown at a window on the way, and was shot there
+          if (a117 && th && th.grenadeCd > 0) for (const o of set) { const os = o._stack; if (os && os.q === q && os.at >= 0 && o.nades > 0 && o.def.grenade && !(o.grenadeCd > 0)) { th = o; break; } }
+          const aim = a117 && th ? this._nadeAim117(th, q) : null;   // (round 117) through the doorway
+          if (th && th._throwGrenade(aim ? aim.x : cellCenter(q.ix), aim ? aim.z : cellCenter(q.iz), a117 ? A117_COOK : 0, aim ? aim.from : null)) {
+            q.nadeT = now; q.last = now; this._stackNades = (this._stackNades || 0) + 1;
+            if (a117) q.burstT = now + this._burstIn117(th);
+            continue;
+          }
           if (th && th.grenadeCd > 0 && waited < STACK_MAX * 0.4) continue;   // his arm is still coming back
           // (round 115) no grenade in the stack: smoke into the doorway, and in under it
           if (this.room115 === true && !th) {
@@ -59014,7 +59659,8 @@ class Game {
           }
           q.nadeT = -1;                                 // nobody has one: in without one
         }
-        if (q.nadeT > 0 && now - q.nadeT < nadeWait) continue;
+        // (round 117) …and in ON THE BURST, the defenders' heads still down
+        if (q.nadeT > 0 && (a117 ? now < (q.burstT || q.nadeT + NADE_ROOM_WAIT) + NADE_ENTER117 : now - q.nadeT < nadeWait)) continue;
       }
       q.last = now;
       u._stack = null; set.delete(u);
@@ -59022,7 +59668,7 @@ class Game {
       u.orderMove(s.tx, s.tz, false, 'fast', s.L);
       u._strSpot = s.key; u._pendingCover = true;
       // (round 115) …and the next room the enemy holds on his way: stack again at its door
-      if (this.room115 === true) { this._roomsCleared = (this._roomsCleared || 0) + 1; this._entryPlan(u, s.key, s.tx, s.tz, s.L, 'fast', q); }
+      if (this.room115 === true || this._a117p('inner')) { this._roomsCleared = (this._roomsCleared || 0) + 1; this._entryPlan(u, s.key, s.tx, s.tz, s.L, 'fast', q); }
     }
   }
   /**
@@ -59047,6 +59693,23 @@ class Game {
     const per = Math.min(n, Math.max(4, Math.ceil(n * (dt || 0.05) / FALLBACK_S)));
     let c = this._fbCur | 0;
     const now = this.time;
+    // (round 117) which house each man is in, and since when (`_enemyInHouse117`)
+    if (this._a117p('leave')) for (const u of U) {
+      if (!u.alive || u.def.vehicle) continue;
+      const hx = worldToCell(u.pos.x), hz = worldToCell(u.pos.z);
+      const hb = inGrid(hx, hz) && S.has(hx, hz) && u._inRoom() ? this._house117(hx, hz) : 0;
+      if (hb !== u._hb117) { u._hb117 = hb; u._hbT117 = now; }
+    }
+    // (round 117) the men out of a door: on from it to the cover, at a run
+    if (this._a117()) for (const u of U) {
+      const x = u._exit117;
+      if (!x) continue;
+      if (!u.alive || u.downed || now - x.t > 25) { u._exit117 = null; continue; }
+      if (worldToCell(u.pos.x) !== x.ox || worldToCell(u.pos.z) !== x.oz) continue;
+      u._exit117 = null;
+      const wasAI = this._aiOrders; this._aiOrders = true;
+      try { u.orderMove(cellCenter(x.cx), cellCenter(x.cz), false, 'fast', 0); } finally { this._aiOrders = wasAI; }
+    }
     // the men on their way to a back window: at it, over the sill and away
     for (const u of U) {
       const v = u._vaultTo;
@@ -59069,7 +59732,7 @@ class Game {
       const hurt = u.hp < u.maxHp * 0.8 || (u.suppression || 0) > 0.35 || u.suppState === 'Pinned';
       // (round 116b) `fallEarly116 = true`: at the long odds (FALLBACK_ODDS x 1.5)
       // he goes before he is hit — a man pinned in a room does not run
-      if (!hurt && this.fallEarly116 !== true) continue;
+      if (!hurt && this.fallEarly116 !== true && !this._a117p('leave')) continue;
       // the enemy known round the house, against his own side in it
       const ix = this._knownIndex(u.team), R2 = FALLBACK_R * FALLBACK_R;
       let foes = 0, fx = 0, fz = 0;
@@ -59078,11 +59741,23 @@ class Game {
         const dx = ix.x[i] - u.pos.x, dz = ix.z[i] - u.pos.z;
         if (dx * dx + dz * dz <= R2) { foes++; fx += ix.x[i]; fz += ix.z[i]; }
       }
-      if (foes < 3) continue;
+      const inside117 = this._a117p('leave') && this._enemyInHouse117(u);
+      if (foes < 3 && !inside117) continue;
       let mates = 0;
       for (const o of U) {
         if (!o.alive || o.downed || o.team !== u.team || o.def.vehicle) continue;
         if (Math.abs(o.pos.x - u.pos.x) < TILE * 3 && Math.abs(o.pos.z - u.pos.z) < TILE * 3) mates++;
+      }
+      if (this._a117p('leave')) {
+        // (round 117) LOSING IT — the enemy in the house, the room coming down,
+        // or overmatched with the cost already being paid (he is hit or pinned,
+        // or a man of his section is down in the house) — and only by a way out
+        // whose dash to cover no known enemy sees; the section goes with him
+        const losing = inside117 || this._wrecked117(u) || (foes >= FALLBACK_ODDS * mates && (hurt || this._lossIn117(u)));
+        if (!losing) continue;
+        const ex = this._hiddenExit117(u);
+        if (ex && this._leave117(u, ex)) { u._fellBackT = now; this._fellBack = (this._fellBack || 0) + 1; this._squadLeave117(u, ex); }
+        continue;
       }
       if (foes < FALLBACK_ODDS * mates) continue;
       if (!hurt && foes < FALLBACK_ODDS * 1.5 * mates) continue;
@@ -64776,6 +65451,12 @@ class Game {
     // already on his way to a cell the fire has not reached: keep going
     const ft = u._fleeTo;
     if (ft && u.path && u.path.length && clear(ft.x, ft.z)) return;
+    // (round 117) …by a way out no enemy sees, where the house has one; else
+    // out regardless, below — a burning house does not beat the open
+    if (this._a117p('leave') && u._inRoom()) {
+      const ex = this._hiddenExit117(u);
+      if (ex && clear(ex.cx, ex.cz) && this._leave117(u, ex)) { u._fledFire = (u._fledFire || 0) + 1; u._fleeTo = { x: ex.cx, z: ex.cz }; return; }
+    }
     // (round 115) …and out on the side AWAY from the enemy: a man who leaves
     // a burning house by the door that faces the guns has swapped one death
     // for another. Each cell within FLEE_FOE_R cells of the nearest known foe
@@ -67526,6 +68207,7 @@ class Game {
       this.scene.background.copy(horizon);
       this.hemiLight.color.copy(horizon);
     }
+    if (this.skyNew) this.skyNew.daylight(this, elDeg, day, night, w);   // round 117: sun, cloud light and horizon (a no-op with game.sky117 off)
     this._daylight = day;
     // WHAT UNITS AND SMOKE ARE LIT BY (round 97). Both used to carry light of
     // their own that the night never took away: the unit shader's bounce fill
@@ -69449,6 +70131,17 @@ class Game {
     if (typeof Unit === 'function') Unit._seq = 0;
     this._squadSeq = 0;
     this._shufCur = 0;                 // (round 110) `_windowShuffle`'s place in the army
+    // (round 117) THE HOUSE ASSAULTS' STATE, which outlived its battle: a door's
+    // stack queue is reused while `time - made < 120`, and `time` goes back to 0
+    // on this path — so the next battle's section at the same door took up the
+    // last one's queue, its grenade already thrown (`nadeT`) and its ranks run
+    // out along the wall. With it the men in stacks and the way-in and way-out
+    // caches.
+    if (this._doorQs) this._doorQs.clear();
+    if (this._stackers) this._stackers.clear();
+    if (this._entryC117) this._entryC117.clear();
+    if (this._exitC117) this._exitC117.clear();
+    if (this._fireNear) this._fireNear.clear();
     if (this.pathfinder) {
       this.pathfinder.newFrame();
       this.pathfinder.lastPartial = false;
@@ -71140,6 +71833,7 @@ class Game {
     }
     if (this.sky) {
       const bolt = this.sky.update(dt, this.camera, this.wind ? hyp(this.wind.x, this.wind.z) : 0);
+      if (this.skyNew) this.skyNew.frame(this, dt, bolt);              // round 117: table rows, drift, lightning
       if (bolt > 0) {                                   // lightning lights the field for a frame
         this.ambientLight.intensity += bolt * 1.6;
         this.sun.intensity += bolt * 1.3;
@@ -71312,12 +72006,15 @@ let game = null;
  *  called for a new reason. */
 function preloadExtModels() {
   if (!window.ExtModels) return;
+  // (round 117) the models are decoded when first asked for (`ExtModels.preload`, `lazy`): all 254 at boot held
+  // 4.5 GB of decoded maps. `?eagerModels=1` is the old arm, for measuring.
+  try { if (/[?&]eagerModels=1/.test(location.search)) ExtModels.lazy = false; } catch (e) {}
   // The baked models (round 97): all built to one convention by tools/blender —
   // metres at 0.75 units each, nose on +Z, ground at 0, a `Turret` node whose
   // origin is the ring, a `Muzzle` node, one baked texture, drawn Lambert.
   for (const file of Object.keys(BAKED_MODELS)) {
     ExtModels.preload(file, 'assets/models/' + file + '/' + file + '.gltf',
-      { scale: 0.75, yaw: 0, centreOn: '^Hull$', turret: '^Turret$', turretPivot: 'node', lambert: true, wheels: true });
+      { scale: 0.75, yaw: 0, centreOn: '^Hull$', turret: '^Turret$', turretPivot: 'node', lambert: true, wheels: true, lazy: true });
     ExtModels.onReady(file, () => {
       const g = window.game;
       if (!g || !g.units) return;
@@ -71330,7 +72027,7 @@ function preloadExtModels() {
   // its file lands has the old procedural gun; rebuild it when it arrives.
   for (const file of Object.keys(CREW_WEAPON_MODELS)) {
     ExtModels.preload(file, 'assets/models/' + file + '/' + file + '.gltf',
-      { scale: CREW_SCALE, yaw: 0, centreOn: '^Hull$', lambert: true });
+      { scale: CREW_SCALE, yaw: 0, centreOn: '^Hull$', lambert: true, lazy: true });
     ExtModels.onReady(file, () => {
       const g = window.game;
       if (!g || !g.units) return;
@@ -71346,7 +72043,7 @@ function preloadExtModels() {
   for (const file of Object.keys(HELD_WEAPON_MODELS).concat(Object.keys(PACK_MODELS))) {
     const types = HELD_WEAPON_MODELS[file] ? HELD_WEAPON_MODELS[file].types : PACK_MODELS[file];
     ExtModels.preload(file, 'assets/models/' + file + '/' + file + '.gltf',
-      { scale: CREW_SCALE, yaw: 0, centreOn: '^Hull$', lambert: true });
+      { scale: CREW_SCALE, yaw: 0, centreOn: '^Hull$', lambert: true, lazy: true });
     ExtModels.onReady(file, () => {
       const g = window.game;
       if (!g || !g.units) return;
@@ -71537,6 +72234,7 @@ function boot() {
   campaignInstall();
   battleSetupInstall();    // (round 111) after the squad layer, whose spawnSquad it deploys with
   playerOrdersInstall();   // (round 110) after every module that puts a command on the prototype
+  if (typeof ui117Install === 'function') ui117Install();   // (round 117) the battle HUD's one visual language (game.ui117); after every module that builds HUD DOM
   game.loadMap(defaultMapIdx());   // the opening field — see DEFAULT_MAP_NAME
   game.setMode('edit');
 }

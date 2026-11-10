@@ -31,6 +31,7 @@
   // A normal-mapped model is lit per pixel (see _prepare); these are its dull
   // sheen. `perPixel` false = the Lambert arm, for measuring what it costs.
   E.perPixel = true;
+  E.lazy = true;       // (round 117) decode a model when it is first asked for, not at boot (see `preload`)
 
   /** Put an object reference on `userData` WITHOUT it being copied by clone.
    *
@@ -61,19 +62,59 @@
    *  no network at all. `url` stays as the fallback for anything not packed. */
   E.preload = function (name, url, opts) {
     if (cache[name]) return;
-    var rec = cache[name] = { proto: null, state: 'loading', onReady: [], opts: Object.assign({ crewKey: name }, opts || {}) };
+    // (round 117) LAZY. Every pack used to be decoded here, at boot: 254 models,
+    // two 2048x2048 or 1024x1024 maps apiece, 4.5 GB of decoded pixels held for
+    // the life of the page (measured: a 6.5 GB renderer one minute after load,
+    // which is what reset a 16 GB machine running several pages). A battle
+    // fields a dozen or two of them. `opts.lazy` registers the model and decodes
+    // it the first time something asks (`ready`, `clone`, `want`); the caller
+    // gets null meanwhile and is rebuilt by its `onReady`, exactly as a unit
+    // built before a boot-time load landed always was. `ExtModels.lazy = false`
+    // (or `?eagerModels=1`) before boot is the old arm.
+    var lazy = !!(opts && opts.lazy) && E.lazy !== false;
+    cache[name] = { proto: null, state: lazy ? 'idle' : 'loading', onReady: [], url: url, opts: Object.assign({ crewKey: name }, opts || {}) };
+    if (!lazy) E._load(name);
+  };
+  /** (round 117) Ask for a lazily registered model: starts its decode, once. */
+  E.want = function (name) {
+    var r = cache[name];
+    if (r && r.state === 'idle') { r.state = 'loading'; E._load(name); }
+  };
+  /** (round 117) Resolves when nothing is decoding. A SEEDED PROBE MUST PRIME: load the map (which asks for its
+   *  models), `await ExtModels.settle()`, then load it again and run — a battle begun on the fallback models is a
+   *  different battle from one begun on the scale models (Village 1697120508 against -1386000172, round 117). */
+  E.settle = function (ms) {
+    var t0 = Date.now();
+    return new Promise(function (res) {
+      (function poll() { if (E.stats().loading === 0 || Date.now() - t0 > (ms || 30000)) res(E.stats()); else setTimeout(poll, 50); })();
+    });
+  };
+  /** (round 117) How many models are in each state — the probe for the above. */
+  E.stats = function () {
+    var c = { idle: 0, loading: 0, ready: 0, failed: 0 };
+    for (var k in cache) c[cache[k].state] = (c[cache[k].state] || 0) + 1;
+    return c;
+  };
+  E._load = function (name) {
+    var rec = cache[name], url = rec.url;
     if (!root.THREE || !root.THREE.GLTFLoader) {
       rec.state = 'failed';
       console.warn('[extmodels] no GLTFLoader — ' + name + ' will use its procedural model');
       return;
     }
-    var done = function (gltf) {
+    // (round 117) ON THE COSMETIC STREAM. A lazy model lands in the middle of a battle, not at boot, and preparing
+    // it and rebuilding the units that waited for it makes meshes and materials (four `Math.random` draws apiece
+    // for a UUID): none of that may move the simulation's rolls. `cosmeticScope` is the page's (absent in tests).
+    var land = function (gltf) {
       try {
         rec.proto = E._prepare(gltf.scene, rec.opts);
         rec.state = 'ready';
         var cbs = rec.onReady; rec.onReady = [];
         for (var i = 0; i < cbs.length; i++) { try { cbs[i](); } catch (e) {} }
       } catch (e) { rec.state = 'failed'; console.warn('[extmodels] ' + name + ' prepare failed', e); }
+    };
+    var done = function (gltf) {
+      if (typeof root.cosmeticScope === 'function') root.cosmeticScope(land, null, [gltf]); else land(gltf);
     };
     var packed = root.EXT_MODEL_DATA && root.EXT_MODEL_DATA[name];
     if (packed) {
@@ -1042,12 +1083,12 @@
     for (var z = 0; z < out.length; z++) root.add(out[z]);
   };
 
-  E.ready = function (name) { var r = cache[name]; return !!(r && r.state === 'ready'); };
+  E.ready = function (name) { var r = cache[name]; if (r && r.state === 'idle') E.want(name); return !!(r && r.state === 'ready'); };
   E.onReady = function (name, cb) {
     var r = cache[name];
     if (!r) return;
     if (r.state === 'ready') { cb(); return; }
-    if (r.state === 'loading') r.onReady.push(cb);
+    if (r.state === 'loading' || r.state === 'idle') r.onReady.push(cb);
   };
 
   // ---- PAINT VARIANTS (round 98) --------------------------------------------
@@ -1099,6 +1140,7 @@
    *  `opts.variant` paints it for another theatre when that variant has loaded. */
   E.clone = function (name, opts) {
     var r = cache[name];
+    if (r && r.state === 'idle') E.want(name);     // (round 117) first asked for: start its decode
     if (!r || r.state !== 'ready' || !r.proto) return null;
     var g = r.proto.clone(true);
     var mats = [];

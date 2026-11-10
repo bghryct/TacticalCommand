@@ -295,7 +295,13 @@
    *  with `game.propPack113 = false`, or `Structures.KIT.on = false` (then
    *  rebuild): the boxes below. Drawing only — the simulation reads the wall
    *  grid. Inside doors keep the boxes: a town has thousands of them. */
-  var KIT = { on: true, quoins: false }, _kit = null;   // quoins: unfinished, off
+  var KIT = { on: true, quoins: false, lintels: true, gutters: true }, _kit = null;   // quoins: unfinished, off
+  /** (round 117) THE FINISHING PIECES: a lintel over every outside window and
+   *  door, a gutter along every eave. Faces in the chunk's one merged geometry
+   *  (no draw call, nothing the sim reads): `Structures.KIT.lintels` and
+   *  `.gutters` (false, then rebuild the chunks), and both off with
+   *  `game.mat117 = false`. */
+  function k117(name) { return KIT[name] !== false && !(window.game && window.game.mat117 === false); }
   function kitPieces() {
     var P = window.PROP_PACK;
     if (!KIT.on || !P || !P.chimStack || !P.chimPots || !P.doorFrame || !P.doorLeaf || !P.doorStep || typeof window.unpackCompact !== 'function'
@@ -595,6 +601,15 @@
     // shutters in about the boxes' triangles (42 against 36 — a town has tens
     // of thousands), the reveal's and the joints' shading baked by Cycles;
     // turned to whichever side is outside, tinted per house as before
+    // (round 117) THE LINTEL. An opening was a hole cut in a sheet: nothing
+    // carried the wall over it. A dressed stone head (a timber one in a timber
+    // wall) 22 cm deep, bearing 18 cm each side, standing 3 cm proud of the
+    // face — its front face only, two triangles a window.
+    if (out && k117('lintels')) {
+      var lwd = pal.mat === MATS[M_WOOD] || pal.mat === MATS[M_PLANK];
+      var lc = hexc(lwd ? 0x4a3a2a : 0x9a9486, 0.96 + ((seed >>> 7) % 8) * 0.01);
+      bx(0, out * 0.012 * S, y + top + 0.08 * S, ow + 0.26 * S, 0.16 * S, WALL_TH + 0.024 * S, lc.r, lc.g, lc.b, OB);
+    }
     var KW = kitPieces();
     if (KW && KW.win) {
       var sg = out ? (horiz ? (out * d[1] > 0 ? 1 : -1) : (out * d[0] > 0 ? 1 : -1)) : 1;
@@ -637,6 +652,13 @@
     function bx(a, b2, yy, la, ly, ln, r, g, b, faces) {
       B.box(horiz ? wx + a : wx + b2 * d[0], yy, horiz ? wz + b2 * d[1] : wz + a,
         horiz ? la : ln, ly, horiz ? ln : la, 0, 0, 0, r, g, b, faces);
+    }
+    // (round 117) …and the lintel over an outside door (see the window's)
+    if (out && k117('lintels')) {
+      var lwd = pal.mat === MATS[M_WOOD] || pal.mat === MATS[M_PLANK];
+      var lc = hexc(lwd ? 0x4a3a2a : 0x9a9486, 0.97);
+      bx(0, out * 0.012 * S, y + dh + 0.09 * S, open + 0.30 * S, 0.18 * S, WALL_TH + 0.024 * S, lc.r, lc.g, lc.b,
+        horiz ? (out * d[1] > 0 ? 1 : 2) : (out * d[0] > 0 ? 4 : 8));
     }
     var KP = out ? kitPieces() : null;
     if (KP) {
@@ -788,6 +810,17 @@
     B.box(cx, base + RISE * 0.5, cz,
       alongX2 ? len + ov : T + ov, 0.17 * S, alongX2 ? T + ov : len + ov,
       alongX2 ? 0 : dd[1] * pitch, 0, alongX2 ? -dd[0] * pitch : 0, c.r, c.g, c.b);
+    // (round 117) THE GUTTER. A roof ended in the cut edge of a slab. Along
+    // the eaves (the lowest course, rank 0) a zinc gutter hangs on the slab's
+    // end: its top, its front and its underside, six triangles an eave cell.
+    // Not on thatch, which has none, nor on a roof that is coming down.
+    if (!(rank > 0) && RISE <= 1 && !(dmg > 0.2) && k117('gutters')) {
+      var gcp = T / len, gsp = RISE / len;
+      var go = T * 0.5 + ov * 0.5 * gcp + 0.03 * S, gy = base - ov * 0.5 * gsp - 0.05 * S;
+      var gc = hexc(0x3c4042, 1);
+      B.box(cx + dd[0] * go, gy, cz + dd[1] * go, alongX2 ? 0.09 * S : T, 0.08 * S, alongX2 ? T : 0.09 * S, 0, 0, 0, gc.r, gc.g, gc.b,
+        48 | (alongX2 ? (dd[0] > 0 ? 4 : 8) : (dd[1] > 0 ? 1 : 2)));
+    }
   }
 
   /** Stairs / ramp / ladder inside one cell (or one half of a two-cell run). */
@@ -2409,6 +2442,7 @@
             var inHere = this._roomAt(gx, gz, L), inThere = this._roomAt(ox, oz, L);
             var outS = inThere === inHere ? 0 : (inThere ? -1 : 1);
             var pal = paletteOf(this.bid[gz * G.GRID + gx] || ((gx >> 3) * 92821 ^ (gz >> 3) * 68917));
+            pal.mat = MATS[m];   // (round 117) what the wall is made of: a timber wall carries a timber lintel
             if (k2 === K_WINDOW && pairs()) {
               emitWindowDressing(B, cx, yw, cz, e, outS, pal, seed0 + e * 29 + L * 3, -T * 0.25);
               emitWindowDressing(B, cx, yw, cz, e, outS, pal, seed0 + e * 29 + L * 3 + 64, T * 0.25);
@@ -2717,6 +2751,13 @@
     if (o.preset) for (var pi = 0; pi < PRESETS.length; pi++) if (PRESETS[pi].id === o.preset) pre = PRESETS[pi];
     if (pre) for (var key in pre) if (o[key] === undefined && key !== 'id' && key !== 'name') o[key] = pre[key];
 
+    // (round 117) A YARD DOOR: a house of a block had one onto its yard; every
+    // house now has one in the wall opposite its street door where nothing stands
+    // across it — the way out of the back a house that is lost is left by
+    // (`Game._hiddenExit117`). With the game's assault117. (Read into a local:
+    // `o` is the map's own record, and writing it carried the doors into every
+    // later load of that map with the switch off.)
+    var backDoor = o.backDoor !== undefined ? !!o.backDoor : !!(window.game && window.game.assault117 === true && !(window.game.a117off && window.game.a117off.yard));
     var x0 = Math.min(o.gx, o.gx + o.w - 1), z0 = Math.min(o.gz, o.gz + o.d - 1);
     var w = Math.max(1, Math.abs(o.w | 0)), d = Math.max(1, Math.abs(o.d | 0));
     x0 = Math.max(0, Math.min(G.GRID - w, x0)); z0 = Math.max(0, Math.min(G.GRID - d, z0));
@@ -2797,7 +2838,7 @@
     // ---- the back door, onto the yard (a block's house) ---------------------
     // In the middle of the wall opposite the street door, where nothing stands
     // across it — the house next door built later makes a shared wall solid.
-    if (o.backDoor) {
+    if (backDoor) {
       var bEdge = (doorEdge + 2) % 4, bd = EDGE_D[bEdge];
       var bx = (bEdge === 0 || bEdge === 2) ? x0 + ((w / 2) | 0) : (bEdge === 3 ? x0 : x1);
       var bz = (bEdge === 0 || bEdge === 2) ? (bEdge === 0 ? z0 : z1) : z0 + ((d / 2) | 0);

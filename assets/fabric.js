@@ -81,9 +81,27 @@
     // dark shadows the look is built on, and the courses and brick show in
     // them. Rain (Ortona) and night (23:30) checked: no wall glows.
     sky: 3.6,
+    // (round 117) render fallen off where the noise passes `fallen` (1 = never),
+    // and how dark a rain streak on the render that is left
+    fallen: 0.69,
+    streak: 0.26,
   };
   /** Live, so it can be tuned in the page: Fabric.sky.value = 2.0 */
   F.sky = { value: F.defaults.sky };
+  // (round 117) RELIEF. A wall was a picture of a wall: the Blender tile said
+  // what colour each brick, stone, board or roof tile is and where its joint
+  // runs, and the light fell on it as on a sheet of paper (the material is
+  // Lambert, lit per vertex). The tile's own channels are a height: a unit's
+  // face stands proud, its joint (G) and cavity (B) lie back, its grain (R)
+  // is a few millimetres of roughness. That height bends the face's normal
+  // per fragment (screen-space derivatives, no second sample, no new draw),
+  // and the sun's share of the light is re-weighted by the bent normal over
+  // the flat one, the sky's by how far it tips up: a low sun rakes along a
+  // wall and every course throws its line. `value` is the joint's depth in
+  // world units (about a centimetre, scaled with the buildings); 0, or
+  // `game.mat117 = false`, is the flat wall again, live.
+  F._relief = 0.0075;
+  F.relief = { get value() { var g = root.game; return (g && g.mat117 === false) ? 0 : F._relief; }, set value(v) { F._relief = +v || 0; } };
   /** TRUE SCALE (round 105): the game's building factor, once. The courses
    *  above were chosen for a storey of 2.6 units; a life-size storey is three
    *  metres, and its tiles and blocks — and the range at which a course is
@@ -95,6 +113,7 @@
     D.tileCourse *= k; D.tileRun *= k; D.wallCourse *= k; D.wallRun *= k;
     D.brickCourse *= k; D.brickRun *= k; D.brickNear *= k; D.brickFar *= k; D.boardRun *= k; D.weather *= k;
     D.fadeNear *= k; D.fadeFar *= k;
+    F._relief *= k;
   };
 
   function glsl(o) {
@@ -118,6 +137,9 @@
   function chunk(o) {
     var f = function (v) { return (+v).toFixed(4); };
     return [
+      '#ifdef FAB_RELIEF',
+      '  float fbRelD = 1.0; float fbRelI = 1.0;',
+      '#endif',
       '{',
       '  float fbUp = abs(normalize(vFabN).y);',
       // A near-vertical face is masonry; anything pitched or flat is roof.
@@ -131,6 +153,14 @@
       '  float fbRed = (diffuseColor.r - diffuseColor.g) / (diffuseColor.r + 0.0001);',
       '  bool  fbBrick = !fbRoof && fbRed > 0.35;',
       '  bool  fbWood  = !fbRoof && !fbBrick && fbRed > 0.18;',
+      // (round 117) PAINTED JOINERY IS BOARDS. A shutter, a door leaf or a
+      // painted frame is blue, green, teal, olive or ox-blood, and by the test
+      // above a blue shutter was coursed stone with mortar joints and a red
+      // one brick. No wall is bluer or greener than it is red, and no brick
+      // carries a third of its red in blue: those are paint on boards.
+      '#ifdef FAB_RELIEF',
+      '  if (uFabRelief > 0.0 && !fbRoof && (diffuseColor.b > diffuseColor.r * 1.06 || diffuseColor.g > diffuseColor.r * 1.02 || (fbBrick && diffuseColor.b > diffuseColor.r * 0.29))) { fbWood = true; fbBrick = false; }',
+      '#endif',
       '  float fbC = fbRoof ? ' + f(o.tileCourse) + ' : fbBrick ? ' + f(o.brickCourse) + ' : ' + f(o.wallCourse) + ';',
       '  float fbR = fbRoof ? ' + f(o.tileRun) + ' : fbBrick ? ' + f(o.brickRun) + ' : ' + f(o.wallRun) + ';',
       // Which course, and which unit along it. Courses run in Y for both — a
@@ -181,7 +211,7 @@
       // the layer and the coordinates first, and ONE sample outside any
       // branch: a mipmapped lookup needs its neighbours in the same flow
       '  float fbLum = (diffuseColor.r + diffuseColor.g + diffuseColor.b) / 3.0;',
-      '  float fbL; vec2 fbUv;',
+      '  float fbL; vec2 fbUv; float fbGapM = 0.0;',
       '  {',
       '    if (fbRoof) {',
       '      bool fbStraw = diffuseColor.r > diffuseColor.b * 1.45 && diffuseColor.g > diffuseColor.b * 1.25 && fbRed < 0.35;',
@@ -195,10 +225,32 @@
       '      fbL = 0.0; fbUv = vec2(fbAlong / ' + f(4 * o.brickRun) + ', vFabP.y / ' + f(12 * o.brickCourse) + ');',
       '    } else if (fbLum > 0.5) {',
       '      fbL = 2.0; fbUv = vec2(fbAlong, vFabP.y) / ' + f(3 * o.wallCourse) + ';',
+      // (round 117) RENDER COMES OFF. A lime-plastered front was one even
+      // sheet; in patches a metre or two across it has fallen and the rubble
+      // wall behind shows (the stone tile, in its own colour), the edge of
+      // the plaster standing proud of it for the relief to catch.
+      '#ifdef FAB_RELIEF',
+      '      float fbGn = fbNoise(vFabP * ' + (1 / (0.42 * +o.weather)).toFixed(4) + ' + 31.0) * 0.7 + fbNoise(vFabP * ' + (1 / (0.13 * +o.weather)).toFixed(4) + ' + 7.0) * 0.3;',
+      '      if (uFabRelief > 0.0 && fbLum > 0.66 && fbGn > ' + (+o.fallen).toFixed(3) + ') { fbGapM = 1.0; fbL = 1.0; fbUv = vec2(fbAlong / ' + f(2 * o.wallRun) + ', vFabP.y / ' + f(3 * o.wallCourse) + '); }',
+      '#endif',
       '    } else {',
       '      fbL = 1.0; fbUv = vec2(fbAlong / ' + f(2 * o.wallRun) + ', vFabP.y / ' + f(3 * o.wallCourse) + ');',
       '    }',
       '  }',
+      // (round 117) fallen render and rain streaks: BEFORE the sample, which
+      // stays the one lookup outside any branch
+      '#ifdef FAB_RELIEF',
+      // the wall behind fallen render, and on the render that is left the
+      // streaks rain and soot have drawn down it (long in Y, narrow along)
+      '  if (uFabRelief > 0.0 && uFabTexOn > 0.5 && !fbRoof) {',
+      '    if (fbGapM > 0.5) diffuseColor.rgb = vec3(0.30, 0.265, 0.21);',
+      '    else if (fbL == 2.0) {',
+      '      diffuseColor.rgb *= 0.9;',
+      '      float fbSk = fbNoise(vec3(vFabP.x * ' + (1 / (0.11 * +o.weather)).toFixed(4) + ', vFabP.y * ' + (1 / (1.3 * +o.weather)).toFixed(4) + ', vFabP.z * ' + (1 / (0.11 * +o.weather)).toFixed(4) + '));',
+      '      diffuseColor.rgb *= 1.0 - ' + (+o.streak).toFixed(3) + ' * smoothstep(0.42, 0.8, fbSk);',
+      '    }',
+      '  }',
+      '#endif',
       '  vec3 fbT = texture(uFabTex, vec3(fbUv, fbL)).rgb;',
       '#ifdef FAB_PLANKS',
       '  if (uFabTexOn > 0.5) {',
@@ -211,6 +263,26 @@
       '  } else',
       '#endif',
       '  diffuseColor.rgb *= mix(1.0, fbTone, fbFade);',
+      // (round 117) relief off the tile's own height; see `F.relief`
+      '#ifdef FAB_RELIEF',
+      '#if NUM_DIR_LIGHTS > 0',
+      '  if (uFabRelief > 0.0 && uFabTexOn > 0.5) {',
+      '    float fbHt = (fbT.r - 0.5) * 0.22 - fbT.g - fbT.b * 0.4 - fbGapM * 1.6;',
+      '    vec3 fbSx = dFdx(vFabV), fbSy = dFdy(vFabV);',
+      '    vec3 fbNg = normalize(cross(fbSx, fbSy));',
+      '    vec3 fbR1 = cross(-fbSy, fbNg), fbR2 = cross(fbNg, -fbSx);',
+      '    float fbDet = dot(-fbSx, fbR1);',
+      '    float fbDp = uFabRelief * (1.0 - smoothstep(' + (+o.fadeNear * 0.6).toFixed(2) + ', ' + (+o.fadeFar).toFixed(2) + ', length(vFabV))) * (1.0 - smoothstep(0.10, 0.28, fbPx));',
+      '    vec3 fbGr = sign(fbDet) * (dFdx(fbHt) * fbR1 + dFdy(fbHt) * fbR2) * fbDp;',
+      '    vec3 fbNb = normalize(abs(fbDet) * fbNg - fbGr);',
+      '    vec3 fbLd = directionalLights[0].direction;',
+      '    float fbA = dot(fbNg, fbLd), fbB = dot(fbNb, fbLd);',
+      '    fbRelD = clamp((max(fbB, 0.0) + 0.22) / (max(fbA, 0.0) + 0.22), 0.3, 2.0);',
+      '    vec3 fbUpV = (viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz;',
+      '    fbRelI = clamp(1.0 + 0.9 * (dot(fbNb, fbUpV) - dot(fbNg, fbUpV)), 0.55, 1.45);',
+      '  }',
+      '#endif',
+      '#endif',
       // …and a front is not one even colour: rain streaks, soot, a repair, a
       // patch the sun has bleached — a slow continuous variation over a few
       // metres, the same at every range, with no seam at a piece's edge
@@ -257,9 +329,19 @@
         sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uFabSky;')
           .replace('#include <lightmap_fragment>', '#include <lightmap_fragment>\n\treflectedLight.indirectDiffuse *= uFabSky;');
       }
+      // (round 117) relief: the sun's share and the sky's, re-weighted by the
+      // bent normal. Only where the tiles are (their height is what bends it)
+      // and only on the Lambert program, whose line this is.
+      var dl = 'reflectedLight.directDiffuse *= BRDF_Diffuse_Lambert( diffuseColor.rgb ) * getShadowMask();';
+      if (tex && sh.fragmentShader.indexOf(dl) >= 0) {
+        sh.uniforms.uFabRelief = F.relief;
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n#define FAB_RELIEF\nuniform float uFabRelief;')
+          .replace(dl, dl + '\n\treflectedLight.directDiffuse *= fbRelD;\n\treflectedLight.indirectDiffuse *= fbRelI;');
+        F.reliefOn = true;
+      }
       if (!ok) F.failed = (F.failed || 0) + 1;
     };
-    var key = '|fab7:' + [o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '') + (planks() ? '|planks' : '');
+    var key = '|fab11:' + [o.fallen, o.streak, o.tileCourse, o.wallCourse, o.brickCourse, o.boardRun, o.weather, o.mottle, o.line].join(',') + (window.FABRIC_TEX ? '|tex' : '') + (planks() ? '|planks' : '') + '|rel117';
     m.customProgramCacheKey = function () {
       return (prevKey ? prevKey.call(this) : '') + key;
     };
