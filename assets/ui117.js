@@ -25,7 +25,7 @@
  *   messages   a feed that keeps the last four (a refusal stays nine seconds,
  *              not 2.6), and PAUSED is its own marker, never hidden by a toast
  *
- * THE SWITCH is game.ui117 (default OFF for now: the last sweep was not finished; set it true to see the HUD). It is an accessor that puts the class
+ * THE SWITCH is game.ui117 (default on). It is an accessor that puts the class
  * `ui117` on <body>: every rule below is scoped to it, and the moved top-bar
  * controls go back to exactly where they were when it is switched off, so OFF
  * is the old HUD and not an approximation of it.
@@ -442,7 +442,7 @@ body.ui117 #u7Log div.old { color: var(--u7-dim); border-left-color: var(--u7-li
         U.log.length = 0;
       }
     }
-    var want = game.ui117 === true;   // DEFAULT OFF until the final sweep is read (paused 10 Nov 12:48 UTC); game.ui117 = true shows the HUD
+    var want = game.ui117 !== false;   // default ON (measured 10 Nov 13:13-13:21: no overlap at 1024 or 1920, no control lost, no cost); false before the install keeps the old HUD
     Object.defineProperty(game, 'ui117', {
       configurable: true, enumerable: true,
       get: function () { return U.on; },
