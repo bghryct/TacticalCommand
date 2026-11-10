@@ -35700,7 +35700,14 @@ class Unit {
 
     // Knockback velocity
     if (this.vel.lengthSq() > 0.01) {
-      this.pos.x += this.vel.x * dt; this.pos.z += this.vel.z * dt;
+      // (round 116b) …stopped by a wall: a blast threw men through brick, a
+      // doorway's jamb and into the well under a flight (the step, unchecked,
+      // put a first-person rider into a stair well on Saint-Lô)
+      const kx = this.pos.x + this.vel.x * dt, kz = this.pos.z + this.vel.z * dt;
+      if (this.def.vehicle || this.game.clear115 === false || this.game._crossOk(this.pos.x, this.pos.z, kx, kz, this.lvl, true, this.pos.y)) {
+        this.pos.x = kx; this.pos.z = kz;
+        if (!this.def.vehicle) this.game._wallClamp(this);
+      } else this.vel.set(0, 0, 0);
       this.vel.multiplyScalar(Math.exp(-5.5 * dt));
     }
 
@@ -37686,7 +37693,7 @@ class Unit {
       }
 
       // Rifle infantry lob a grenade when the enemy is in the sweet spot
-      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive && !(this._stack && this.game.room115 === true && this.nades <= 1)) {
+      if (this.def.grenade && this.grenadeCd <= 0 && this.nades > 0 && this.target && this.target.alive && !(this._stack && (this.game.room115 === true || this.game.nadeHold116 === true) && this.nades <= 1)) {
         const gDef = this.def.grenade;
         const gd = dist2(this.pos, this.target.pos);
         // Not with one of ours inside the burst. A grenade is the shortest
@@ -41307,7 +41314,7 @@ class Unit {
     const step = LANE_STEP * dt * side;
     const nx = this.pos.x + Math.cos(b) * step, nz = this.pos.z - Math.sin(b) * step;
     if (this._footPassAt(nx, nz)
-      && this.game._crossOk(this.pos.x, this.pos.z, nx, nz, this.lvl, true)) {
+      && this.game._crossOk(this.pos.x, this.pos.z, nx, nz, this.lvl, true, this.pos.y)) {
       this.pos.x = nx; this.pos.z = nz;
       this.game._wallClamp(this);                    // (round 115)
       this._laneDrift = (this._laneDrift || 0) + Math.abs(step);
@@ -41408,7 +41415,7 @@ class Unit {
     if (!dx && !dz) return false;
     const nx = this.pos.x + dx, nz = this.pos.z + dz;
     if (!this._footPassAt(nx, nz)) return false;
-    if (!this.game._crossOk(this.pos.x, this.pos.z, nx, nz, this.lvl, !this.def.vehicle)) return false;
+    if (!this.game._crossOk(this.pos.x, this.pos.z, nx, nz, this.lvl, !this.def.vehicle, this.pos.y)) return false;
     this.pos.x = nx; this.pos.z = nz;
     if (!this.def.vehicle) this.game._wallClamp(this);   // (round 115) off the wall he was shoved at
     return true;
@@ -51307,13 +51314,7 @@ class Game {
     const tryMove = (nx, nz) => {
       const gx = worldToCell(nx), gz = worldToCell(nz);
       if (!inGrid(gx, gz)) return false;
-      if (!this._crossOk(u.pos.x, u.pos.z, nx, nz, u.lvl, !u.def.vehicle)) return false;   // a wall in the way (round 115: a door's jambs too)
-      // (round 115) …and not under a flight from its foot, at floor level, as
-      // the search has it (`Structures.underFlight`); on the treads he climbs
-      if (S && !u.def.vehicle && this.stair115 !== false && (gx !== worldToCell(u.pos.x) || gz !== worldToCell(u.pos.z))) {
-        const ox = worldToCell(u.pos.x), oz = worldToCell(u.pos.z), L = u.lvl | 0;
-        if (u.pos.y < S.floorY(ox, oz, L) + STAIR_STEP && S.underFlight(ox, oz, L, gx - ox, gz - oz)) return false;
-      }
+      if (!this._crossOk(u.pos.x, u.pos.z, nx, nz, u.lvl, !u.def.vehicle, u.pos.y)) return false;   // a wall in the way (round 115: a door's jambs too; 116b: and a flight's high end)
       const want = S ? S.resolveLevel(nx, nz, u.lvl, u.pos.y) : 0;
       if (want > 0) return this.pathfinder.passableL(gx, gz, want);
       // (round 113) on foot, through the trees and the scrub (`FOOT_THROUGH`)
@@ -51633,6 +51634,11 @@ class Game {
     if (Math.abs(s) >= want) return;
     if (Math.abs((u.pos.x - L.cx) * L.dx + (u.pos.z - L.cz) * L.dz) > L.half) return;
     const k = (s >= 0 ? 1 : -1) * want - s;
+    // (round 116b) …but not through a wall, a jamb or under a flight's high end:
+    // the push out of a line crossed cell edges unasked, and a man in first
+    // person beside a rubble line under a landing was put into the stair well
+    // (Saint-Lô, a hand-placed ride)
+    if (!(u.def && u.def.vehicle) && this.clear115 !== false && typeof this._crossOk === 'function' && !this._crossOk(u.pos.x, u.pos.z, u.pos.x + L.nx * k, u.pos.z + L.nz * k, u.lvl, true, u.pos.y)) return;
     u.pos.x += L.nx * k; u.pos.z += L.nz * k;
   }
   /** The player's field of view (vertical degrees) and mouse sensitivity: [ ] and - =,
@@ -54511,7 +54517,7 @@ class Game {
         // throwing at a position, not at a man — so the danger test has to be
         // made against the point he actually throws at.
         const gtx = t.x + rand(-2, 2), gtz = t.z + rand(-2, 2);
-        if ((u._assault || t.kind === 'assault') && !(u._stack && this.room115 === true && u.nades <= 1) && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
+        if ((u._assault || t.kind === 'assault') && !(u._stack && (this.room115 === true || this.nadeHold116 === true) && u.nades <= 1) && dist2(u.pos, { x: t.x, z: t.z }) <= u._throwReach() * 1.05
             && !u._friendlyNearPoint(gtx, gtz, u._grenadeDanger(g), u._leadFor('grenade'))) {
           if (u._throwGrenade(gtx, gtz)) continue;
         }
@@ -54542,7 +54548,7 @@ class Game {
           if (u._friendlyNearPoint(e.pos.x, e.pos.z, u._grenadeDanger(g), u._leadFor('grenade'))) continue;
           bd = d; best = e;
         }
-        if (best && !(u._stack && this.room115 === true && u.nades <= 1) && u._throwGrenade(best.pos.x, best.pos.z)) continue;
+        if (best && !(u._stack && (this.room115 === true || this.nadeHold116 === true) && u.nades <= 1) && u._throwGrenade(best.pos.x, best.pos.z)) continue;
       }
 
       // ---- THE PANZERFAUST, AND THE BAZOOKA ------------------------------
@@ -59061,7 +59067,9 @@ class Game {
       if (!u.alive || u.downed || u.def.vehicle || u.def.towed || u.embarkedIn || u.explicit || (this.fpv && this.fpv.unit === u)) continue;
       if (!u._inRoom() || (u.path && u.path.length)) continue;
       const hurt = u.hp < u.maxHp * 0.8 || (u.suppression || 0) > 0.35 || u.suppState === 'Pinned';
-      if (!hurt) continue;
+      // (round 116b) `fallEarly116 = true`: at the long odds (FALLBACK_ODDS x 1.5)
+      // he goes before he is hit — a man pinned in a room does not run
+      if (!hurt && this.fallEarly116 !== true) continue;
       // the enemy known round the house, against his own side in it
       const ix = this._knownIndex(u.team), R2 = FALLBACK_R * FALLBACK_R;
       let foes = 0, fx = 0, fz = 0;
@@ -59077,6 +59085,7 @@ class Game {
         if (Math.abs(o.pos.x - u.pos.x) < TILE * 3 && Math.abs(o.pos.z - u.pos.z) < TILE * 3) mates++;
       }
       if (foes < FALLBACK_ODDS * mates) continue;
+      if (!hurt && foes < FALLBACK_ODDS * 1.5 * mates) continue;
       fx /= foes; fz /= foes;
       if (this._fallOut(u, fx, fz)) { u._fellBackT = now; this._fellBack = (this._fellBack || 0) + 1; }
     }
@@ -63140,7 +63149,7 @@ class Game {
 
   /** Continuous movement (shoves, first person, knockback) between two world
    *  points: is there a wall across the cell boundary they cross? */
-  _crossOk(x0, z0, x1, z1, lvl, man) {
+  _crossOk(x0, z0, x1, z1, lvl, man, y) {
     const S = this.structures;
     if (!S || !S.any) return true;
     const gx0 = worldToCell(x0), gz0 = worldToCell(z0);
@@ -63149,6 +63158,14 @@ class Game {
     if (!dx && !dz) return true;
     if (Math.abs(dx) > 1 || Math.abs(dz) > 1) return true;   // a jump, not a step
     if (!S.canCross(gx0, gz0, lvl | 0, dx, dz)) return false;
+    // (round 116b) …NOR UNDER A FLIGHT FROM ITS FOOT (`Structures.underFlight`,
+    // the rule both searches keep) — for every way a man is moved, his own
+    // step in first person and the shoves of the men round him alike; a man on
+    // the treads of a flight, in its own cell, is climbing it, not under it
+    if (man && y != null && this.stair115 !== false && S.underFlight) {
+      const L0 = lvl | 0, onTreads = !!S.featAt(gx0, gz0, L0) && y >= S.floorY(gx0, gz0, L0) + STAIR_STEP;
+      if (!onTreads && S.underFlight(gx0, gz0, L0, dx, dz)) return false;
+    }
     // (round 115) …AND A MAN GOES THROUGH THE DOORWAY, NOT THE WALL BESIDE IT.
     // `canCross` opens a door's whole edge (`Structures.moveSpan`).
     if (!man || this.clear115 === false) return true;
@@ -63163,7 +63180,12 @@ class Game {
     const along = horiz ? x0 + (x1 - x0) * t - (cellCenter(gx0) - TILE * 0.5) : z0 + (z1 - z0) * t - (cellCenter(gz0) - TILE * 0.5);
     const k = S.moveSpan(gx0, gz0, L, e, along);
     if (k !== 2) return k === 1;
-    const rr = Math.min(MAN_CLEAR, (S.spanHi - S.spanLo) * 0.45);
+    // (round 116b) half his width off the jambs at the crossing, not all of it:
+    // the clamp (`_wallClamp`) holds the rest, and at the full width a man
+    // standing in the doorway at the edge of its band, turning to go through
+    // on a slant, was refused the crossing and clamped back from the slide —
+    // stopped dead in the door (a first-person ride on Ortona)
+    const rr = Math.min(MAN_CLEAR, (S.spanHi - S.spanLo) * 0.45) * (this.clear115 !== false ? 0.5 : 1);
     return along >= S.spanLo + rr - 1e-6 && along <= S.spanHi - rr + 1e-6;
   }
   /**
