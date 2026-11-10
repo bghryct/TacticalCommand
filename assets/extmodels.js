@@ -1083,6 +1083,18 @@
     for (var z = 0; z < out.length; z++) root.add(out[z]);
   };
 
+  /** (round 118) TEST HOOK: put decoded models back to their never-asked state (`idle`, no prototype), so one page
+   *  can run a seeded battle on the fallbacks after one on the scale models (`tools/probe_simmodel118.js`). The next
+   *  `ready`/`clone` asks for each again. `names` limits it; returns the names reset. Nothing in the game calls it. */
+  E._forgetForTest = function (names) {
+    var out = [];
+    for (var k in cache) {
+      var r = cache[k];
+      if (r.state !== 'ready' || (names && names.indexOf(k) < 0)) continue;
+      r.state = 'idle'; r.proto = null; out.push(k);
+    }
+    return out;
+  };
   E.ready = function (name) { var r = cache[name]; if (r && r.state === 'idle') E.want(name); return !!(r && r.state === 'ready'); };
   E.onReady = function (name, cb) {
     var r = cache[name];

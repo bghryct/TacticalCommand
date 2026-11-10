@@ -2785,7 +2785,7 @@ const UNIT_DEFS = {
   ukvalentine: { name: 'Valentine IX', kind: 'tank', hp: 330, spd: 2.2, dmg: 70, rng: 92, atkTime: 3.6, armor: 0.48, shield: 0, size: 1.97, vis: 58, color: 0x5b4c34, model: 'stuart',
                 vehicle: true, aoe: 2.2, minRng: 3 },
   ukarcher: { name: 'Archer', kind: 'tank', hp: 250, spd: 3.4, dmg: 115, rng: 120, atkTime: 5.6, armor: 0.24, shield: 0, size: 2.02, vis: 80, color: 0x4a5530, model: 'marder',
-                vehicle: true, noTurret: true, openTop: true, lightArmor: true, prefer: 'armour', aoe: 3.2, minRng: 4 },
+                vehicle: true, noTurret: true, gunAft: true, openTop: true, lightArmor: true, prefer: 'armour', aoe: 3.2, minRng: 4 },
   ukbishop: { name: 'Bishop', kind: 'artillery', hp: 345, spd: 2.2, dmg: 85, rng: 170, atkTime: 6, armor: 0.3, shield: 0, size: 2.04, vis: 40, color: 0x5b4c34, model: 'wespe',
                 vehicle: true, noTurret: true, aoe: 8, minRng: 26 },
   ukcrusader: { name: 'Crusader III', kind: 'tank', hp: 380, spd: 4.1, dmg: 70, rng: 92, atkTime: 3.2, armor: 0.3, shield: 0, size: 2.12, vis: 66, color: 0x5b4c34, model: 'cromwell',
@@ -2821,7 +2821,7 @@ const UNIT_DEFS = {
   frpanhard: { name: 'Panhard 178', kind: 'tank', hp: 220, spd: 7.1, dmg: 26, rng: 60, atkTime: 1.6, armor: 0.14, shield: 0, size: 1.71, vis: 140, color: 0x5b6046, model: 'm8',
                 vehicle: true, wheeled: true, lightArmor: true, scout: true, aoe: 1, minRng: 3, mg: { dmg: 7, rng: 16, cd: 0.3 } },
   frlaffly: { name: 'Laffly W15 TCC', kind: 'tank', hp: 155, spd: 4.2, dmg: 76, rng: 100, atkTime: 3.4, armor: 0.06, shield: 0, size: 1.78, vis: 70, color: 0x5b6046, model: 'ustruck',
-                vehicle: true, noTurret: true, openTop: true, lightArmor: true, wheeled: true, prefer: 'armour', aoe: 2, minRng: 3 },
+                vehicle: true, noTurret: true, gunAft: true, openTop: true, lightArmor: true, wheeled: true, prefer: 'armour', aoe: 2, minRng: 3 },
   frue: { name: 'Renault UE', kind: 'apc', hp: 140, spd: 2.6, dmg: 6, rng: 45, armor: 0.08, shield: 0, size: 1.5, vis: 50, color: 0x5b6046, model: 'carrier',
                 vehicle: true, mgOnly: true, openTop: true, lightArmor: true, capacity: 2, mg: { dmg: 6, rng: 45, cd: 0.4 } },
   frm4a2: { name: 'M4A2 Sherman (2e DB)', kind: 'tank', hp: 520, spd: 3.2, dmg: 78, rng: 26,  atkTime: 4.2,  armor: 0.42, shield: 0, size: 2.3,  vis: 30, color: 0x4a5238, model: 'sherman',
@@ -7476,7 +7476,7 @@ const VEH_BODY = {
   uscalliope: { L: 4.55, W: 1.96, H: 1.43, zc: 0.03, deck: 1.43, top: 2.81, tz: 0.27, tw: 0.64, tb: 0.87 },
   ukmatilda: { L: 4.18, W: 1.94, H: 1.27, zc: 0.04, deck: 1.27, top: 1.78, tz: 0.2, tw: 0.61, tb: 0.6 },
   ukvalentine: { L: 4.05, W: 2, H: 1.25, zc: 0.04, deck: 1.25, top: 1.73, tz: 0.17, tw: 0.53, tb: 0.57 },
-  ukarcher: { L: 4.15, W: 2.1, H: 1.63, zc: -0.35 },
+  ukarcher: { L: 4.15, W: 2.1, H: 1.63, zc: 0.4 },
   ukbishop: { L: 4.22, W: 2.1, H: 1.81, zc: 0.05 },
   ukcrusader: { L: 4.6, W: 2.1, H: 1.13, zc: -0.02, deck: 1.13, top: 1.55, tz: 0.5, tw: 0.63, tb: 0.61 },
   uktetrarch: { L: 2.98, W: 1.72, H: 1.16, zc: 0.04, deck: 1.16, top: 1.52, tz: 0.25, tw: 0.44, tb: 0.51 },
@@ -7494,7 +7494,7 @@ const VEH_BODY = {
   framr35: { L: 2.88, W: 1.28, H: 1, zc: 0, deck: 1, top: 1.34, tz: 0.19, tw: 0.21, tb: 0.33 },
   frd2: { L: 4.09, W: 1.68, H: 1.42, zc: 0.05, deck: 1.42, top: 1.84, tz: 0.38, tw: 0.42, tb: 0.54 },
   frpanhard: { L: 3.14, W: 1.4, H: 1.21, zc: -0.02, deck: 1.21, top: 1.6, tz: 0.23, tw: 0.44, tb: 0.44 },
-  frlaffly: { L: 3.69, W: 1.42, H: 1.38, zc: -0.08 },
+  frlaffly: { L: 3.69, W: 1.42, H: 1.38, zc: 0.09 },
   frue: { L: 2.1, W: 1.26, H: 0.71, zc: 0 },
   frm4a2: { L: 4.55, W: 1.96, H: 1.43, zc: 0.03, deck: 1.43, top: 1.98, tz: 0.27, tw: 0.62, tb: 0.81 },
   frm10: { L: 4.52, W: 2.26, H: 1.41, zc: 0.06, deck: 1.41, top: 1.88, tz: 0.11, tw: 0.65, tb: 0.84 },
@@ -21255,6 +21255,22 @@ const LINE_CROSS = {
 const FOOT_CROSS_COST = new Float64Array(8), FOOT_CROSS_SLOW = new Float64Array(8).fill(1);
 FOOT_CROSS_COST[3] = HEDGE_FOOT_COST; FOOT_CROSS_SLOW[3] = HEDGE_FOOT_SLOW;
 for (const k in LINE_CROSS) { FOOT_CROSS_COST[LINE_CROSS[k].code] = LINE_CROSS[k].cost; FOOT_CROSS_SLOW[LINE_CROSS[k].code] = LINE_CROSS[k].slow; }
+// (round 118) `game.trench118`: A TRENCH A MAN STANDS IN. Measured in round 117, the `trench` prop (1,754 cells
+// on 30 maps), `trenchseg` and the `foxhole` prop (3,215) were occupancy 1, walls: no man could stand in one,
+// and the man beside it was 'up' (presented 0.40). With the switch on when the map is laid they are occupancy
+// 7 (`Obstacles.add`), crossed and walked on foot at a price (the WebAssembly search takes code 7's cost
+// through `set_ocost`, as the round-116 low lines' 4-6), still a wall to a vehicle (`passable`: not
+// crushable). The ditch is a band `thick` either side of the prop's line (`lineOf`); a man who stops in it
+// is in it (`Unit._trench118`, `_trenchTick118`): dug in, as a man in a hole he dug, and drawn at the
+// trench's depth (`TRENCH118_SEAT`: crouched on the floor 1.45 m down, his helmet under the 0.63 m bank;
+// firing from the fire step, 0.80 m down, head and shoulders over it). Gun pits stay walls: a gun is a
+// vehicle to the pathfinder. `game.trench118` is read when the map is laid (default `TRENCH118_ON`).
+const TRENCH118 = { trench: { thick: 0.45 / METERS_PER_UNIT, deep: true }, trenchseg: { thick: 0.45 / METERS_PER_UNIT, deep: true },
+                    foxhole: { thick: 0.45 / METERS_PER_UNIT, deep: false } };
+const TRENCH118_ON = true, TRENCH118_SLACK = 0.15 / METERS_PER_UNIT;
+const TRENCH118_SEAT = { crouch: 1.45 / METERS_PER_UNIT, fire: 0.80 / METERS_PER_UNIT };
+FOOT_CROSS_COST[7] = 0; FOOT_CROSS_SLOW[7] = 0.8;   // free to route along (a price made the search walk beside it), slower to walk
+function trench118On() { const g = window.game; return g && g.trench118 != null ? !!g.trench118 : TRENCH118_ON; }
 // how far either side of the line a man is on it (its pace, a vault); where a man stands
 // pressed behind it (past its half-depth); the least he may be from it standing still
 const LINE_BAND = 0.5 / METERS_PER_UNIT, LINE_STAND = 0.22 / METERS_PER_UNIT, LINE_BODY = 0.12 / METERS_PER_UNIT;
@@ -22794,9 +22810,11 @@ class Obstacles {
     // lone trench, which is 74% of the trench cells on the shipped maps, and
     // open at both ends showed the hollow inside of its parapets
     this._trenchGeos = this._trenchGeos || [];
-    const slot = end === 'both' ? 8 + i : end ? 4 + i : i;
+    // (round 118) `trench118`: the ditch goes on down under the ground, its own slots (read when the map is laid)
+    const deep = trench118On();
+    const slot = (end === 'both' ? 8 + i : end ? 4 + i : i) + (deep ? 100 : 0);
     if (this._trenchGeos[slot]) return this._trenchGeos[slot];
-    { const pg = this._refined113('trench', slot); if (pg) return (this._trenchGeos[slot] = pg); }
+    if (!deep) { const pg = this._refined113('trench', slot); if (pg) return (this._trenchGeos[slot] = pg); }
     const r = mulberry32(6400 + i * 29 + (end ? 7 : 0));
     const pos = [], nor = [], col = [], hk = [], rim = [];
     const put = (p, n, c, k) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c[0], c[1], c[2]); hk.push(k[0], k[1], k[2]); rim.push(n[0], n[1], n[2]); };
@@ -22816,6 +22834,18 @@ class Obstacles {
     const hump = (a, b) => (a === 0 || a === NX) ? 0 : Math.sin(a * 2.3 + b * 1.9 + i * 2.1) * 0.035;
     for (let a = 0; a < NX; a++) {
       const xa = x0 + (x1 - x0) * a / NX, xb = x0 + (x1 - x0) * (a + 1) / NX;
+      // (round 118) UNDER THE GROUND, for `trench118`: revetted walls down to a floor 1.45 m below it, a
+      // duckboard walk, the ends shut. The terrain hides it all from above (the floor at the ground stays the
+      // mouth the playing camera sees); from a man's eye down in it, it is the trench round him.
+      if (deep) {
+        const KM = 1 / (METERS_PER_UNIT * K_PROP), yF = -1.45 * KM, yD = yF + 0.06 * KM, zW = 0.28, dark = [0.080, 0.064, 0.044];
+        quad([xa, yF, -zW], [xa, yF, zW], [xb, yF, zW], [xb, yF, -zW], mud, mud, mud, mud, B, [0, 1, 0]);
+        quad([xa, yD, -0.11], [xa, yD, 0.11], [xb, yD, 0.11], [xb, yD, -0.11], board, board, board, board, W, [0, 1, 0]);
+        quad([xa, yF, -zW], [xb, yF, -zW], [xb, 0.015, -zW], [xa, 0.015, -zW], dark, dark, plank, plank, W, [0, 0, 1]);
+        quad([xb, yF, zW], [xa, yF, zW], [xa, 0.015, zW], [xb, 0.015, zW], dark, dark, plank, plank, W, [0, 0, -1]);
+        if (a === NX - 1 && end) quad([x1, yF, -zW], [x1, yF, zW], [x1, 0.015, zW], [x1, 0.015, -zW], dark, dark, mud, mud, B, [-1, 0, 0]);
+        if (a === 0 && end === 'both') quad([x0, yF, zW], [x0, yF, -zW], [x0, 0.015, -zW], [x0, 0.015, zW], dark, dark, mud, mud, B, [1, 0, 0]);
+      }
       // floor: mud, and a duckboard walk down the middle
       quad([xa, 0.015, -0.28], [xa, 0.015, -0.11], [xb, 0.015, -0.11], [xb, 0.015, -0.28], mud, mud, mud, mud, B, [0, 1, 0]);
       quad([xa, 0.015, 0.11], [xa, 0.015, 0.28], [xb, 0.015, 0.28], [xb, 0.015, 0.11], mud, mud, mud, mud, B, [0, 1, 0]);
@@ -25255,7 +25285,7 @@ class Obstacles {
   lineOf(o) {
     if (o._line) return o._line;
     const th = o.mesh ? o.mesh.rotation.y : (o.rot || 0), dx = Math.cos(th), dz = -Math.sin(th);
-    const L = LINE_CROSS[o.type];
+    const L = LINE_CROSS[o.type] || TRENCH118[o.type];
     return (o._line = {
       cx: o.mesh ? o.mesh.position.x : cellCenter(o.gx), cz: o.mesh ? o.mesh.position.z : cellCenter(o.gz),
       dx, dz, nx: -dz, nz: dx, half: TILE * 0.5 / Math.max(Math.abs(dx), Math.abs(dz), 1e-3), thick: L ? L.thick : 0.05,
@@ -26033,6 +26063,7 @@ class Obstacles {
     const foot = FOOT_THROUGH[type] != null && !(window.game && window.game.footThrough113 === false);
     this.occupied[gz * GRID + gx] = foot ? 2 : (type === 'hedge' && !(window.game && window.game.hedgeFoot113 === false) ? 3
       : LINE_CROSS[type] && !(window.game && window.game.line116 === false) ? LINE_CROSS[type].code : 1);   // (round 116) 4-6: a low line, climbed
+    if (TRENCH118[type] && trench118On()) this.occupied[gz * GRID + gx] = 7;   // (round 118) a trench a man stands IN
     if (foot) obs.footR = FOOT_THROUGH[type];
     const hr = HAZ_RANK[type] || 0;
     if (hr) { this.hazSelf[gz * GRID + gx] = hr; this._hazTouch(gx, gz); }
@@ -35826,6 +35857,7 @@ class Unit {
       if (Math.random() < dt * 3) this.game.effects.debris(this.pos.x, this.pos.y + 0.15 * K_FX, this.pos.z, 2, 0x4a4030);
       if (this.digT <= 0) this._completeDigIn();
     }
+    else if (this._dugByTrench118 || !this.dugin) this._trenchTick118();   // (round 118) in a trench, he is in it
     if (this.setupT > 0) this.setupT -= dt;   // towed gun limbering / unlimbering
     this._gunHaul(dt);                       // …and hitch up / come into battery on its own
     if (this.def.vehicle && !this.crewBailed) this._checkBailOut(dt);   // crippled crews may abandon ship
@@ -36033,6 +36065,15 @@ class Unit {
   }
 
   _updateModelAnim(dt) {
+    // (round 118) THE POSE ENGINE DRAWS ON THE COSMETIC STREAM (`game.simModel118`, default on).
+    // It runs inside the simulation step (`Unit.update`) but only makes a picture, and on a
+    // scale model it builds three.js objects — `_crewWeaponCarried` clones the carried weapon,
+    // four `Math.random` draws for every UUID — that a fallback figure never builds. So the
+    // sim's stream depended on which models had decoded: Village seed 11 primed drew 4,251
+    // rolls by step 125 and unprimed 4,219, and the battles parted there. Entered once on
+    // the cosmetic stream (`cosmeticScope`), as `_buildVisual` already is; `false`: the old
+    // draw on the sim's stream. `tools/probe_simmodel118.js` finds a leak of this shape.
+    if (Math.random !== vrandom && this.game.simModel118 !== false) return cosmeticScope(this._updateModelAnim, this, arguments);
     // MOVING MEANS MOVING. `path.length > 0` says "has somewhere to be", which
     // is a different thing: a man who is pinned, blown, cowering, digging in,
     // unlimbering a gun, holding while his section closes up, or simply jammed
@@ -36365,7 +36406,7 @@ class Unit {
     const rt = this.recoilT || 0;
     if (rt > F.rec + 0.08 && !this.def.mgOnly && this.def.kind !== 'apc') {
       const gp = this._gunPos ? this._gunPos() : null;
-      const gy = this.face + (this.gunYaw || 0), gx = Math.sin(gy), gz = Math.cos(gy);
+      const gy = this.face + this._gunBase() + (this.gunYaw || 0), gx = Math.sin(gy), gz = Math.cos(gy);
       const t0 = gp && TYPE_DEF[T.typeAt(worldToCell(gp.x), worldToCell(gp.z))];
       const dry = t0 && !/mud|marsh|swamp|water|ford/.test(t0.name);
       if (gp && dry) {
@@ -39009,7 +39050,7 @@ class Unit {
       // …but he looks where he is GOING while he is going there. Turning a
       // running man to face the enemy he is not allowed to shoot at makes him
       // cross the gap sideways. Same rule `_tankCombat` already uses.
-      if (!this.path.length) this.targetFace = Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z);
+      if (!this.path.length) this.targetFace = Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z) - this._gunBase();
       return;
     }
 
@@ -39607,7 +39648,7 @@ class Unit {
     // plume along it). The hull's heading plus the turret's traverse; in first
     // person, where the camera looks. Read by the picture only — nothing in the
     // simulation reads `dx`/`dz` off a muzzle position.
-    let a = this.face + (this.gunYaw || 0);
+    let a = this.face + this._gunBase() + (this.gunYaw || 0);
     if (this._fpvMuzzle && this.game.fpv && this.game.fpv.yaw != null) a = this.game.fpv.yaw;
     v.dx = Math.sin(a); v.dz = Math.cos(a);
     return v;
@@ -40965,7 +41006,7 @@ class Unit {
     // with four rounds in thirty seconds. Measured, not theorised.
     if ((this.def.towed || this.def.kind === 'atgun') && (this.limbered || this.setupT > 0)) return;
     this.path = [];
-    this.targetFace = Math.atan2(ga.x - this.pos.x, ga.z - this.pos.z);
+    this.targetFace = Math.atan2(ga.x - this.pos.x, ga.z - this.pos.z) - this._gunBase();
     // THE COAX DOES THIS WORK. A tank beating soft ground uses the machine gun
     // it carries for exactly that, and keeps the main armament for armour and
     // for cover a bullet will not go through (`_worthAShell`). A jammed turret
@@ -41289,8 +41330,14 @@ class Unit {
         const th = this._threatDir();
         if (th) {
           // Would driving forwards turn our side or back to the threat?
-          const expFwd = Math.abs(angDiff(desired, th.ang));         // 0 = nose-on
-          const expRev = Math.abs(angDiff(desired + Math.PI, th.ang));
+          // (round 118) …or, for a gun carried over the TAIL, gun-on: the
+          // Archer and the Laffly reverse into their fire position and drive
+          // out forwards. Driven nose-first at the enemy, they arrived with the
+          // gun pointing away, spent ten seconds turning half round, and were
+          // sent on again before the turn was done: 0 shots in 75 s, measured.
+          const gb = this._gunBase();
+          const expFwd = Math.abs(angDiff(desired + gb, th.ang));    // 0 = nose-on (gun-on)
+          const expRev = Math.abs(angDiff(desired + Math.PI + gb, th.ang));
           // Reverse if it keeps us appreciably better angled AND the threat is
           // close enough to matter. Reversing is slow; nobody does it for fun.
           //
@@ -43878,6 +43925,7 @@ class Unit {
     const st = this._stanceDrawn117(false);
     const want = hole === 'pit' ? DIG117.pit
       : (st === 'prone' || st === 'crawl' || st === 'down') ? FOX_SINK
+      : this._dugByTrench118 && this._trenchDeep118() ? (st === 'aim' ? TRENCH118_SEAT.fire : TRENCH118_SEAT.crouch)   // (round 118)
       : st === 'aim' ? DIG117.depth - DIG117.step : DIG117.depth;
     let s = this._sink117 || 0;
     s += (want - s) * 0.2;
@@ -43886,6 +43934,40 @@ class Unit {
   }
   /** (round 117) Is his hole the one-man foxhole (`DIG117`)? A man on foot
    *  with his own weapon; not a gun's pit, an MG's or a mortar's. */
+  /** (round 118) The trench (or foxhole prop) he is standing IN, or null: a cell laid as occupancy 7
+   *  (`trench118`), and he is within its ditch (`TRENCH118[type].thick` of its line). Sim state only. */
+  _trench118() {
+    const o = this._trenchCell118();
+    return o && Math.abs(this.game.obstacles.lineSide(o, this.pos.x, this.pos.z)) <= this.game.obstacles.lineOf(o).thick + TRENCH118_SLACK ? o : null;
+  }
+  /** (round 118) The trench laid in the cell he is in (occupancy 7), wherever in the cell he stands. */
+  _trenchCell118() {
+    const d = this.def;
+    if (d.vehicle || d.towed || this.garrison || (this.lvl | 0) > 0) return null;
+    const gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z);
+    if (!inGrid(gx, gz)) return null;
+    const O = this.game.obstacles;
+    if (O.occupied[gz * GRID + gx] !== 7) return null;
+    const o = O.at(gx, gz);
+    return o && TRENCH118[o.type] ? o : null;
+  }
+  /** (round 118) Is his trench the deep kind (a fire trench, not a foxhole prop)? Drawing only. */
+  _trenchDeep118() { const o = this._trench118(); return !!(o && TRENCH118[o.type].deep); }
+  /** (round 118) Each step: a man who has stopped in a trench is dug in by it; one who has left it (an order
+   *  clears it in `orderMove`, a shove does not) is not. Runs for every man not otherwise dug in; with the
+   *  switch off it reads one flag and returns. */
+  _trenchTick118() {
+    if (!this._dugByTrench118 && !trench118On()) return;
+    let inT = !!this._trench118();
+    // stopped on its banks (an order ends within a metre or so of the cell's middle), he steps down into it
+    if (!inT && !this.dugin && !(this.digT > 0) && !(this.path && this.path.length)) {
+      const o = this._trenchCell118();
+      if (o) { const O = this.game.obstacles, s = O.lineSide(o, this.pos.x, this.pos.z), Ln = O.lineOf(o);
+        if (Math.abs(s) < 2.0 / METERS_PER_UNIT) { this.pos.x -= Ln.nx * s; this.pos.z -= Ln.nz * s; inT = true; } }
+    }
+    if (inT && !this.dugin && !(this.digT > 0) && !(this.path && this.path.length)) { this.dugin = 0.85; this._dugByTrench118 = true; }
+    else if (!inT && this._dugByTrench118) { if (this.dugin) this._clearDigIn(); this._dugByTrench118 = false; }
+  }
   _inFoxhole117() { return this.dugin > 0 && this._holeKind117() === 'fox'; }
   /** (round 117) Which hole this unit digs: 'fox' (a man on foot with his own
    *  weapon), 'pit' (a mortar's), or null: a gun's pit and an MG's are as they
@@ -44049,6 +44131,7 @@ class Unit {
     this.dugin = 0;
     this._sink117 = 0;
     this._foxRelease();
+    this._dugByTrench118 = false;
   }
 
   /** Take Cover: path to the nearest cover object and hunker down (Defend). */
@@ -44085,7 +44168,7 @@ class Unit {
       const L = O.lineOf(best), thr = this._threatDir();
       const s0 = O.lineSide(best, this.pos.x, this.pos.z);
       const side = thr ? ((Math.sin(thr.ang) * L.nx + Math.cos(thr.ang) * L.nz) > 0 ? -1 : 1) : (s0 >= 0 ? 1 : -1);
-      const al = clamp((this.pos.x - L.cx) * L.dx + (this.pos.z - L.cz) * L.dz, -L.half * 0.8, L.half * 0.8), off = L.thick + LINE_STAND;
+      const al = clamp((this.pos.x - L.cx) * L.dx + (this.pos.z - L.cz) * L.dz, -L.half * 0.8, L.half * 0.8), off = O.occupied[best.gz * GRID + best.gx] === 7 ? 0 : L.thick + LINE_STAND;   // (round 118) a trench: IN it
       this.orderMove(L.cx + L.dx * al + L.nx * side * off, L.cz + L.dz * al + L.nz * side * off); this._pendingCover = true; return;
     }
     if (best) {
@@ -44319,7 +44402,7 @@ class Unit {
    *  where its hull becomes its traverse; anything whose guns are on free
    *  mounts, always. */
   _hullToward(ang) {
-    const d = this.def, rel = angDiff(ang, this.face);
+    const d = this.def, base = this._gunBase(), rel = angDiff(ang, this.face + base);   // (round 118) a gun over the tail: see _gunBase
     const piece = !d.vehicle && (d.towed || d.kind === 'atgun' || d.kind === 'artillery');
     if (this._casemate() || piece) {
       // Its mount is its traverse. Inside its own arc the gunner lays it on
@@ -44330,9 +44413,19 @@ class Unit {
       const A = this._gunArcLR();
       if (A.full || (rel <= A.l && rel >= -A.r)) return;
     } else if (this._hasLaidGun() && Math.abs(rel) <= HULL_ARC) return;
-    this.targetFace = ang;
+    this.targetFace = ang - base;
   }
 
+  /** WHERE THE GUN POINTS AT REST, OFF THE BOW (round 118). The Archer and the
+   *  Laffly W15 TCC carried their gun over the TAIL — the crew reversed into a
+   *  hide, fired, and drove out forwards — and round 115 drew and simulated
+   *  both gun-first, so they drove muzzle-first. Their models are now built
+   *  cab-first with the gun aft (tools/blender/vehicles/r115.py aft_turn), and
+   *  every bearing their gun is laid on — the arc, the lay, the hull turn that
+   *  brings the arc round, first person — is measured from the TAIL: `gunYaw`
+   *  stays the traverse off the mount's own centre line. `def.gunAft` is
+   *  written by tools/roster_r115.py. `game.gunAft118 = false` is the old reading. */
+  _gunBase() { return (this.def.gunAft && this.game.gunAft118 !== false) ? Math.PI : 0; }
   /** DOES THIS THING HAVE A GUN TO LAY? Machine-gun carriers, trucks and the
    *  troop carriers do not: their weapon is on a free mount and the whole
    *  system below is skipped for them. */
@@ -44403,7 +44496,7 @@ class Unit {
   _inArc(x, z) {
     const a = this._gunArcLR();
     if (a.full) return true;
-    const rel = angDiff(Math.atan2(x - this.pos.x, z - this.pos.z), this.face);
+    const rel = angDiff(Math.atan2(x - this.pos.x, z - this.pos.z), this.face + this._gunBase());
     return rel <= a.l + 1e-4 && rel >= -a.r - 1e-4;
   }
   /** Is the gun actually pointing at it? A fire-control gate, not an accuracy
@@ -44411,7 +44504,7 @@ class Unit {
    *  the trigger until the sight is ON. */
   _bearsOn(x, z) {
     if (!this._hasLaidGun()) return true;
-    const want = angDiff(Math.atan2(x - this.pos.x, z - this.pos.z), this.face);
+    const want = angDiff(Math.atan2(x - this.pos.x, z - this.pos.z), this.face + this._gunBase());
     return Math.abs(angDiff(want, this.gunYaw)) <= LAY_TOL;
   }
   /** Bring the gun round. Called every frame for anything that has one, and it
@@ -44444,12 +44537,12 @@ class Unit {
     const A = this._gunArcLR();
     let want = 0;                                   // nothing to shoot at: stow it forward
     if (aimX !== null) {
-      want = angDiff(Math.atan2(aimX - this.pos.x, aimZ - this.pos.z), this.face);
+      want = angDiff(Math.atan2(aimX - this.pos.x, aimZ - this.pos.z), this.face + this._gunBase());
       // Outside the arc the mount is what has to move. A vehicle already
       // points its hull at what it is fighting when it is halted; this covers
       // the gun crews and anything the movement layer has pointed elsewhere.
       if (!A.full && (want > A.l || want < -A.r) && !this.path.length) {
-        this.targetFace = Math.atan2(aimX - this.pos.x, aimZ - this.pos.z);
+        this.targetFace = Math.atan2(aimX - this.pos.x, aimZ - this.pos.z) - this._gunBase();
       }
     }
     const step = this._traverseRate() * dt;
@@ -46210,6 +46303,7 @@ class Editor {
     if (stool) return stool === 'building' ? 'rect' : this.strMode;
     if (Editor.foliageDef(this.tool)) return 'brush';   // sowing is always a drag
     if (['vpflag', 'routeDraw', 'routeDel'].includes(this.tool)) return 'brush';   // point tools: one click, one action
+    if (this.tool === 'prop:trench') return this.propMode;   // (round 118) the trench prop, not the ground type of its name
     if (TYPE[this.tool] !== undefined) return this.paintMode;
     if (OBS_DEF[this.tool] || this.tool === 'removeObs' || this.tool === 'turnObs') return this.propMode;
     return 'brush';
@@ -46237,7 +46331,19 @@ class Editor {
       // lies along world (cos a, -sin a), so a = atan2(-dz, dx)
       this._lineRad = mode === 'line' && (gx !== st.gx0 || gz !== st.gz0) ? Math.atan2(-(gz - st.gz0), gx - st.gx0) : null;
       this._lineSeg = this._lineRad != null ? [st.gx0, st.gz0, gx, gz] : null;
-      if (mode === 'line') this._forLine(st.gx0, st.gz0, gx, gz, (x, z) => this._stamp(x, z));
+      if (mode === 'line' && (this.tool === 'prop:trench' || this.tool === 'trenchseg') && trench118On() && this.game.traverse118 !== false) {
+        // (round 118) A FIRE TRENCH IS DUG IN BAYS: three cells (18 m) along the drag, then a step of one cell to
+        // the side round a traverse, so that one burst or one gun laid down its length cannot sweep it
+        // (`game.traverse118 = false` lays it straight)
+        const ax = Math.abs(gx - st.gx0) >= Math.abs(gz - st.gz0), seen = new Set();
+        const put = (x, z) => { const k = z * GRID + x; if (seen.has(k)) return; seen.add(k); this._stamp(x, z); };
+        let k = 0, prev = 0;
+        this._forLine(st.gx0, st.gz0, gx, gz, (x, z) => {
+          const o = Math.floor(k++ / 3) % 2;
+          if (o !== prev) put(ax ? x : x + prev, ax ? z + prev : z);
+          put(ax ? x : x + o, ax ? z + o : z); prev = o;
+        });
+      } else if (mode === 'line') this._forLine(st.gx0, st.gz0, gx, gz, (x, z) => this._stamp(x, z));
       else this._forRect(st.gx0, st.gz0, gx, gz, (x, z) => this._stamp(x, z));
       this._lineRad = null; this._lineSeg = null;
       this.game.obstacles.refreshHeights();
@@ -46436,6 +46542,7 @@ class Editor {
 
   _applyPlacement(gx, gz, tool) {
     const game = this.game;
+    if (tool === 'prop:trench') tool = 'trench';   // (round 118) the Props panel's trench
     if (OBS_DEF[tool]) {
       const def = OBS_DEF[tool];
       if (def.scatter && this.brush > 1) {
@@ -47102,7 +47209,9 @@ class UI {
     const obsRow = document.getElementById('obstacleTools');
     obsRow.innerHTML = '';
     for (const [k, def] of Object.entries(OBS_DEF))
-      obsRow.appendChild(mkBtn(k, cap(k) + (def.explosive ? '💥' : ''), def.color));
+      // (round 118) the trench PROP's button: 'trench' is also a ground type (Paint), and every tool lookup asks the
+      // ground types first, so this button painted the carved ground and the prop could not be placed at all
+      obsRow.appendChild(mkBtn(k === 'trench' && trench118On() ? 'prop:trench' : k, cap(k) + (def.explosive ? '💥' : ''), def.color));
     obsRow.appendChild(mkBtn('removeObs', '✕', 0x4a2a2a));
     obsRow.appendChild(mkBtn('turnObs', '⟳ Turn', 0x3a4a5a));     // (round 113) turn a placed prop to the Angle
     // Surface swatches live on their own tab now, generated from TYPE_DEF
@@ -50114,7 +50223,7 @@ class Game {
     const mode = this._fpvMode(unit);
     this.fpv = {
       unit, mode,
-      yaw: unit.face + (unit.turret ? unit.turret.rotation.y : 0),
+      yaw: unit.face + (unit.turret ? unit.turret.rotation.y : (unit._gunBase ? unit._gunBase() : 0)),
       pitch: mode === 'foot' ? 0 : 0.05,
       ads: false, zoom: 1, lean: 0, leanT: 0, stance: unit.posture === 'prone' ? 'prone' : 'stand',
       bob: 0, sway: 0, kick: 0, hurtT: 0, lastHp: unit.hp, fireHeld: false, secondHeld: false, spread: 1,
@@ -51297,12 +51406,12 @@ class Game {
   _fpvTraverse(f, u, dt, steering) {
     if (f.wantYaw == null) f.wantYaw = f.yaw;
     if (u.turretJammed) { f.yaw = f.wantYaw; return; }     // the gun is offline; the commander still looks round
-    const A = u._gunArcLR();
-    let want = angDiff(f.wantYaw, u.face);
+    const A = u._gunArcLR(), base = u._gunBase ? u._gunBase() : 0;   // (round 118) off the tail for a gun carried aft
+    let want = angDiff(f.wantYaw, u.face + base);
     if (!A.full && (want > A.l || want < -A.r) && !steering && !u.immobilized) {
       const turn = u._turnRate() * dt;
       u.face += clamp(want, -turn, turn);
-      want = angDiff(f.wantYaw, u.face);
+      want = angDiff(f.wantYaw, u.face + base);
     }
     u.targetFace = u.face;
     // (round 111) …AT A SHOOTER'S PACE. The view is the gun, so a Tiger I's
@@ -51318,7 +51427,7 @@ class Game {
     let ny = gy + clamp(angDiff(want, gy), -step, step);
     if (!A.full) ny = clamp(ny, -A.r, A.l);
     u.gunYaw = ny;
-    f.yaw = u.face + ny;
+    f.yaw = u.face + base + ny;
   }
 
   _driveFpv(dt) {
@@ -51866,6 +51975,7 @@ class Game {
   _lineClamp116(u) {
     const O = this.obstacles, gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z);
     if (!inGrid(gx, gz) || O.occupied[gz * GRID + gx] < 4) return;
+    if (O.occupied[gz * GRID + gx] === 7) return;   // (round 118) a trench is stood IN, not behind
     const o = O.at(gx, gz); if (!o) return;
     const L = O.lineOf(o), s = O.lineSide(o, u.pos.x, u.pos.z), want = L.thick + LINE_BODY;
     if (Math.abs(s) >= want) return;
@@ -52416,7 +52526,7 @@ class Game {
         const pos = a => 50 + clamp(angDiff(a, f.yaw) * 180 / Math.PI / 62, -1, 1) * 50;
         if (Math.abs(angDiff(f.wantYaw, f.yaw)) > 0.02) html += `<i style="left:${pos(f.wantYaw)}%"></i>`;
         const A = u._gunArcLR();
-        if (!A.full) for (const st of [u.face + A.l, u.face - A.r]) {
+        if (!A.full) for (const st of [u.face + u._gunBase() + A.l, u.face + u._gunBase() - A.r]) {
           if (Math.abs(angDiff(st, f.yaw)) <= 62 * DEG) html += `<em style="left:${pos(st)}%"></em>`;
         }
       }
@@ -64974,7 +65084,7 @@ class Game {
     const V = this.effects && this.effects.vfx;
     if (!V || !V.streak || !u._gunPos) return;
     const gp = u._gunPos();
-    const a = gp.dx != null ? Math.atan2(gp.dx, gp.dz) : u.face + (u.gunYaw || 0);
+    const a = gp.dx != null ? Math.atan2(gp.dx, gp.dz) : u.face + u._gunBase() + (u.gunYaw || 0);
     const fx = Math.sin(a), fz = Math.cos(a), rx = Math.cos(a), rz = -Math.sin(a);
     for (let i = 0; i < 4; i++) {
       const side = (i % 2 ? 1 : -1) * vrand(0.6, 1.2), up = (i < 2 ? 1 : -0.4) * vrand(0.6, 1.2), sp = vrand(12, 18);
