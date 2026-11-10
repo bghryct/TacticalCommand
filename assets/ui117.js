@@ -48,7 +48,7 @@ body.ui117 {
   --u7-text: #dedccd; --u7-dim: #979a8a; --u7-faint: #70745f;
   --u7-own: #7db2e8; --u7-foe: #e3806f; --u7-neutral: #a9ad9c;
   --u7-good: #86b96f; --u7-warn: #dba955; --u7-bad: #dc6f5c;
-  --u7-t-cap: 9.5px; --u7-t-sm: 11px; --u7-t-md: 12px; --u7-t-lg: 14px; --u7-t-xl: 16px;
+  --u7-t-cap: 9.5px; --u7-t-sm: 11px; --u7-t-md: 12px; --u7-t-lg: 14px; --u7-t-xl: 16px; --u7-t-title: 22px;
   --u7-1: 4px; --u7-2: 8px; --u7-3: 12px; --u7-4: 16px;
   --u7-r: 3px; --u7-shadow: 0 2px 10px rgba(0,0,0,0.5);
 }
@@ -218,6 +218,49 @@ body.ui117 #u7Log div.bad { border-left-color: var(--u7-bad); color: #f4d9d2; }
 body.ui117 #u7Log div.good { border-left-color: var(--u7-good); }
 body.ui117 #u7Log div.old { color: var(--u7-dim); border-left-color: var(--u7-line2); }
 @keyframes u7In { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* ==== the battle setup screen (game.uiMenus117, inside game.ui117): the HUD's panel, button and type ==== */
+body.ui117.u7m #bsetup { background: rgba(6,8,7,0.8); font: 13px/1.45 var(--u7-font); color: var(--u7-text); }
+body.ui117.u7m #bsetup .bs-card { background: rgba(16,19,17,0.97); border: 1px solid var(--u7-line); border-top: 2px solid var(--u7-khaki-dim);
+  border-radius: var(--u7-r); box-shadow: 0 18px 50px rgba(0,0,0,0.6); }
+body.ui117.u7m #bsetup .bs-head, body.ui117.u7m #bsetup .bs-sum, body.ui117.u7m #bsetup .bs-fs, body.ui117.u7m #bsetup .bs-foot { border-color: var(--u7-line); }
+body.ui117.u7m #bsetup .bs-side + .bs-side { border-left-color: var(--u7-line); }
+body.ui117.u7m #bsetup .bs-op { font: 700 var(--u7-t-cap)/1 var(--u7-font); letter-spacing: 1.6px; color: var(--u7-khaki); }
+body.ui117.u7m #bsetup .bs-title { font: 700 var(--u7-t-title)/1.15 var(--u7-font); letter-spacing: 0.3px; color: var(--u7-text); margin: 6px 0 2px; }
+body.ui117.u7m #bsetup .bs-sub { font-style: normal; font-size: var(--u7-t-md); color: var(--u7-dim); }
+body.ui117.u7m #bsetup .bs-keys { font: var(--u7-t-sm)/1.7 var(--u7-font); color: var(--u7-faint); }
+body.ui117.u7m #bsetup .bs-sw { border-radius: 2px; }
+body.ui117.u7m #bsetup .bs-sh b { font-size: var(--u7-t-lg); font-weight: 700; color: var(--u7-text); }
+body.ui117.u7m #bsetup .bs-sh select { background: var(--u7-raise); color: var(--u7-text); border: 1px solid var(--u7-line); border-radius: 2px;
+  font: 600 var(--u7-t-md) var(--u7-font); padding: 4px 6px; }
+body.ui117.u7m #bsetup .bs-pre i, body.ui117.u7m #bsetup .bs-arm i { font: 600 var(--u7-t-sm)/1 var(--u7-font); letter-spacing: 0.2px; padding: 5px 9px;
+  border: 1px solid var(--u7-line); border-radius: 2px; background: var(--u7-raise); color: var(--u7-text); }
+body.ui117.u7m #bsetup .bs-pre i:hover, body.ui117.u7m #bsetup .bs-arm i:hover { border-color: var(--u7-khaki-dim); background: var(--u7-raise2); color: #fff; }
+body.ui117.u7m #bsetup .bs-pre i.on, body.ui117.u7m #bsetup .bs-arm i.on { border-color: var(--u7-khaki); background: var(--u7-khaki); color: #14150f; }
+body.ui117.u7m #bsetup .bs-arm span, body.ui117.u7m #bsetup .bs-cat, body.ui117.u7m #bsetup .bs-fs h4 { font: 700 var(--u7-t-cap)/1.2 var(--u7-font); letter-spacing: 1.4px; color: var(--u7-faint); }
+body.ui117.u7m #bsetup .bs-fs h4 { color: var(--u7-khaki); }
+body.ui117.u7m #bsetup .bs-cat { border-top-color: var(--u7-line); }
+body.ui117.u7m #bsetup .bs-cat u, body.ui117.u7m #bsetup .bs-fs h4 u { color: var(--u7-dim); letter-spacing: 0.4px; }
+body.ui117.u7m #bsetup .bs-cat u:hover, body.ui117.u7m #bsetup .bs-fs h4 u:hover { color: var(--u7-khaki); }
+body.ui117.u7m #bsetup .bs-sum { font: 600 var(--u7-t-sm)/1.4 var(--u7-font); color: var(--u7-khaki); }
+body.ui117.u7m #bsetup .bs-own, body.ui117.u7m #bsetup .bs-note3 { font-style: normal; color: var(--u7-dim); }
+body.ui117.u7m #bsetup .bs-list, body.ui117.u7m #bsetup .bs-fs { font: var(--u7-t-sm)/1.35 var(--u7-font); }
+body.ui117.u7m #bsetup .bs-list::-webkit-scrollbar-thumb { background: var(--u7-line2); border-radius: 3px; }
+body.ui117.u7m #bsetup .bs-row { border-bottom-color: rgba(57,64,54,0.55); }
+body.ui117.u7m #bsetup .bs-row b { color: var(--u7-text); }
+body.ui117.u7m #bsetup .bs-row.has b { color: var(--u7-khaki); }
+body.ui117.u7m #bsetup .bs-row em { font-size: var(--u7-t-cap); color: var(--u7-faint); }
+body.ui117.u7m #bsetup .bs-men { font-size: var(--u7-t-sm); color: var(--u7-dim); }
+body.ui117.u7m #bsetup .bs-ctl i { border: 1px solid var(--u7-line); border-radius: 2px; background: var(--u7-raise); color: var(--u7-text); }
+body.ui117.u7m #bsetup .bs-ctl i:hover { border-color: var(--u7-khaki-dim); background: var(--u7-raise2); color: #fff; }
+body.ui117.u7m #bsetup .bs-ctl u { color: var(--u7-text); font-weight: 700; }
+body.ui117.u7m #bsetup .bs-ctl u.z { color: var(--u7-faint); font-weight: 400; }
+body.ui117.u7m #bsetup .bs-warn { color: var(--u7-warn); }
+body.ui117.u7m #bsetup .bs-foot button { font: 600 var(--u7-t-md) var(--u7-font); padding: 7px 16px; border-radius: 2px; border: 1px solid var(--u7-line);
+  background: var(--u7-raise); color: var(--u7-text); }
+body.ui117.u7m #bsetup .bs-foot button:hover { border-color: var(--u7-khaki-dim); background: var(--u7-raise2); color: #fff; }
+body.ui117.u7m #bsetup .bs-foot button.go { border-color: var(--u7-khaki); background: var(--u7-khaki); color: #14150f; font-weight: 700; }
+body.ui117.u7m #bsetup .bs-foot button.go:hover { background: #dfca93; color: #14150f; }
 `;
 
   var SVG_OPT = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 3h10M1 6h10M1 9h10" stroke="currentColor" stroke-width="1.2" fill="none"/>'
@@ -433,6 +476,7 @@ body.ui117 #u7Log div.old { color: var(--u7-dim); border-left-color: var(--u7-li
       if (on === U.on) return;
       U.on = on;
       B.classList.toggle('ui117', on);
+      B.classList.toggle('u7m', on && U.menus);   // the setup screen goes with the HUD
       selSig = ''; objSig = ''; supSig = '';
       if (on) { dock(); drawSel(); }
       else {
@@ -442,6 +486,13 @@ body.ui117 #u7Log div.old { color: var(--u7-dim); border-left-color: var(--u7-li
         U.log.length = 0;
       }
     }
+    /* the battle setup screen in the same language: its own switch, inside this one (class u7m with ui117) */
+    U.menus = game.uiMenus117 !== false;
+    Object.defineProperty(game, 'uiMenus117', {
+      configurable: true, enumerable: true,
+      get: function () { return U.menus; },
+      set: function (v) { U.menus = !!v; B.classList.toggle('u7m', U.on && U.menus); }
+    });
     var want = game.ui117 !== false;   // default ON (measured 10 Nov 13:13-13:21: no overlap at 1024 or 1920, no control lost, no cost); false before the install keeps the old HUD
     Object.defineProperty(game, 'ui117', {
       configurable: true, enumerable: true,
