@@ -1571,6 +1571,7 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/editfps118.js"></script>
 <!-- (round 118) the trench kit, built in Blender (tools/blender/trench_kit.py), and its layer along smooth runs:
      `game.trenchKit118`, default OFF. Drawing only; the simulation keeps its trench cells. -->
+<script src="assets/groundmatch118.js"></script>
 <script src="assets/trenchkit118.pack.js"></script>
 <script src="assets/trenchkit118.js"></script>
 <script src="assets/bunker118.js"></script>
@@ -20040,6 +20041,8 @@ class Terrain {
     if (anyC) {
       this._uploadRows(col, cLo, cHi);
       if (sp) { for (const a of [ga.splatA, ga.splatB, ga.splatC, ga.splatD, ga.splatE]) this._uploadRows(a, cLo, cHi); }
+      // (round 118) the earthworks drawn with the field's colour follow it: assets/groundmatch118.js (`game.groundMatch118`)
+      if (window.GroundMatch118 && sp) window.GroundMatch118.rows(this, cLo, cHi);
       // What the field reflects on average, for the exposure (see GROUND_KEY_REF).
       // Only on a whole-field bake: a crater does not change the map's key.
       if (wholeField) {
@@ -24444,11 +24447,20 @@ class Obstacles {
    *  ragged ring of thrown earth, its inner slope scorched, clods flung past
    *  it. Earth's kind with `hedge.z` 1 — freshly turned, so no snow lies on it. */
   _craterLipGeo() {
-    if (this._lipGeo) return this._lipGeo;
+    // (round 118) `game.craterLook118` (default ON): NO LID. The lip drew a centre fan and its first ring (r 0..0.55)
+    // in soot, flat at the rim's mean height, over the bowl the shell dug: from 72 m and 26 m every crater was a flat
+    // black disc, a hole into the void. Now the lip's inner face goes DOWN into the bowl, freshly turned earth darkening
+    // as it goes (the kit's own occlusion darkens it with depth), and where the dug bowl (the terrain, scorched and
+    // turned) is higher it hides the rest: the hole is the ground's own, its shape the sim's (heights untouched).
+    // One geometry either way (the same three.js draws); `false` = the soot lid exactly as before.
+    const look = !(typeof game !== 'undefined' && game && game.craterLook118 === false);
+    if (look ? this._lipGeo118 : this._lipGeo) return look ? this._lipGeo118 : this._lipGeo;
     const r = mulberry32(9901), K = this._kit(), E = [0, 0, 1], N = 20;
     const SOOT = [0.085, 0.072, 0.058], TURN = [0.25, 0.20, 0.14], TOE = [0.21, 0.18, 0.13];
+    const DEEP = [0.30, 0.235, 0.165], BURNT = [0.23, 0.18, 0.13];   // x the kit's occlusion: ~0.07-0.18 down the throat
     // the ring's cross-section, from the hole out: [radius, height, colour]
-    const prof = [[0.18, -0.02, SOOT], [0.55, 0.06, SOOT], [0.82, 0.2, TURN], [1.0, 0.22, TURN], [1.22, 0.1, TOE], [1.5, -0.03, TOE]];
+    const prof = look ? [[0.26, -0.62, DEEP], [0.58, -0.12, DEEP], [0.82, 0.17, BURNT], [1.0, 0.22, TURN], [1.22, 0.1, TOE], [1.5, -0.03, TOE]]
+      : [[0.18, -0.02, SOOT], [0.55, 0.06, SOOT], [0.82, 0.2, TURN], [1.0, 0.22, TURN], [1.22, 0.1, TOE], [1.5, -0.03, TOE]];
     const jr = [], jh = [];
     for (let j = 0; j < N; j++) { jr.push(0.9 + r() * 0.2); jh.push(0.7 + r() * 0.6); }
     const at = (k, j) => {
@@ -24456,7 +24468,7 @@ class Obstacles {
       return [Math.cos(a) * rr, hh, Math.sin(a) * rr];
     };
     for (let j = 0; j < N; j++) {
-      K.tri([0, -0.02, 0], at(0, j + 1), at(0, j), SOOT, E, [0, 1, 0]);
+      if (!look) K.tri([0, -0.02, 0], at(0, j + 1), at(0, j), SOOT, E, [0, 1, 0]);
       for (let k = 0; k < prof.length - 1; k++) {
         const a = (j + 0.5) / N * 6.283, up = [Math.cos(a) * (prof[k + 1][1] - prof[k][1]) * -1, prof[k + 1][0] - prof[k][0], Math.sin(a) * (prof[k + 1][1] - prof[k][1]) * -1];
         K.quad(at(k, j), at(k, j + 1), at(k + 1, j + 1), at(k + 1, j), prof[k + 1][2], E, up);
@@ -24466,7 +24478,7 @@ class Obstacles {
       const a = r() * 6.283, d = 1.35 + r() * 0.6;
       K.box(K.at(Math.cos(a) * d, 0.02, Math.sin(a) * d, r() * 3), 0.05 + r() * 0.05, 0.035, 0.04 + r() * 0.04, TOE, E);
     }
-    return (this._lipGeo = K.geo());
+    return look ? (this._lipGeo118 = K.geo()) : (this._lipGeo = K.geo());
   }
   /** A BURNT-OUT TANK (round 98) is one of the scale models, brewed up: the
    *  paint burnt to soot and rust the way a unit's is (`Unit._scorch`, fully

@@ -576,6 +576,8 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
         if (eg) {
           const em = new T.Mesh(eg, obs.terrain.mesh.material); em.castShadow = false; em.receiveShadow = true;
           em.matrixAutoUpdate = false; em.updateMatrix(); em.name = 'trenchKitEarth118'; grp.add(em); st.earthTris = (st.earthTris || 0) + b.e.p.length / 9;
+          // (round 118, ground match) the copy follows the field as it changes (scorch, craters, ruts): assets/groundmatch118.js
+          if (window.GroundMatch118) GroundMatch118.add(em, { terr: obs.terrain });
         }
       }
       if (b.m.length) {   // the mouth, twice: mark where it is the nearest thing, then clear the ground's depth there

@@ -354,6 +354,7 @@
       if (earth.length) {
         var ec = new Float32Array(n * 3), euv = new Float32Array(n * 2), es = SPL.map(function () { return new Uint8Array(n * 4); });
         var Wt = (GRID - 1) * TILE, c0w = cellCenter(0), tc = TA.color.array, sa = SPL.map(function (k) { return TA[k].array; });
+        var gmV = [], gmM = new Float32Array(n), gmA = new Float32Array(n * 3);   // (round 118, ground match) field x mul + add
         for (var v2 = 0; v2 < n; v2++) {
           if (K.band[v2] !== spoil) continue;
           var ex = wp[v2 * 3], ez = wp[v2 * 3 + 2], fx2 = (ex - c0w) / TILE, fz2 = (ez - c0w) / TILE;
@@ -368,6 +369,7 @@
           ec[v2 * 3 + 1] = (tc[i00 * 3 + 1] * w00 + tc[i10 * 3 + 1] * w10 + tc[i01 * 3 + 1] * w01 + tc[i11 * 3 + 1] * w11) * ao2 * (1 - kb) + 0.125 * kb;
           ec[v2 * 3 + 2] = (tc[i00 * 3 + 2] * w00 + tc[i10 * 3 + 2] * w10 + tc[i01 * 3 + 2] * w01 + tc[i11 * 3 + 2] * w11) * ao2 * (1 - kb) + 0.08 * kb;
           euv[v2 * 2] = (ex - c0w) / Wt; euv[v2 * 2 + 1] = 1 - (ez - c0w) / Wt;
+          gmV.push(v2); gmM[v2] = ao2 * (1 - kb); gmA[v2 * 3] = 0.17 * kb; gmA[v2 * 3 + 1] = 0.125 * kb; gmA[v2 * 3 + 2] = 0.08 * kb;
           for (var s3 = 0; s3 < 5; s3++) {
             var A3 = sa[s3], O3 = es[s3];
             for (var q4 = 0; q4 < 4; q4++) O3[v2 * 4 + q4] = Math.round(A3[i00 * 4 + q4] * w00 + A3[i10 * 4 + q4] * w10 + A3[i01 * 4 + q4] * w01 + A3[i11 * 4 + q4] * w11);
@@ -381,6 +383,8 @@
         var em = new TH.Mesh(eg, TM.material);
         em.castShadow = true; em.receiveShadow = true; em.matrixAutoUpdate = false; em.updateMatrix(); em.name = 'bunker118:' + r.kind + ':earth';
         g.scene.add(em); self._meshes.push(em);
+        // (round 118, ground match) the mound follows the field as it changes (scorch, craters, ruts): assets/groundmatch118.js
+        if (window.GroundMatch118) GroundMatch118.add(em, { terr: T, verts: gmV, mul: gmM, add: gmA });
       }
       // the kit's meshes are shown once the sheet has decoded (a frame drawn before that is black)
       var pr = TK.ready ? TK.ready() : null;
