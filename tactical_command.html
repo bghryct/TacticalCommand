@@ -10724,6 +10724,11 @@ const AMALG_CREW = new Set(['hmg', 'mortar', 'rocket', 'atgun', 'sniper', 'artil
 // …and how long before a man who has just taken the best cover near him goes
 // looking for better. He does not: he fights from what he found.
 const COVER_SEEK_S = 9.0;
+// (round 118, cover doctrine, fifth pass) OUT OF THE FIRE (`game.fireEscape118`) and OUT OF THE BEATEN ZONE
+// (`game.beatenZone118`): see `Unit._fireEscape118` and `Unit._bzStep118`. Distances in world units, `reach` in cells.
+const FE118 = { reach: 8, cool: 1.0, legMax: 8, pad: 0.75, lee: 3, resumeMax: 90 };
+const BZ118 = { note: 2.2, fresh: 14, minN: 2, reach: 9, legMax: 10, margin: 1.5, hole: 0.12, try: 1.5 };
+const BZ_NEAR118 = [];
 const MOVE_COMMIT_S = 3.4;      // an infantry bound, once given, is run
 /** How long a man remembers where his last bound started, so the next one is
  *  not allowed to walk him back to it. Longer than a bound takes to run and
@@ -34710,7 +34715,7 @@ class Unit {
     this._gibbed = undefined; this._deadFor = undefined; this._brewUp = undefined; this.burnT = undefined;
     this._scorchT = undefined; this.crewCas = undefined; this._ccPip = undefined; this._startN = undefined;
     this._moodDrift = undefined; this._moodT = undefined; this._dread = undefined; this._burnSrc = undefined;
-    this._burnWp = undefined; this._fireFleeT = undefined; this._playerAssault = undefined; this._hulk = undefined;
+    this._burnWp = undefined; this._fireFleeT = undefined; this._fe118 = undefined; this._bz118 = undefined; this._playerAssault = undefined; this._hulk = undefined;
     this._cookT = undefined; this._medicCase = undefined; this._medicT = undefined; this._shyT = undefined;
     this._lastHitLoc = undefined; this._plates = undefined; this._turretProf = undefined; this._marks = undefined;
     this._stagOn = undefined; this._stagAcc = undefined; this._ip = undefined; this._flashOn = undefined; this._tsm = undefined;
@@ -38590,6 +38595,10 @@ class Unit {
   _aiReact() {
     if (!this.alive || this.explicit || this.digT > 0) return false;
     const g = this.game, now = g.time;
+    // (round 118, fifth cover pass) BEFORE THE HOLD BELOW: a man on his way out of a fire, or out of a mortar's
+    // beaten zone, keeps going — the pinned and cowering branches lay him flat and empty his path every think.
+    if (this._fe118 && (g.fireEscape118 === true || g.fireOrder118 !== false) && this._feLeg118()) return true;
+    if (this._bz118 && g.beatenZone118 === true && !this.def.vehicle && this._bzStep118(now)) return true;
     const lowHp = this.hp < this.maxHp * 0.3;
     const dry = this.ammo !== Infinity && this.ammo <= 0;
     // (round 107) THE NEAREST ENEMY ONLY WHEN SOMETHING BELOW NEEDS HIM. Every
@@ -38720,6 +38729,7 @@ class Unit {
       const gx = gx0 + dx, gz = gz0 + dz;
       const cover = g._coverAtCell(gx, gz);
       if (cover < AICFG.coverMin) continue;                 // cheap gate — skip open ground
+      if (g.fireEscape118 === true && g._burnAt118(gx, gz) === 1) continue;   // (round 118) not into a fire
       // (round 113) a man takes cover IN a wood or the scrub, not only beside it
       if (!g.pathfinder.passable(gx, gz) && !(!this.def.vehicle && g.obstacles.footThrough(gx, gz) && g.terrain.typePassable(gx, gz))) continue;
       let wx = cellCenter(gx), wz = cellCenter(gz), lineBonus = 0;
@@ -38807,11 +38817,239 @@ class Unit {
     this._threatU = best;
     return best ? { ang: Math.atan2(best.pos.x - this.pos.x, best.pos.z - this.pos.z), unit: best } : null;
   }
+  /** (round 118, cover doctrine, fourth pass) `game.coverIncoming118`: UNDER A BOMB, JUDGE THE GROUND, NOT THE POSTURE.
+   *  The exposure ledger (`tools/probe_coverledger118.js`, Village + Sedan, all switches off, 1800 s): half (Village)
+   *  to three-fifths (Sedan) of the hits on men in the open came from indirect fire, nearly all of it mortars. The
+   *  INCOMING reflex below moved a man only while `_coverValue()` — which counts his own posture — was under 0.4 and
+   *  the cover was more than 2.5 u (10 m; `dist2` is the straight distance) away: once he was flat (prone is 0.45)
+   *  he never moved again however many bombs fell, and a wall, a hole or a trench 6-10 m off was never taken. With
+   *  the switch, on open ground (his cell's own cover under 0.35, posture left out) the search's spot is taken when it
+   *  is HARD (>= 0.35: a wall, a hole, a trench) at any distance past 1 u; a man already flat goes on his belly, as
+   *  before. Not for a man on your explicit order (the old rule). True when it took his movement. */
+  _incomingStep118(cover, now) {
+    if (!cover || cover.cover < 0.35 || this.explicit) return false;
+    const g = this.game;
+    if (g._coverAtCell(worldToCell(this.pos.x), worldToCell(this.pos.z)) >= 0.35) return false;
+    if (dist2(this.pos, cover) <= 1) return false;
+    this._coverGoal = { x: this.anchor.x, z: this.anchor.z }; this._hunkerT = now;
+    this._setPathTo(cover.x, cover.z); this.state = 'advance';
+    this.target = null; this.moveMode = 'fast';
+    return true;
+  }
+  /** (round 118, cover doctrine, fifth pass) `game.fireEscape118`: OUT OF THE FIRE, AND THE ORDER KEPT.
+   *  The ledger (`tools/probe_coverledger118.js`) put burning ground at 13% (Village) and 32% (Sedan) of the hits on
+   *  men in the open, and a man in a fire was not lacking a reflex: `_updateFires` already pathed him out, radially,
+   *  f.r + 2.5 from that one fire. He took hit after hit anyway because (`tools/probe_cover5_118.js`):
+   *    · he went out ON HIS BELLY: pinned or under a bomb's whistle, `_aiReact` and `_survival` laid him flat every
+   *      think, and a prone man crawls at 0.35 of his pace through the flames;
+   *    · a cowering man's path was emptied by `_aiReact` the next think, and he could not have walked it anyway: the
+   *      morale ladder's `move` is 0 for a cowering man and 0.35 for a pinned one (`_updateMove` `condMul`);
+   *    · the radial point could be in the next fire (fires spread and merge into fields), or downwind of it;
+   *    · the player's man was taken off his order for good (`explicit = false`, `hold = false`).
+   *  With the switch: the nearest cell that is not burning and not downwind of a fire, within `FE118.reach` cells,
+   *  preferring cover and the direction of his task, one clear cell from the flames (else the old radial point); up
+   *  and running at full pace whatever his rung (`_updateMove`), the leg kept until
+   *  he is out (`_feLeg118`, checked before the pinned hold); a dug-in man leaves his hole, a man in a building is the
+   *  building's (`_updateBuildingFires`). The player's man keeps `explicit` and `hold`; once out he fights from where
+   *  he is and goes back to his order (his path's end, or the ground he was told to hold) when it stops burning.
+   *  Returns 'move' when it set his path. */
+  _fireEscape118(f) {
+    const g = this.game, now = g.time;
+    if (this.def.vehicle || this.downed || this.garrison || this.embarkedIn || !this.alive) return 0;
+    if (g.fpv && g.fpv.unit === this) return 0;                        // the man you are in first person: your legs
+    let L = this._fe118;
+    if (L && L.leg && this.path.length && now - L.t < FE118.legMax
+        && g._burnAt118(worldToCell(L.x), worldToCell(L.z)) !== 1) return 1;          // on his way out already
+    if (L && now - (L.tryT == null ? -99 : L.tryT) < FE118.cool) return 0;
+    if (!L) L = this._fe118 = { t: now, t0: now, leg: false, wait: false, ord: null };
+    L.tryT = now;
+    const pick = this._fireSafeCell118(f);
+    // the player's order as it stood when the fire reached him (a human drives him: `orderHold` leaves `explicit` off)
+    const pl = !this._underAI();
+    if (pl && !L.ord) {
+      const e = this.path.length ? this.path[this.path.length - 1] : null;
+      L.ord = { dest: e ? { x: e.x, z: e.z, lvl: e.lvl } : null, hold: !!this.hold, ax: this.anchor.x, az: this.anchor.z,
+        posture: this.posture, state: this.state, moveMode: this.moveMode };
+    }
+    if (this.dugin || this.digT > 0) this._clearDigIn();
+    if (this.suppression > 0.5) { this.suppression = 0.5; if (this._deriveSupp) this._deriveSupp(); }
+    if (this.posture === 'prone') this.posture = 'normal';           // up and out: a crawl through a fire kills
+    this._proneReflex = false; this.target = null;
+    const path0 = this.path, idx0 = this.pathIdx;
+    this._setPathTo(pick.x, pick.z);
+    if (!this.path.length) { this.path = path0; this.pathIdx = idx0; return 0; }   // no way out found: his route stands
+    L.leg = true; L.wait = false; L.t = now; L.x = pick.x; L.z = pick.z;
+    this.moveMode = 'fast';
+    if (!pl) { this.hold = false; this.state = 'advance'; }
+    else { this.anchor.set(pick.x, this.anchor.y, pick.z); if (this.state !== 'advance') this.state = 'move'; }
+    if (this._commitMove) this._commitMove(3);
+    this._fireFleeT = now;
+    return 'move';
+  }
+  /** The ground he runs to: not burning, not downwind of a fire, passable, within `FE118.reach` cells; nearer,
+   *  in cover and toward his task (his path's end, else his anchor) scores better. None: the old radial point. */
+  _fireSafeCell118(f) {
+    const g = this.game, B = g._burnGrid118(), R = FE118.reach;
+    const gx0 = worldToCell(this.pos.x), gz0 = worldToCell(this.pos.z);
+    const e = this.path.length ? this.path[this.path.length - 1] : this.anchor;
+    let tdx = e.x - this.pos.x, tdz = e.z - this.pos.z;
+    const tl = hyp(tdx, tdz);
+    if (tl > 2) { tdx /= tl; tdz /= tl; } else { tdx = 0; tdz = 0; }
+    let best = null, bs = Infinity;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const gx = gx0 + dx, gz = gz0 + dz;
+      if (!inGrid(gx, gz)) continue;
+      const b = B[gz * GRID + gx];
+      if (b === 1) continue;
+      const wx = cellCenter(gx), wz = cellCenter(gz), ox = wx - this.pos.x, oz = wz - this.pos.z, d = hyp(ox, oz);
+      if (d > R * TILE) continue;
+      if (!g.pathfinder.passable(gx, gz)) continue;
+      const cov = g._coverAtCell(gx, gz);
+      // a cell ON the fire's edge is ground the next hop takes (fires creep a metre or two a second): one clear cell
+      // between him and the flames is worth a few metres more running
+      let edge = 0;
+      for (let k = -1; k <= 1 && !edge; k++) for (let j = -1; j <= 1; j++) {
+        if ((k || j) && inGrid(gx + j, gz + k) && B[(gz + k) * GRID + gx + j] === 1) { edge = 1; break; }
+      }
+      // the fire he would run THROUGH to get there (the straight line, sampled every half cell): a man at the downwind
+      // edge is not sent across the flames to the upwind side
+      let thru = 0;
+      const nS = Math.ceil(d / (TILE * 0.5));
+      for (let k = 1; k < nS; k++) {
+        const sx = worldToCell(this.pos.x + ox * k / nS), sz = worldToCell(this.pos.z + oz * k / nS);
+        if (inGrid(sx, sz) && B[sz * GRID + sx] === 1) thru++;
+      }
+      const s = d + thru * TILE * 0.5 * 3 + (b === 2 ? 2 : 0) + edge * 3 - Math.min(cov, 0.6) * 4 - (d > 0.01 ? (ox * tdx + oz * tdz) / d : 0) * 1.5;
+      if (s < bs) { bs = s; best = { x: wx, z: wz }; }
+    }
+    if (best) return best;
+    let dx = this.pos.x - f.x, dz = this.pos.z - f.z, L = hyp(dx, dz);
+    if (L < 0.05) { dx = tdx || 1; dz = tdz; L = hyp(dx, dz); }     // at the very centre: toward his task
+    const out = f.r + 2.5;
+    return { x: clamp(f.x + dx / L * out, -HALF + 2, HALF - 2), z: clamp(f.z + dz / L * out, -HALF + 2, HALF - 2) };
+  }
+  /** True while he is on his way out of a fire (nobody else may empty that path). Once out: an AI man is the AI's
+   *  again; the player's man fights from there and, once the ground of his order is not burning (or after
+   *  `FE118.resumeMax` s), goes back to it — his path's end, or the spot he was told to hold, in his own posture. */
+  _feLeg118() {
+    const L = this._fe118, g = this.game, now = g.time;
+    if (!L) return false;
+    if (L.ord && this._lastOrderT != null && this._lastOrderT > L.t0) { this._fe118 = null; return false; }   // a new order of yours
+    if (L.leg) {
+      if (this.path.length && now - L.t < FE118.legMax) {
+        if (this.posture === 'prone') this.posture = 'normal';
+        return true;
+      }
+      L.leg = false;
+      if (!L.ord) { this._fe118 = null; return false; }
+      L.wait = true; L.chkT = -99;
+    }
+    const pl = !this._underAI();
+    if (L.wait && pl && now - L.chkT >= 1) {
+      L.chkT = now;
+      const o = L.ord, d = o.dest, tx = d ? d.x : o.ax, tz = d ? d.z : o.az;
+      if (g._burnAt118(worldToCell(tx), worldToCell(tz)) !== 1 || now - L.t > FE118.resumeMax) {
+        this._fe118 = null;
+        this.anchor.set(o.ax, this.anchor.y, o.az);
+        this.posture = o.posture; this.moveMode = o.moveMode;
+        if (hyp(this.pos.x - tx, this.pos.z - tz) > 1) {
+          this._setPathTo(tx, tz, d ? d.lvl : undefined);
+          this.state = o.state === 'advance' ? 'advance' : 'move';
+        }
+      }
+    } else if (L.wait && !pl) this._fe118 = null;                 // given back to the AI meanwhile
+    return false;
+  }
+  /** (round 118, cover doctrine, fifth pass) `game.beatenZone118`: OUT OF THE BRACKET, THEN DOWN.
+   *  Pinned men in the open took 21% (Village) and 36% (Sedan) of the hits on exposed men, nearly all of it mortar
+   *  bombs: `_aiReact` held a pinned man flat where he lay and `_survival`'s INCOMING reflex laid him flat again
+   *  under every whistle, so a section caught in a concentration lay in it until it was hit. With the switch, a man
+   *  pinned (by fire or fear, not cowering: a cowering man's `move` is 0) or under a whistle, inside the
+   *  concentration he has seen fall round him (`_bzNote118`: two
+   *  bursts or more within `BZ118.fresh` s), on ground with no hard cover (cell cover < 0.35, no trench, not dug in)
+   *  gets up and goes: to the nearest hard cover, trench cell or shell hole OUTSIDE the zone within `BZ118.reach`
+   *  cells (nearer and toward his anchor better; leaving his section costs, it does not forbid), else straight across
+   *  the line of fire (from the tube when it is on the field, else from the enemy's side) to the edge of the zone.
+   *  Then he goes to ground. Not a man a human is driving (the player decides where his men lie). True while it
+   *  owns his movement. */
+  _bzStep118(now) {
+    const Z = this._bz118, g = this.game;
+    if (!Z || this.def.vehicle || this.downed || this.garrison || this.embarkedIn || this.explicit || !this._underAI()) return false;
+    if (Z.leg) {
+      if (this.path.length && now - Z.legT < BZ118.legMax && this._cc().move >= 0.1) {   // frozen by fear: down where he is
+        if (this.posture === 'prone') this.posture = 'normal';
+        return true;
+      }
+      Z.leg = false; Z.n = 0; Z.rr = 0;          // out: a new concentration has to find him where he is now
+      this._reflexDown();                         // …and down
+      return false;
+    }
+    if (now - Z.t > BZ118.fresh || Z.n < BZ118.minN || this.dugin || this.digT > 0) return false;
+    const rank = this._cc().rank;
+    // pinned (by fire or by fear) or under a whistle; a cowering man does not move at all (`move` 0) and a panicked
+    // or broken one has his own way out (`_aiReact`), so not them
+    if (rank >= 3 || this._cc().move < 0.1) return false;
+    if (!(this.suppState === 'Pinned' || rank === 2 || (this._incomingT || 0) > now)) return false;
+    if (now - (Z.tryT == null ? -99 : Z.tryT) < BZ118.try) return false;
+    Z.tryT = now;
+    const zr = Math.max(Z.rr + Z.R, Z.R * 1.5);
+    const ux = this.pos.x - Z.x, uz = this.pos.z - Z.z;
+    if (hyp(ux, uz) > zr) return false;                                     // not in it
+    const gx0 = worldToCell(this.pos.x), gz0 = worldToCell(this.pos.z);
+    if (g._coverAtCell(gx0, gz0) >= 0.35 || g.obstacles.occupied[gz0 * GRID + gx0] === 7) return false;   // hard ground: stay
+    let lx, lz;
+    if (Z.sx != null) { lx = Z.x - Z.sx; lz = Z.z - Z.sz; } else { const d = g._rearDir118(this.team); lx = d.x; lz = d.z; }
+    const ll = hyp(lx, lz) || 1;
+    const pick = this._bzExit118(Z, zr, -lz / ll, lx / ll, ux, uz);
+    if (!pick) return false;
+    this._setPathTo(pick.x, pick.z);
+    if (!this.path.length) return false;
+    Z.leg = true; Z.legT = now; Z.kind = pick.k;
+    this.posture = 'normal'; this._proneReflex = false; this.moveMode = 'fast'; this.state = 'advance'; this.target = null;
+    if (this._commitMove) this._commitMove(3);
+    return 'move';
+  }
+  _bzExit118(Z, zr, nx, nz, ux, uz) {
+    const g = this.game, R = BZ118.reach, B = g._burnGrid118();
+    const gx0 = worldToCell(this.pos.x), gz0 = worldToCell(this.pos.z);
+    const ax = this.anchor.x - this.pos.x, az = this.anchor.z - this.pos.z, al = hyp(ax, az);
+    const occ = g.obstacles.occupied;
+    let best = null, bs = Infinity;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const gx = gx0 + dx, gz = gz0 + dz;
+      if (!inGrid(gx, gz)) continue;
+      const wx = cellCenter(gx), wz = cellCenter(gz), ox = wx - this.pos.x, oz = wz - this.pos.z, d = hyp(ox, oz);
+      if (d > R * TILE || d < 1) continue;
+      if (hyp(wx - Z.x, wz - Z.z) < zr + BZ118.margin) continue;          // still in the bracket
+      const i = gz * GRID + gx;
+      if (B[i] === 1) continue;
+      const tr = occ[i] === 7, cov = tr ? 1 : g._coverAtCell(gx, gz);
+      const hole = !tr && cov < 0.35 && g._holeAt118(gx, gz);
+      if (cov < 0.35 && !hole) continue;
+      if (!g.pathfinder.passable(gx, gz)) continue;
+      let s = d - (al > 2 ? (ox * ax + oz * az) / (d * al) * 2 : 0);
+      if (this._tetherAt && !this._tetherAt(wx, wz)) s += 8;
+      if (s < bs) { bs = s; best = { x: wx, z: wz, k: tr ? 'trench' : hole ? 'hole' : 'hard' }; }
+    }
+    if (best) return best;
+    // nothing hard outside it within reach: straight across the line of fire to the edge of the bracket
+    const off = ux * nx + uz * nz;
+    const sgn = Math.abs(off) > 0.5 ? Math.sign(off) : (ax * nx + az * nz >= 0 ? 1 : -1);
+    const need = zr + BZ118.margin - off * sgn;
+    if (need <= 0.5) return null;
+    const tx = clamp(this.pos.x + nx * sgn * need, -HALF + 3, HALF - 3), tz = clamp(this.pos.z + nz * sgn * need, -HALF + 3, HALF - 3);
+    const c = g.pathfinder.nearestPassable(worldToCell(tx), worldToCell(tz), 3);
+    if (!c) return null;
+    const cx = cellCenter(c.x), cz = cellCenter(c.z);
+    if (B[c.z * GRID + c.x] === 1) return null;
+    return { x: cx, z: cz, k: 'across' };
+  }
   /** Self-preservation for infantry on the move: AI bounds cover-to-cover and
    *  hunkers under fire; the player's troops hit the dirt when pinned in the open
    *  and get back up on their own once it's over (no loss of control). Returns
    *  true when it has taken over this unit's movement for the tick. */
   _survival() {
+    if (this._fe118 && (this.game.fireEscape118 === true || this.game.fireOrder118 !== false) && this._feLeg118()) return true;   // (round 118) out of the fire first
     if (this.def.vehicle || this.downed || this.digT > 0 || this.garrison || this.embarkedIn || this._assault) return false;
     if (this.def.kind === 'atgun' || this.def.kind === 'artillery' || this.def.towed || this.def.kind === 'suicide') return false;
     const now = this.game.time;
@@ -38823,6 +39061,7 @@ class Unit {
       if (now - (this._incomingActT || -99) > 2.2) {
         this._incomingActT = now;
         const cover = this._bestCoverNear(11, null);
+        if (this.game.coverIncoming118 === true && this._incomingStep118(cover, now)) return true;   // (round 118) the ground, not the posture
         if (cover && dist2(this.pos, cover) > 2.5 && this._coverValue() < 0.4) {
           this._coverGoal = { x: this.anchor.x, z: this.anchor.z }; this._hunkerT = now;
           this._setPathTo(cover.x, cover.z); this.state = 'advance';
@@ -41866,6 +42105,9 @@ class Unit {
     // crew — barely faster than a crawl, but it moves.
     const towMul = (this.def.kind === 'atgun' || this.def.towed) ? (this.limbered ? 5 : 0.5) : 1;
     let condMul = this._cc().move;                                                         // condition: pinned men barely move
+    // (round 118) …but a man whose ground is burning runs: a cowering man's `move` is 0 and a pinned man's 0.35, so
+    // with the flames on him he did not leave however he was pathed (`game.fireEscape118`, `_fireEscape118`)
+    if (this._fe118 && this._fe118.leg && (this.game.fireEscape118 === true || this.game.fireOrder118 !== false)) condMul = Math.max(condMul, 1);
     if (this._fatigued()) condMul *= 0.35; else if (this.fatState === 'Winded') condMul *= 0.78;
     if (this.posture === 'prone') condMul *= 0.35;                                         // crawling on your belly
     if (this.healthState === HEALTH.WOUNDED) condMul *= COMBAT.woundMoveMul;               // a wounded man hobbles
@@ -65797,6 +66039,7 @@ class Game {
     }
 
     // Units: falloff damage + knockback + suppression. Explosions ignore team.
+    if (this.beatenZone118 === true && radius > 0) this._bzNote118(wx, wz, radius, source, opts);   // (round 118) who saw it fall
     // White phosphorus is a terror weapon first — everyone near it breaks.
     const supPow = opts.wp ? 1 : Math.min(1, Math.max(0.3, dmg / 50));
     // Kinetic penetration bleeds off with striking velocity — a 75 mm that
@@ -70212,6 +70455,71 @@ class Game {
     this.groundFires.push(f);
     return f;
   }
+  /** (round 118, fifth cover pass) WHERE THE GROUND IS BURNING, a cell at a time: 1 = inside a fire's reach (the
+   *  disc `_updateFires` burns men in, plus half a cell), 2 = downwind of one within `FE118.lee` (the smoke and the
+   *  next hop go that way). Rebuilt from `groundFires` at most every half second, and at once on a new battle (a new
+   *  `groundFires` array). Reads nothing random and writes nothing the sim reads but itself. */
+  _burnGrid118() {
+    const N = GRID * GRID;
+    let B = this._burn118;
+    if (!B || B.length !== N) { B = this._burn118 = new Uint8Array(N); this._burnGT118 = null; }
+    if (this._burnFires118 === this.groundFires && this._burnGT118 != null && this.time >= this._burnGT118
+        && this.time - this._burnGT118 < 0.5) return B;
+    this._burnGT118 = this.time; this._burnFires118 = this.groundFires;
+    B.fill(0);
+    if (!this.groundFires.length) return B;
+    const w = this.wind, wl = w ? hyp(w.x, w.z) : 0, ux = wl > 0.05 ? w.x / wl : 0, uz = wl > 0.05 ? w.z / wl : 0;
+    for (const f of this.groundFires) {
+      const rr = f.r + FE118.pad, rl = wl > 0.05 ? f.r + FE118.lee : rr;
+      const R = Math.ceil(rl / TILE) + 1, cx = worldToCell(f.x), cz = worldToCell(f.z);
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        const gx = cx + dx, gz = cz + dz;
+        if (!inGrid(gx, gz)) continue;
+        const ox = cellCenter(gx) - f.x, oz = cellCenter(gz) - f.z, d = hyp(ox, oz), i = gz * GRID + gx;
+        if (d <= rr) B[i] = 1;
+        else if (d <= rl && B[i] === 0 && ox * ux + oz * uz > d * 0.5) B[i] = 2;
+      }
+    }
+    return B;
+  }
+  _burnAt118(gx, gz) { return inGrid(gx, gz) ? this._burnGrid118()[gz * GRID + gx] : 0; }
+  /** A shell hole the grid can see: the cell sits below its four neighbours by `BZ118.hole` (world units). */
+  _holeAt118(gx, gz) {
+    if (!inGrid(gx - 1, gz - 1) || !inGrid(gx + 1, gz + 1)) return false;
+    const T = this.terrain, h = T.height(gx, gz);
+    const m = (T.height(gx - 1, gz) + T.height(gx + 1, gz) + T.height(gx, gz - 1) + T.height(gx, gz + 1)) * 0.25;
+    return (m - h) * HSCALE > BZ118.hole;
+  }
+  /** The way back to a team's own side, a value every two seconds (`_rearDir` walks every man). */
+  _rearDir118(T) {
+    const c = this._rd118 || (this._rd118 = {});
+    const e = c[T];
+    if (!e || this.time < e.t || this.time - e.t > 2) c[T] = { t: this.time, d: this._rearDir(T) };
+    return c[T].d;
+  }
+  /** (round 118, fifth cover pass) `game.beatenZone118`: A BURST OF INDIRECT FIRE IS SEEN BY EVERY MAN NEAR IT. Each
+   *  keeps the concentration falling round him: its running centre, how far the bursts scatter from it (`rr`), the
+   *  burst's reach (`R`), how many (`n`), when the last fell, and where it came from when the tube is on the field.
+   *  A mortar bomb (`mortar`), an off-map round (`plunge`) or a gun firing indirect; nothing else. */
+  _bzNote118(wx, wz, radius, source, opts) {
+    const ind = !!(opts.mortar || opts.plunge || (source && source._indirect && source._indirect()));
+    if (!ind) return;
+    const R = radius * BZ118.note, now = this.time;
+    const near = this.unitGrid ? this.unitGrid.query(wx, wz, R, BZ_NEAR118) : this.units;
+    const src = source && source.pos && source.alive !== undefined ? source : null;
+    for (const u of near) {
+      if (!u.alive || u.downed || u.def.vehicle || u.embarkedIn) continue;
+      const d0 = hyp(u.pos.x - wx, u.pos.z - wz);
+      if (d0 > R) continue;
+      let Z = u._bz118;
+      if (!Z || now - Z.t > BZ118.fresh || now < Z.t) Z = u._bz118 = { x: wx, z: wz, n: 0, rr: 0, R: radius, t: now, sx: null, sz: null, leg: false };
+      const n = Z.n + 1, k = 1 / n, d = hyp(wx - Z.x, wz - Z.z);
+      Z.x += (wx - Z.x) * k; Z.z += (wz - Z.z) * k;
+      Z.rr = n > 1 ? Z.rr + (d - Z.rr) * k : 0;
+      Z.n = n; Z.t = now; Z.R = Math.max(Z.R * 0.8, radius);
+      if (src) { Z.sx = src.pos.x; Z.sz = src.pos.z; }
+    }
+  }
   /** Mark a flammable prop alight — it burns down and spreads flame. */
   _igniteObstacle(o) {
     if (!o || o.burning || !FLAMMABLE_OBS.has(o.type)) return;
@@ -70299,7 +70607,14 @@ class Game {
           // which is most of how a spreading fire killed men wholesale. The
           // flames reach him and he gets up and goes, the short way out, hole
           // or no hole; a reflex, so the player's men do it too.
-          if (this._fireFlee !== false && u.alive && !u.downed && !u.garrison && this.time - (u._fireFleeT || -99) > 2.5) {
+          // (round 118) `game.fireEscape118`: to the nearest ground that is not burning and not downwind of it, up
+          // and running, the leg kept until he is out, and the player's order kept and resumed (`_fireEscape118`).
+          // `game.fireOrder118` (default ON): the same for the men a HUMAN drives, whatever the AI switch says —
+          // the old flee below took them off their order for good (`hold = false`, `explicit = false`)
+          if (this.fireEscape118 === true || (this.fireOrder118 !== false && u.team === this.playerTeam && !u._underAI())) {
+            if (u.alive && !u.downed && !u.garrison && !u.embarkedIn) u._fireEscape118(f);
+          }
+          else if (this._fireFlee !== false && u.alive && !u.downed && !u.garrison && this.time - (u._fireFleeT || -99) > 2.5) {
             u._fireFleeT = this.time;
             const dx = u.pos.x - f.x, dz = u.pos.z - f.z, L = hyp(dx, dz) || 1;
             const out = f.r + 2.5;
