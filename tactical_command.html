@@ -1574,6 +1574,7 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/trenchkit118.pack.js"></script>
 <script src="assets/trenchkit118.js"></script>
 <script src="assets/bunker118.js"></script>
+<script src="assets/bunkermaps118.js"></script>
 <script src="assets/covertab118.js"></script>
 <script>
 'use strict';
@@ -6782,6 +6783,64 @@ const TREE_H_MIN = 1.15, TREE_H_MAX = 2.85;
  *  in NORMANDY, which is oak, elm, beech and poplar in banked hedgerows. */
 const TREE_CONIFER = 0.22;
 
+/** (round 118, cover doctrine, third pass) `game.coverBest118`: THE BEST PROP OF THE FIVE, NOT THE FIRST.
+ *  `_coverAtCell` and `_coverValueCalc` took the first prop among a cell and its four neighbours, so wire laid
+ *  beside a hedge (wire has no cover) took that cell's hedge cover away (0.25 -> 0.06 in the Cover tab's probe). */
+const CB118_DX = [0, 1, -1, 0, 0], CB118_DZ = [0, 0, 0, 1, -1];
+function coverBest118(O, gx, gz) {
+  let best = 0;
+  for (let k = 0; k < 5; k++) {
+    const o = O.at(gx + CB118_DX[k], gz + CB118_DZ[k]);
+    if (!o) continue;
+    const oc = COVER_DOODAD[o.type] || 0;
+    if (oc > best) best = oc;
+  }
+  return best;
+}
+/** (round 118, cover doctrine, third pass) `game.coverRoute118`: A ROUTE UNDER CONTACT KEEPS OUT OF SIGHT.
+ *  Under fire most of a man's exposed time is spent CROSSING open ground — the second pass made legs END in cover
+ *  and exposure barely moved. Each side keeps an exposure grid: the cells the enemies it has SEEN in the last
+ *  EXPO118_AGE s (`_contactAt`: where they were seen, fog-of-war honest) can see, by a radial sweep from each over
+ *  the ground, the props and the buildings (`expoSweep118`), EXPO118_PER_STEP viewpoints a step — a side's grid is
+ *  rebuilt about once a second. A leg on foot planned while its side's grid is live pays up to EXPO118_K cells of
+ *  open ground extra for each such cell, by how open it is (cover under EXPO118_COVER, a crop's concealment) and
+ *  how many of them see it (full at two), so the A* runs behind hedges, walls, banks and dead ground when there is
+ *  a way round, and crosses the open when there is not. Reads the sim only; the grids are new each battle. */
+const EXPO118_R = 40, EXPO118_AGE = 20, EXPO118_VP = 16, EXPO118_PER_STEP = 2, EXPO118_K = 1.6;
+const EXPO118_COVER = 0.35, EXPO118_OPEN_S = 15, EXPO118_HOUSE_H = 2.0, EXPO118_CYCLE_S = 1.0;
+/** One viewpoint's sweep: every cell within R cells whose standing man's mark (MARK_H over its floor) the eye at
+ *  eyeY over (x0, z0) sees over the ground, the solid props and the buildings between, counted once into `next`
+ *  (`stamp`/`sv`: once per viewpoint). A ray to each of the 8R cells round the square of radius R, a cell per step
+ *  along its major axis: that visits EVERY cell inside (the cell (t, y) lies on the ray to (R, round(yR/t)), off by
+ *  under half a cell) — rays at even angles leave holes between them a route would thread. Returns cells stepped. */
+function expoSweep118(next, stamp, sv, H, OC, OB, SM, x0, z0, R, eyeY) {
+  const G = GRID, TL = TILE, HS = HSCALE, MH = MARK_H, RW = R * TL;
+  const cx = Math.floor((x0 + HALF) / TL), cz = Math.floor((z0 + HALF) / TL);
+  let steps = 0;
+  if (cx >= 0 && cz >= 0 && cx < G && cz < G) { const c0 = cz * G + cx; if (stamp[c0] !== sv) { stamp[c0] = sv; if (next[c0] < 255) next[c0]++; } }
+  for (let k = 0, n = 8 * R; k < n; k++) {
+    const side = (k / (2 * R)) | 0, j = k - side * 2 * R - R;
+    const ex = side === 0 ? R : side === 1 ? -j : side === 2 ? -R : j;
+    const ez = side === 0 ? j : side === 1 ? R : side === 2 ? -j : -R;
+    const fx = ex / R, fz = ez / R, len = Math.sqrt(fx * fx + fz * fz) * TL;
+    let smax = -Infinity;
+    for (let s = 1; s <= R; s++) {
+      const d = s * len;
+      if (d > RW) break;
+      const gx = cx + Math.round(fx * s), gz = cz + Math.round(fz * s);
+      if (gx < 0 || gz < 0 || gx >= G || gz >= G) break;
+      const ci = gz * G + gx, fl = H[ci] * HS;
+      steps++;
+      if ((fl + MH - eyeY) / d >= smax && stamp[ci] !== sv) { stamp[ci] = sv; if (next[ci] < 255) next[ci]++; }
+      let top = fl;
+      if (OC[ci]) { const o = OB.at(gx, gz); if (o && !OBS_DEF[o.type].seethrough) top = fl + o.height; }
+      if (SM !== null && SM[ci] !== 0 && s > 2 && fl + EXPO118_HOUSE_H > top) top = fl + EXPO118_HOUSE_H;
+      const bs = (top - eyeY) / d;
+      if (bs > smax) smax = bs;
+    }
+  }
+  return steps;
+}
 const COVER_DOODAD = {
   foxhole: 0.65, sandbags: 0.55, wall: 0.50, house: 0.55, tower: 0.55, well: 0.40,
   rock: 0.45, menhir: 0.40, tree: 0.30, bush: 0.35, deadtree: 0.25, hay: 0.30,
@@ -28580,9 +28639,23 @@ class Pathfinder {
     this.walkCost = true;
     return vb.work > 0 && vb.work * 0.4 <= this.crushing;
   }
+  /** (round 118) `coverRoute118`: the price of the cells on the straight line from one cell to another, the first
+   *  (where he stands) left out (`this.expo`). */
+  _expoLine118(x1, z1, x2, z2) {
+    const E = this.expo;
+    if (!E) return 0;
+    const n = Math.max(Math.abs(x2 - x1), Math.abs(z2 - z1));
+    let s = 0;
+    for (let i = 1; i <= n; i++) {
+      const x = n ? Math.round(x1 + (x2 - x1) * i / n) : x1, z = n ? Math.round(z1 + (z2 - z1) * i / n) : z1;
+      if (E.vis[z * GRID + x]) s += E.price(x, z);
+    }
+    return s;
+  }
   /** `losWalk`, but demanding a line with nothing to pay on it. This is what
    *  the early-out and the string-pull actually need. */
   losFree(x1, z1, x2, z2, L) {
+    if (this._expoStrict && L === 0 && this._expoLine118(x1, z1, x2, z2) > 0) return false;   // (round 118) the early-out only
     return this.losWalk(x1, z1, x2, z2, L) && !this.walkCost;
   }
 
@@ -28681,6 +28754,7 @@ class Pathfinder {
     // exactly the searches `_wasmSearch` runs, whose grid blocks on 1 alone
     this.foot = !this.floating && !this.crushing && !this.amphibious;
     const out = this._find(sx, sz, ex, ez, sL | 0, eL | 0);
+    this.expo = null; this._expoStrict = false;   // (round 118) `coverRoute118`: priced for one search only
     this.foot = false;
     this.floating = false;
     this.climbMax = CLIMB;
@@ -28742,9 +28816,11 @@ class Pathfinder {
     // 53 of them (66%) crossed a crushable wall, 425 crossings in all, and 18
     // of the 43 single-waypoint paths drove through one. At a 41% chance of
     // throwing a track per brick crossing, that is a tank that does not arrive.
+    this._expoStrict = !!this.expo;       // (round 118) `coverRoute118`: no straight line across priced ground (`losFree`)
     if (sL === eL && this.losFree(sx, sz, ex, ez, sL)) {
       return [{ x: cellCenter(ex), z: cellCenter(ez), lvl: eL }];
     }
+    this._expoStrict = false;
 
     // THE SAME SEARCH, IN WEBASSEMBLY, when this is a search it can run — a
     // man on foot, on the arrays it shares with the game. See `_wasmSearch`.
@@ -28752,6 +28828,7 @@ class Pathfinder {
     if (wasm) return wasm;
 
     const { g, closed, from, stamp } = this;
+    const EXV = this.expo ? this.expo.vis : null, EXP = EXV ? this.expo.price : null;   // (round 118) coverRoute118
     const gen = ++this._gen;
     const heap = new MinHeap();
     const PLANE = GRID * GRID;
@@ -28859,6 +28936,7 @@ class Pathfinder {
           if (dx !== 0 && dz !== 0 && (!this.passable(cx + dx, cz) || !this.passable(cx, cz + dz))) continue; // no corner cutting
           climbCost = Math.max(0, nh - ch) * 0.4;
         } else if (dx !== 0 && dz !== 0 && (!this.passableL(cx + dx, cz, cl) || !this.passableL(cx, cz + dz, cl))) continue;
+        if (EXV !== null && cl === 0 && EXV[nz * GRID + nx] !== 0) climbCost += EXP(nx, nz);   // (round 118) `coverRoute118`: ground the enemy sees
         const move = (dx !== 0 && dz !== 0) ? 1.414 : 1;
         const terr = cl === 0 ? 1 / Math.max(this.terrain.speedAt(nx, nz), 0.2) : 1;
         const ng = g[ci] + move * (0.6 + terr * 0.4) + climbCost + wallCost
@@ -28947,6 +29025,16 @@ class Pathfinder {
    *  — shared by both searches, so the two can only differ in the cells. */
   _pull(cells) {
     cells = this._unCorner(cells);
+    // (round 118) `coverRoute118`: a short cut may not cross more of the ground the enemy sees than the cells it
+    // replaces (the round-44 lesson: a price is worthless if the smoothing undoes the route that paid it)
+    const EXq = this.expo;
+    let EXc = null;
+    if (EXq) {
+      EXc = new Float64Array(cells.length + 1);
+      for (let i = 0; i < cells.length; i++) { const q = cells[i]; EXc[i + 1] = EXc[i] + (q.lvl === 0 && EXq.vis[q.z * GRID + q.x] ? EXq.price(q.x, q.z) : 0); }
+    }
+    const free = EXc ? (a, k, al) => this.losFree(cells[a].x, cells[a].z, cells[k].x, cells[k].z, al)
+      && (al !== 0 || this._expoLine118(cells[a].x, cells[a].z, cells[k].x, cells[k].z) <= EXc[k + 1] - EXc[a + 1] + 0.25) : null;
     // String-pull: keep only waypoints where LOS breaks. Pulling only happens
     // WITHIN a storey — a staircase is a fixed route and smoothing across one
     // would cut the corner straight through the floor.
@@ -28983,11 +29071,11 @@ class Pathfinder {
       // and the loop linear. A leg longer than the window is simply split into
       // two, which is a waypoint the unit walks through without stopping.
       const bb = Math.min(b, a + PULL_WINDOW);
-      if (this.losFree(ax, az, cells[bb].x, cells[bb].z, al)) c = bb;
+      if (free ? free(a, bb, al) : this.losFree(ax, az, cells[bb].x, cells[bb].z, al)) c = bb;
       else {
         let step = 1;
-        while (c + step < bb && this.losFree(ax, az, cells[c + step].x, cells[c + step].z, al)) { c += step; step *= 2; }
-        while (step > 1) { step >>= 1; if (c + step < bb && this.losFree(ax, az, cells[c + step].x, cells[c + step].z, al)) c += step; }
+        while (c + step < bb && (free ? free(a, c + step, al) : this.losFree(ax, az, cells[c + step].x, cells[c + step].z, al))) { c += step; step *= 2; }
+        while (step > 1) { step >>= 1; if (c + step < bb && (free ? free(a, c + step, al) : this.losFree(ax, az, cells[c + step].x, cells[c + step].z, al))) c += step; }
       }
       out.push(cells[c]);
       a = c;
@@ -29007,6 +29095,7 @@ class Pathfinder {
     const W = window.WasmPath, gm = window.game;
     if (!W || !W.ready || (gm && gm._wasmPath === false)) return null;
     if (this.floating || this.crushing || this.wading || this.amphibious) return null;
+    if (this.expo) return null;           // (round 118) `coverRoute118`: the module has no price layer — a priced search is JS
     if (GRID > W.maxg || LV > W.lvmax) return null;
     const T = this.terrain, O = this.obstacles, S = this.structures;
     if (!W.owns(T.h, 'H') || !W.owns(T.type, 'TY') || !W.owns(O.occupied, 'OCC')) return null;
@@ -36108,6 +36197,8 @@ class Unit {
       this.path = []; this.pathIdx = 0; this._pathPartial = false;
       return;
     }
+    // (round 118) `game.coverRoute118`: a leg on foot under contact is priced by what the enemy it knows of sees
+    if (this.game.coverRoute118 === true && !this.def.vehicle) this.game.pathfinder.expo = this.game._expoFor118(this, wx, wz);
     const path = this.game.pathfinder.find(
       worldToCell(this.pos.x), worldToCell(this.pos.z),
       worldToCell(wx), worldToCell(wz), this.def.floats, climbOf(this.def),
@@ -46141,9 +46232,14 @@ class Unit {
     if (this.def.vehicle) return 0;   // vehicles rely on armour, not cover
     const gx = worldToCell(this.pos.x), gz = worldToCell(this.pos.z);
     let cov = TYPE_DEF[this.game.terrain.typeAt(gx, gz)].cover || 0;
+    if (this.game.coverBest118 === true) {           // (round 118) the best prop of the five, not the first
+      const oc = coverBest118(this.game.obstacles, gx, gz);
+      if (oc) cov = 1 - (1 - cov) * (1 - oc);
+    } else {
     const o = this.game.obstacles.at(gx, gz) || this.game.obstacles.at(gx + 1, gz)
       || this.game.obstacles.at(gx - 1, gz) || this.game.obstacles.at(gx, gz + 1) || this.game.obstacles.at(gx, gz - 1);
     if (o) { const oc = COVER_DOODAD[o.type]; if (oc) cov = 1 - (1 - cov) * (1 - oc); }
+    }
     // A building's own surfaces. Directional: the wall between you and the
     // shooter is cover, the one at your back is scenery. `_coverFrom` is set
     // by takeDamage before it asks, so the same call serves both the incoming
@@ -53639,6 +53735,7 @@ class Game {
   _aiDoctrine(dt) {
     this._doctrineT = (this._doctrineT || 0) - dt;
     this._aiContactSurvey(dt);   // a few enemies a frame, all of them each tick — see below
+    if (this.coverRoute118 === true) this._expoTick118();   // (round 118) what each side's known enemies can see
     // ASSIGNMENT is a slow decision; EXECUTION is not. A section swapping the
     // halves of its bounding overwatch, or its gun displacing to keep the rush
     // covered, happens on its own clock inside the task it was given.
@@ -54474,6 +54571,12 @@ class Game {
     const INDOORS = { hold: 1, assault: 1 };
     if (!(INDOORS[kind] && t && INDOORS[t.kind] && hyp(t.x - x, t.z - z) < 8)) {
       for (const u of rec.live) {
+        // (round 118, `game.bunkerMaps118`) a map bunker's crew (assets/bunkermaps118.js) stays in it whatever the
+        // section does next, until it pulls back: a withdrawal takes them out, and they are no longer its crew
+        if (u._b118Gar && this.bunkerMaps118 === true) {
+          if (kind !== 'withdraw') continue;
+          u._b118Gar = false; u._bunker118 = null;
+        }
         if (u._vpGuard) { u._vpGuard = null; u.hold = false; }
         u._strSpot = null;
         // A GUN LINE IS A CLAIM AND DIES WITH THE JOB THAT MADE IT, exactly as
@@ -54680,7 +54783,7 @@ class Game {
     if (this.obstacles.occupied[gz * GRID + gx] === 7) return COMBAT.coverMax;
     let c = this._coverAtCell(gx, gz);
     const F = this.foliage;
-    if (F && F.coverAt) { const fc = F.coverAt(gx, gz); if (fc > 0) c = 1 - (1 - c) * (1 - fc); }
+    if (F && F.coverAt && this.coverPlants118 !== true) { const fc = F.coverAt(gx, gz); if (fc > 0) c = 1 - (1 - c) * (1 - fc); }   // (round 118) not twice
     return c;
   }
   /** (round 118) THE BEST COVER WITHIN `R` CELLS OF THE POINT A MAN IS GOING TO (`game.coverLeg118`), or null when
@@ -61306,14 +61409,140 @@ class Game {
     return best;
   }
 
+  /** (round 118) `game.coverRoute118`: the per-side exposure grids (see EXPO118_R). New each battle: keyed on the
+   *  terrain, the field's size and the clock (a battle starts at 0), so nothing carries into the next one. */
+  _expoInit118() {
+    const N = GRID * GRID, teams = {};
+    const R = { key: this.terrain, n: N, lastT: this.time, openF: new Uint8Array(N).fill(255), openT: this.time,
+      stamp: new Int32Array(N), sv: 0, teams, order: [], rr: 0,
+      stats: { sweeps: 0, cycles: 0, steps: 0, asked: 0, priced: 0, vp: 0 } };
+    for (const u of this.units) if (u.team > 0 && !teams[u.team]) { teams[u.team] = this._expoTeam118(R, u.team); R.order.push(u.team); }
+    R.order.sort((a, b) => a - b);
+    return R;
+  }
+  _expoTeam118(R, T) {
+    const S = { T, vis: new Uint8Array(R.n), next: new Uint8Array(R.n), queue: [], qi: 0, nvp: 0, cand: [], keys: new Set(), waitT: -1, swapped: true };
+    const g = this, openF = R.openF, PV = new Float64Array(256);
+    for (let v = 1; v < 256; v++) PV[v] = EXPO118_K * Math.min(1, v / 2) / 254;
+    S.ex = { vis: S.vis, price: (x, z) => {
+      const i = z * GRID + x, v = S.vis[i];
+      if (!v) return 0;
+      let f = openF[i];
+      if (f === 255) f = g._expoOpen118(i, x, z);
+      return PV[v] * f;
+    } };
+    return S;
+  }
+  /** How open a cell is to fire, 0..254 (cached per cell, the cache emptied every EXPO118_OPEN_S): a trench cell or
+   *  cover at EXPO118_COVER is closed; less cover is open in proportion; a crop's concealment scales it down. */
+  _expoOpen118(i, gx, gz) {
+    const R = this._route118;
+    const c = this.obstacles.occupied[i] === 7 ? 1 : this._coverAtCell(gx, gz);
+    let f = c >= EXPO118_COVER ? 0 : 1 - c / EXPO118_COVER;
+    const F = this.foliage;
+    if (f > 0 && F && F.concealAt) f *= F.concealAt(gx, gz);
+    return (R.openF[i] = Math.round(f * 254));
+  }
+  /** A side's viewpoints for its next sweep: the enemies it saw within EXPO118_AGE s, latest first, at most one per
+   *  four-cell square and EXPO118_VP in all, each where he was seen and out to his reach (EXPO118_R cells at most). */
+  _expoQueue118(S) {
+    const T = S.T, now = this.time, C = S.cand, Q = S.queue, K = S.keys;
+    C.length = 0; Q.length = 0; K.clear();
+    for (const e of this.units) {
+      if (!e.alive || e.downed || !e._contactT || !areHostile(T, e.team)) continue;
+      const t = e._contactT[T];
+      if (t == null || now - t > EXPO118_AGE) continue;
+      C.push(e);
+    }
+    C.sort((a, b) => (b._contactT[T] - a._contactT[T]) || (a.id - b.id));
+    for (const e of C) {
+      if (Q.length >= EXPO118_VP) break;
+      const at = (e._contactAt && e._contactAt[T]) || e.pos;
+      const key = (worldToCell(at.z) >> 2) * 4096 + (worldToCell(at.x) >> 2);
+      if (K.has(key)) continue;
+      K.add(key);
+      const r = Math.max(8, Math.min(EXPO118_R, Math.ceil(e._reach() / TILE)));
+      Q.push({ x: at.x, z: at.z, r, eye: this.terrain.heightAt(at.x, at.z) + ((e.def.vehicle && e.def.eyeH) || EYE_H) });
+    }
+    C.length = 0;
+  }
+  /** One step of the sweeps: EXPO118_PER_STEP viewpoints, the sides taking turns. A side whose sweep is done swaps
+   *  it in (what it swept is what it now knows) and queues the next EXPO118_CYCLE_S after it queued this one (a
+   *  side that knows two enemies would otherwise re-sweep them every other step); nobody seen, again in 0.5 s. */
+  _expoTick118() {
+    let R = this._route118;
+    if (!R || R.key !== this.terrain || R.n !== GRID * GRID || this.time < R.lastT) R = this._route118 = this._expoInit118();
+    R.lastT = this.time;
+    if (this.time - R.openT >= EXPO118_OPEN_S) { R.openF.fill(255); R.openT = this.time; }
+    const T = this.terrain, H = T.h, OB = this.obstacles, OC = OB.occupied, str = this.structures;
+    const SM = str && str.any && str.mask && str.mask.length === R.n ? str.mask : null;
+    let left = EXPO118_PER_STEP;
+    for (let k = 0; k < R.order.length && left > 0; k++) {
+      const S = R.teams[R.order[R.rr]];
+      R.rr = (R.rr + 1) % R.order.length;
+      if (S.qi >= S.queue.length) {
+        if (!S.swapped) {                              // a finished sweep goes in at once, whole
+          const had = S.nvp > 0, t = S.vis;
+          S.vis = S.next; S.next = t; S.ex.vis = S.vis; S.nvp = S.queue.length; S.swapped = true;
+          if (had) S.next.fill(0);
+        }
+        if (this.time < S.waitT) continue;            // the next starts EXPO118_CYCLE_S after this one did
+        this._expoQueue118(S);
+        S.qi = 0; S.swapped = false; R.stats.cycles++;
+        S.waitT = this.time + (S.queue.length ? EXPO118_CYCLE_S : 0.5);
+        if (!S.queue.length) continue;
+      }
+      while (left > 0 && S.qi < S.queue.length) {
+        const v = S.queue[S.qi++];
+        R.sv++;
+        R.stats.steps += expoSweep118(S.next, R.stamp, R.sv, H, OC, OB, SM, v.x, v.z, v.r, v.eye);
+        R.stats.sweeps++; left--;
+      }
+    }
+  }
+  /** The price layer for this man's next search, or null: his side's grid when it is live and he is a man on foot
+   *  whose route the computer chooses (the player's own order keeps the route the player gave). */
+  _expoFor118(u, wx, wz) {
+    const R = this._route118;
+    if (!R || R.key !== this.terrain) return null;
+    R.stats.asked++;
+    const S = R.teams[u.team];
+    if (!S || !S.nvp || u.def.vehicle || u.def.floats || u.embarkedIn) return null;
+    if (this.fpv && this.fpv.unit === u) return null;
+    if (u.team === this.playerTeam && u.explicit) return null;
+    // (round 118) `game.coverRouteGate118`: a leg whose start, end and straight line the enemy sees none of is not
+    // priced, and so runs in the WASM search as before — the priced JavaScript search is ~3.5x dearer
+    if (this.coverRouteGate118 === true && wx != null) {
+      const V = S.vis, sx = worldToCell(u.pos.x), sz = worldToCell(u.pos.z), ex = worldToCell(wx), ez = worldToCell(wz);
+      if (inGrid(sx, sz) && inGrid(ex, ez) && !V[sz * GRID + sx] && !V[ez * GRID + ex]) {
+        const n = Math.max(Math.abs(ex - sx), Math.abs(ez - sz));
+        let seen = false;
+        for (let i = 1; i < n && !seen; i++) seen = V[Math.round(sz + (ez - sz) * i / n) * GRID + Math.round(sx + (ex - sx) * i / n)] !== 0;
+        if (!seen) { R.stats.gated = (R.stats.gated || 0) + 1; return null; }
+      }
+    }
+    R.stats.priced++; R.stats.vp += S.nvp;
+    return S.ex;
+  }
   // ---- Batch J: cover + threat fields (used by self-preserving movement) --
   /** Cover value 0..1 at an arbitrary cell (terrain + adjacent cover doodads). */
   _coverAtCell(gx, gz) {
     if (!inGrid(gx, gz)) return 0;
     let cov = (TYPE_DEF[this.terrain.typeAt(gx, gz)].cover) || 0;
+    if (this.coverBest118 === true) {                // (round 118) the best prop of the five, not the first
+      const oc = coverBest118(this.obstacles, gx, gz);
+      if (oc) cov = 1 - (1 - cov) * (1 - oc);
+    } else {
     const o = this.obstacles.at(gx, gz) || this.obstacles.at(gx + 1, gz) || this.obstacles.at(gx - 1, gz)
       || this.obstacles.at(gx, gz + 1) || this.obstacles.at(gx, gz - 1);
     if (o) { const oc = COVER_DOODAD[o.type]; if (oc) cov = 1 - (1 - cov) * (1 - oc); }
+    }
+    // (round 118) `game.coverPlants118`: the standing crop and brush (`foliage.coverAt`), which `_coverValueCalc`
+    // counts when a man is shot and no cover SEARCH saw — so the plants laid in the Cover tab drew nobody into them
+    if (this.coverPlants118 === true) {
+      const F = this.foliage;
+      if (F && F.coverAt) { const fc = F.coverAt(gx, gz); if (fc > 0) cov = 1 - (1 - cov) * (1 - fc); }
+    }
     return cov;
   }
   /** Incoming-fire danger at a world point for a unit of `myTeam` — sum of every
@@ -67019,6 +67248,7 @@ class Game {
     if (!this.battleSnapshot) return;
     const snap = this.battleSnapshot;
     this.load(snap, { keepMode: true });
+    if (window.BunkerMaps118) window.BunkerMaps118.restore(this);   // (round 118, `game.bunkerMaps118`) the map bunkers' crews again
     this._prepareDefence();   // the snapshot keeps flags, not holes
     this.battleSnapshot = snap; // keep for repeated restarts
     this.mode = 'play';
@@ -71304,6 +71534,9 @@ class Game {
       }
     }
     this._setupVictoryPoints();
+    // (round 118, `game.bunkerMaps118`) the map's old bunker / pillbox props become bunkers, manned from the computer's
+    // own deployment — after the objectives (the props weigh in `_autoObjectives`), before the defence digs in
+    if (window.BunkerMaps118) window.BunkerMaps118.apply(this, map);
     this._prepareDefence();           // the defending side holds its ground, dug in
     // A SETTING ONLY EVER WRITTEN ONE WAY IS A LATCH — the same shape as
     // `playerTeam` at the top of this method. `support` was built in the
@@ -72558,6 +72791,7 @@ class Game {
     this._updateMoods(dt);                       // what each section is feeling about this
     this._keepPlayerSections();                  // (round 110) the player's sections draw in their stragglers
     if (this.bunker118 === true && window.Bunker118) window.Bunker118.tick(this, dt);   // (round 118) bunkers take their crews
+    if (this.bunkerMaps118 === true && window.BunkerMaps118) window.BunkerMaps118.tick(this, dt);   // (round 118) …and a map bunker's crew stays in
     this._windowShuffle(dt);                     // (round 110) …and men in a house go to the side the enemy is on
     this._stackTick(dt);                         // (round 115) …and men going into a fight go in at a door, one at a time
     this._houseFallBack(dt);                     // (round 115) …and a house that cannot be held is left by the far side
