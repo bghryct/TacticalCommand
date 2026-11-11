@@ -25,11 +25,46 @@
   const S = { group: null, hidden: [], mat: null, stats: null };
   const SECT = 4, UNDER = 1.4;   // UNDER: the bounce in the cut (vertex colour, below the ground); near the eye `Canopy.near` lifts the shade
 
-  // DEFAULT OFF (round 118, main's review of the Sedan and Kotelnikovo captures): the bags read as white eggs scattered
+  // DEFAULT ON (round 118, 04:55 UTC 11 Nov, main's review of .claude/wip118/bunker2/trench14_0430.jpg): the berm is the
+  // field with fresh earth only at the lip, the sacks read as sacks, the end mound is welded; drawn / not drawn identical
+  // in seeded battles; +0.1..0.4 ms with trenches in view. It was OFF before because (main's review of the Sedan and
+  // Kotelnikovo captures) the bags read as white eggs scattered
   // on the berm, the spoil ends as plank ramps with stretched streaks, and the berm as a flat slab with hard ends. The
   // sim is untouched (seeded battles identical, null control, 3 seeds x 3 maps) and it costs +0.23 ms at 2,035 men;
   // turn it on when captures at 72 m, 26 m, close up and first person read as earthworks on grass and on snow.
-  const TRENCHKIT118_ON = false;
+  const TRENCHKIT118_ON = true;
+  // THE BERM UNDER THE SPOIL IS THE FIELD (round 118, the bunker agent; as the bunkers' mounds, assets/bunker118.js): a copy
+  // of every spoil triangle 2 cm lower (its toe 6 cm under the field), drawn with the TERRAIN's material, its colour, its
+  // twenty ground surfaces' weights (`assets/groundsplat.js`) and uv taken bilinear from the terrain under each vertex.
+  // Where the spoil dissolves (the feet's noise) the field heaped up shows, so the berm ends in the field's own grass or
+  // snow, not on an outline. `EARTH` false = without it. One draw a sector, no new program.
+  const EARTH = true;
+  function earthGeo(P, N, terr) {
+    const tm = terr && terr.mesh, ta = tm && tm.geometry && tm.geometry.attributes, SPL = ['splatA', 'splatB', 'splatC', 'splatD', 'splatE'];
+    if (!ta || !ta.color || !tm.material || !SPL.every(k => ta[k])) return null;
+    const T = THREE, n = P.length / 3, col = new Float32Array(n * 3), uv = new Float32Array(n * 2), sp = SPL.map(() => new Uint8Array(n * 4));
+    const tc = ta.color.array, sa = SPL.map(k => ta[k].array), Wt = (GRID - 1) * TILE, c0 = cellCenter(0);
+    for (let v = 0; v < n; v++) {
+      const x = P[v * 3], z = P[v * 3 + 2], fx = (x - c0) / TILE, fz = (z - c0) / TILE;
+      const gx = Math.max(0, Math.min(GRID - 2, Math.floor(fx))), gz = Math.max(0, Math.min(GRID - 2, Math.floor(fz)));
+      const ax = Math.min(1, Math.max(0, fx - gx)), az = Math.min(1, Math.max(0, fz - gz));
+      const i00 = gz * GRID + gx, i10 = i00 + 1, i01 = i00 + GRID, i11 = i01 + 1, w00 = (1 - ax) * (1 - az), w10 = ax * (1 - az), w01 = (1 - ax) * az, w11 = ax * az;
+      for (let q = 0; q < 3; q++) col[v * 3 + q] = tc[i00 * 3 + q] * w00 + tc[i10 * 3 + q] * w10 + tc[i01 * 3 + q] * w01 + tc[i11 * 3 + q] * w11;
+      uv[v * 2] = (x - c0) / Wt; uv[v * 2 + 1] = 1 - (z - c0) / Wt;
+      for (let s = 0; s < 5; s++) { const A = sa[s], O = sp[s]; for (let q = 0; q < 4; q++) O[v * 4 + q] = Math.round(A[i00 * 4 + q] * w00 + A[i10 * 4 + q] * w10 + A[i01 * 4 + q] * w01 + A[i11 * 4 + q] * w11); }
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.Float32BufferAttribute(P, 3)); geo.setAttribute('normal', new T.Float32BufferAttribute(N, 3));
+    geo.setAttribute('color', new T.BufferAttribute(col, 3)); geo.setAttribute('uv', new T.BufferAttribute(uv, 2));
+    for (let s = 0; s < 5; s++) geo.setAttribute(SPL[s], new T.BufferAttribute(sp[s], 4, true));
+    geo.computeBoundingSphere();
+    return geo;
+  }
+  // the spoil's brightness per ground (see `gmul` in build): measured on turf and snow; the others are the turf factor eased
+  // (turf 0.45 drew the berm a dark ring on Sedan; 1.0 a pale one: 0.70. Sand 0.70 measured 1.08x the field.)
+  // (04:18) the berm is spoil only now (no grassed band): on turf a darker loam
+  const GROUND_MUL = { turf: 0.58, snow: 1.00, sand: 0.70, stone: 0.70, ash: 0.80 };
+  function groundMul(pal) { return GROUND_MUL[pal] != null ? GROUND_MUL[pal] : 0.7; }
   function on(g) {
     const want = g && g.trenchKit118 != null ? !!g.trenchKit118 : TRENCHKIT118_ON;
     if (!want || !window.TRENCHKIT118 || !window.THREE) return false;
@@ -61,7 +96,7 @@
     const [map, nrm] = S.tex;
     // no emissive fill: a constant term glowed at night (measured on The Dunkirk Perimeter's dark field); the cut is lit
     // by the scene's own sky and fill, as every other prop
-    const M = new T.MeshPhongMaterial({ map, normalMap: nrm, vertexColors: true, specular: 0x0b0b0b, shininess: 12 });
+    const M = new T.MeshPhongMaterial({ map, normalMap: nrm, vertexColors: true, specular: 0x030303, shininess: 10 });
     M.polygonOffset = true; M.polygonOffsetFactor = -1; M.polygonOffsetUnits = -2;
     M.name = feet ? 'trenchKitFeet118' : 'trenchKit118';
     if (feet) S.matF = M; else S.mat = M;
@@ -88,7 +123,7 @@ float hTK(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); 
 float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hTK(i), hTK(i + vec2(1.0, 0.0)), f.x), mix(hTK(i + vec2(0.0, 1.0)), hTK(i + vec2(1.0, 1.0)), f.x), f.y); }`)
         .replace('void main() {', feet ? `void main() {
-  if (vFadeTK < 0.999) { float n = 0.62 * nTK(vWTK * 2.2) + 0.38 * nTK(vWTK * 6.1); if (n > vFadeTK * 1.15 - 0.08) discard; }` : 'void main() {')
+  if (vFadeTK < 0.999) { float n = 0.50 * nTK(vWTK * 0.6) + 0.30 * nTK(vWTK * 2.2) + 0.20 * nTK(vWTK * 6.1); if (n > vFadeTK * 1.15 - 0.08) discard; }` : 'void main() {')
         .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
   if (uNearTK > 0.0) {   // the share of the sun this face got, against the sun's own luminance: shade below ~0.06-0.30
     vec3 lwTK = vec3(0.2126, 0.7152, 0.0722);
@@ -103,7 +138,9 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     diffuseColor.rgb = mix(diffuseColor.rgb, l * uSpoilTK, sp * uSpoilMixTK);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.58, 0.60, 0.64), smoothstep(0.45, 0.85, vUpTK) * uSnowTK * 0.8); }`);
     };
-    M.customProgramCacheKey = () => 'trenchKit118-ground-v5' + (feet ? '-feet' : '');
+    // v6 (round 118, the bunker agent): a 5 m octave in the feet's cut, so a berm's outline wanders (main: "a clean rounded
+    // rectangle at 72 m"); and the earth's sheen down (specular 0x0b -> 0x03: the bunkers' mounds read as fabric)
+    M.customProgramCacheKey = () => 'trenchKit118-ground-v6' + (feet ? '-feet' : '');
     return M;
   }
 
@@ -265,7 +302,7 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       const sx = Math.max(0, Math.min(SECT - 1, Math.floor((x + HALF) / (WORLD / SECT))));
       const sz = Math.max(0, Math.min(SECT - 1, Math.floor((z + HALF) / (WORLD / SECT))));
       const key = sz * SECT + sx;
-      let b = B.get(key); if (!b) { b = { p: [], n: [], uv: [], c: [], m: [], f: [] }; b.feet = { p: [], n: [], uv: [], c: [], f: [] }; B.set(key, b); }
+      let b = B.get(key); if (!b) { b = { p: [], n: [], uv: [], c: [], m: [], f: [] }; b.feet = { p: [], n: [], uv: [], c: [], f: [] }; b.e = { p: [], n: [] }; B.set(key, b); }
       return b;
     };
     const st = { runs: 0, lone: 0, pieces: 0, ends: 0, bags: 0, tris: 0, gaps: 0 };
@@ -277,6 +314,26 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     const gpal = obs._spoilPal ? obs._spoilPal() : 'turf';
     const REF = { turf: [0.20, 0.26, 0.10], snow: [0.56, 0.58, 0.62], sand: [0.52, 0.45, 0.31], stone: [0.36, 0.35, 0.33], ash: [0.20, 0.19, 0.18] }[gpal] || [0.20, 0.26, 0.10];
     const hiT = gpal === 'snow' ? 1.0 : 2.2;
+    // (round 118, the bunker agent) THE SPOIL MATCHED TO THE FIELD BY MEASUREMENT: on Sedan's turf the berm's foot drew 1.47x
+    // (sRGB) the field beside it and the crest 1.6x — the "pale raised pillow" — because the tint matches the terrain's
+    // VERTEX colour and the terrain's own shader darkens that; on Kotelnikovo's snow it drew 0.9-0.96x. A factor on the
+    // spoil band's vertex colour per ground (`groundMul`, shared with the bunkers' earth), from pixel windows on the berm
+    // and the field 3-6 m apart at 26 m and 72 m (.claude/wip118/bunker2/NOTES.md).
+    const gmul = groundMul(gpal), footMul = gpal === 'turf' ? 0.86 : 1;   // (0.72 drew a dark olive halo on Village)
+    // THE BERM IS THE FIELD (main's review 04:27: "put the spoil on the terrain's material ... fresh earth only near the
+    // lip, blending out into the terrain's own grass or snow, with no visible band edge at 26 m"): under the spoil lies
+    // the berm in the field's own ground (`earthGeo`); the spoil is solid only at the lip and thins out over the first
+    // half of the berm (the brown band on grass and the smooth white band on snow were the edge)
+    const snowy = EARTH, SPW = 0.42 * (SP1 - SP0);
+    const fdOf = (FD, UV, v) => {
+      const f = FD ? FD[v] : 1;
+      if (!snowy) return f;
+      const vv = UV[v * 2 + 1];
+      if (vv <= SP0 || vv >= SP1) return f;
+      const t = Math.min(1, Math.max(0, (vv - SP0) / SPW)), s = Math.min(1, Math.max(0, (t - 0.22) / 0.48));   // (0.06/0.44 left only a line behind the bags)
+      const r = Math.min(f, 1 - s * s * (3 - 2 * s));
+      return r >= 0.999 ? 1 : r;   // a solid triangle stands at exactly 1
+    };
     const turfTint = tcol ? (x, z) => {
       const gx = Math.max(0, Math.min(GRID - 1, Math.round((x + HALF - TILE / 2) / TILE))), gz = Math.max(0, Math.min(GRID - 1, Math.round((z + HALF - TILE / 2) / TILE)));
       const a = tcol.array, i = (gz * GRID + gx) * 3;
@@ -286,7 +343,7 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     // emit one piece through a mapping fn(x, y, z) -> [wx, wy, wz] and nfn(nx, ny, nz) -> world normal
     // (`flip`: the mapping is a reflection, so each triangle is wound the other way)
     const tmpP = [0, 0, 0];
-    function emit(pc, map, nmap, flip, skip, b, ushift, uk) {
+    function emit(pc, map, nmap, flip, skip, b, ushift, uk, tone) {
       const P = pc.pos, N = pc.nor, UV = pc.uv, A = pc.ao, I = pc.idx, TG = pc.tag, FD = pc.fd;
       const wp = new Float32Array(P.length), wn = new Float32Array(N.length);
       for (let v = 0; v < A.length; v++) {
@@ -296,13 +353,15 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       const B0 = b;
       for (let t = 0; t < I.length; t += 3) {
         const a = I[t], c1 = flip ? I[t + 2] : I[t + 1], c2 = flip ? I[t + 1] : I[t + 2];
-        b = FD && B0.feet && (FD[a] < 0.999 || FD[c1] < 0.999 || FD[c2] < 0.999) ? B0.feet : B0;   // a faded foot: the discarding program
+        const fa = fdOf(FD, UV, a), f1 = fdOf(FD, UV, c1), f2 = fdOf(FD, UV, c2);
+        b = (FD || snowy) && B0.feet && (fa < 0.999 || f1 < 0.999 || f2 < 0.999) ? B0.feet : B0;   // a faded foot: the discarding program
+        const gone = fa <= 0 && f1 <= 0 && f2 <= 0;   // wholly cut away by the feet's noise: not drawn at all (its earth copy is)
         if (skip && TG && skip(TG[a], TG[I[t + 1]], TG[I[t + 2]], (P[a * 3] + P[I[t + 1] * 3] + P[I[t + 2] * 3]) / 3)) continue;
         if (TG && TG[a] === 3 && TG[I[t + 1]] === 3 && TG[I[t + 2]] === 3) {   // the mouth: the hole in the ground's depth
           for (const v of [a, c1, c2]) B0.m.push(wp[v * 3], wp[v * 3 + 1], wp[v * 3 + 2]);
           continue;
         }
-        for (const v of [a, c1, c2]) {
+        if (!gone) for (const v of [a, c1, c2]) {
           b.p.push(wp[v * 3], wp[v * 3 + 1], wp[v * 3 + 2]); b.n.push(wn[v * 3], wn[v * 3 + 1], wn[v * 3 + 2]);
           b.uv.push(UV[v * 2] * (uk || 1) + (ushift || 0), UV[v * 2 + 1]);
           // in the cut, light comes back off the sunlit wall and the sky over the slot: the fill alone left the timber black
@@ -310,11 +369,22 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
           // on turf, the spoil grassing over toward its foot takes the field's own colour there (the terrain's vertex
           // colour, linear), so the berm does not end in an outline of another green
           const vv = UV[v * 2 + 1], tw = turfTint && vv > SP0 && vv < SP1 ? Math.min(1, Math.max(0, ((vv - SP0) / (SP1 - SP0) - 0.45) / 0.4)) : 0;   // the grassed half only
-          if (tw > 0) { const q = turfTint(wp[v * 3], wp[v * 3 + 2]); b.c.push(ao * (1 + (q[0] - 1) * tw), ao * (1 + (q[1] - 1) * tw), ao * (1 + (q[2] - 1) * tw)); }
-          else b.c.push(ao, ao, ao);
-          b.f.push(FD ? FD[v] : 1);
+          const am = (vv > SP0 && vv < SP1 ? ao * gmul : ao) * (tone || 1);
+          // …and the grassed foot a little darker again on turf (at 0.70 it drew a light green halo round the berm on Village)
+          if (tw > 0) { const q = turfTint(wp[v * 3], wp[v * 3 + 2]), af = am * (1 - (1 - footMul) * tw); b.c.push(af * (1 + (q[0] - 1) * tw), af * (1 + (q[1] - 1) * tw), af * (1 + (q[2] - 1) * tw)); }
+          else b.c.push(am, am, am);
+          b.f.push(fdOf(FD, UV, v));
         }
-        st.tris++;
+        // (round 118, the bunker agent) …and the berm again UNDER the spoil, in the field's own ground (`earthGeo`): where
+        // the spoil dissolves, the field heaped up shows, not the flat field through a hole (no rim on snow, no halo)
+        if (EARTH && B0.e && !(fa >= 1 && f1 >= 1 && f2 >= 1)) {   // (under solid spoil the copy would never show)
+          const s0 = UV[a * 2 + 1], s1 = UV[c1 * 2 + 1], s2 = UV[c2 * 2 + 1];
+          if (s0 > SP0 && s0 < SP1 && s1 > SP0 && s1 < SP1 && s2 > SP0 && s2 < SP1) for (const v of [a, c1, c2]) {
+            const yl = P[v * 3 + 1];
+            B0.e.p.push(wp[v * 3], wp[v * 3 + 1] - (0.02 + Math.max(0, 0.06 - yl)) * U, wp[v * 3 + 2]); B0.e.n.push(wn[v * 3], wn[v * 3 + 1], wn[v * 3 + 2]);
+          }
+        }
+        if (!gone) st.tris++;
       }
     }
     // the bags of a piece, each through the piece's own mapping (so they follow the curve and the ground)
@@ -323,9 +393,13 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
         const [bx, by, bz, yaw, sc] = list[i];
         if (skipBag && skipBag(bx, bz)) continue;
         const c = Math.cos(yaw), s = Math.sin(yaw), us = ((i * 0.3711 + seed * 0.137) % 1);
-        const lm = (x, y, z) => map(bx + (x * c + z * s) * sc, by + y * sc, bz + (-x * s + z * c) * sc);
+        // (round 118) no two sacks alike: a tone of its own (old hessian and new, wet and dry), its ends sagging over the
+        // course below and its fill a little uneven (main: "a little variation in tone and some sag")
+        const h1 = ((i * 0.6180339 + seed * 0.2718 + bx * 0.37 + bz * 0.71) % 1 + 1) % 1, h2 = ((h1 * 7.31 + 0.17) % 1);
+        const tone = 0.80 + 0.32 * h1, sag = 0.018 + 0.024 * h2, hs = 0.88 + 0.16 * h2;
+        const lm = (x, y, z) => { const e = x / 0.31; return map(bx + (x * c + z * s) * sc, by + (y * hs - sag * e * e) * sc, bz + (-x * s + z * c) * sc); };
         const ln = (x, y, z) => nmap(x * c + z * s, y, -x * s + z * c);
-        emit(bags, lm, ln, !flip, null, b, us);   // the bag came out of Blender with Y and Z swapped: a reflection, wound the other way
+        emit(bags, lm, ln, !flip, null, b, us, 0, tone);   // the bag came out of Blender with Y and Z swapped: a reflection, wound the other way
         st.bags++;
       }
     }
@@ -461,6 +535,13 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
         const fm = new T.Mesh(fg, material(true)); fm.castShadow = false; fm.receiveShadow = true; fm.matrixAutoUpdate = false; fm.updateMatrix();
         fm.name = 'trenchKitFeet118'; grp.add(fm); st.feetTris = (st.feetTris || 0) + F.p.length / 9;
       }
+      if (b.e && b.e.p.length) {   // the berm in the field's own ground, under the spoil
+        const eg = earthGeo(b.e.p, b.e.n, obs.terrain);
+        if (eg) {
+          const em = new T.Mesh(eg, obs.terrain.mesh.material); em.castShadow = false; em.receiveShadow = true;
+          em.matrixAutoUpdate = false; em.updateMatrix(); em.name = 'trenchKitEarth118'; grp.add(em); st.earthTris = (st.earthTris || 0) + b.e.p.length / 9;
+        }
+      }
       if (b.m.length) {   // the mouth, twice: mark where it is the nearest thing, then clear the ground's depth there
         const hg = new T.BufferGeometry(); hg.setAttribute('position', new T.Float32BufferAttribute(b.m, 3)); hg.computeBoundingSphere();
         const [m1, m2] = holeMats();
@@ -495,5 +576,7 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
   }
   function dirty() { const d = !!S.dirty; S.dirty = false; return d; }
   window.TrenchKit118 = { prepare: C(prepare), build: C(build), unbake: C(unbake), on, stats: () => S.stats, group: () => S.group, lost, dirty,
-    _runs: runs, _curve: curve, ready: C(() => { material(); return S.ready; }) };
+    _runs: runs, _curve: curve, ready: C(() => { material(); return S.ready; }),
+    // (round 118, bunkers) the kit's material and its ground uniforms, shared by assets/bunker118.js's models
+    material: C(material), uniforms: () => S.u, groundMul };
 })();

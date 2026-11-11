@@ -2177,6 +2177,10 @@
   // =========================================================================
 
   Structures.prototype._pieceHp = function (mat) { return MATS[mat].hp; };
+  /** (round 118, `game.bunker118`) a bunker's SLAB: the roof's hp times its kind's factor (assets/bunker118.js writes
+   *  `slab118`, a factor per cell; absent or 0 = 1, the old roof). A field casemate's metre of concrete shrugs off
+   *  81 mm and takes a 105 mm battery ten rounds; a heavy shell or a bomb still breaks it. */
+  Structures.prototype.roofHpF = function (gx, gz) { var f = this.slab118 ? this.slab118[gz * G.GRID + gx] : 0; return f > 0 ? f : 1; };
 
   /**
    * Hurt one piece. `ref` is what `raySegment` returns, or `{kind,gx,gz,L,e}`.
@@ -2194,6 +2198,7 @@
     else return false;
     if (!mat || !arr[ai]) return false;
     var max = this._pieceHp(mat);
+    if (ref.kind === 'roof' && this.slab118) max *= this.roofHpF(ref.gx, ref.gz);   // (round 118) a bunker's slab
     var frac = Math.min(255, Math.round(dmg / max * 255));
     var was = arr[ai];
     arr[ai] = was > frac ? was - frac : 0;
@@ -2588,6 +2593,7 @@
     var pieces = 0;
     for (var gz = z0; gz < z1; gz++) for (var gx = x0; gx < x1; gx++) {
       if (!this.mask[gz * G.GRID + gx]) continue;
+      if (this.skip118 && this.skip118[gz * G.GRID + gx]) continue;   // (round 118, `game.bunker118`) a bunker's cell: its model draws it (assets/bunker118.js)
       var seed0 = gx * 73856093 ^ gz * 19349663;
       for (var L = 0; L < LEVELS; L++) {
         var i = this.li(gx, gz, L);
@@ -2619,6 +2625,8 @@
         for (var e = 0; e < 4; e++) {
           var m = this.wallM[i * 4 + e];
           if (!m) continue;
+          // (round 118, `game.bunker118`) a wall shared with a bunker's cell is the bunker's: its model draws it
+          if (this.skip118) { var sd = EDGE_D[e], sx = gx + sd[0], sz = gz + sd[1]; if (sx >= 0 && sz >= 0 && sx < G.GRID && sz < G.GRID && this.skip118[sz * G.GRID + sx]) continue; }
           if (e === 2 || e === 1) {
             var d = EDGE_D[e], nx = gx + d[0], nz = gz + d[1];
             if (this.inb(nx, nz, L) && this.wallM[this.li(nx, nz, L) * 4 + ((e + 2) % 4)]) continue;
@@ -2856,6 +2864,7 @@
     var x0 = c.cx * CHUNK, z0 = c.cz * CHUNK, x1 = Math.min(G.GRID, x0 + CHUNK), z1 = Math.min(G.GRID, z0 + CHUNK);
     for (var gz = z0; gz < z1; gz++) for (var gx = x0; gx < x1; gx++) {
       if (!this.mask[gz * G.GRID + gx]) continue;
+      if (this.skip118 && this.skip118[gz * G.GRID + gx]) continue;   // (round 118) a bunker's cell has no house furniture
       var kind = null;
       for (var L = 0; L < LEVELS; L++) {
         if (!this._roomAt(gx, gz, L)) break;

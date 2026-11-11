@@ -10075,6 +10075,9 @@ const SUP117_KNOWN_S = 30;   // (round 117) `_holdGunLine117`: an enemy the side
 // DUCK118_HIT_S puts him down, and he comes back up DUCK118_BASE + DUCK118_NERVE x (1 - nerve) s after the fire lifts.
 const COVER118_R = 8, COVER118_EVERY = 6, COVER118_PER = 2, COVER118_SNAP = 3;
 const DUCK118_SUPP = 0.3, DUCK118_HIT_S = 1.5, DUCK118_BASE = 1.5, DUCK118_NERVE = 4.5;
+// (round 118, cover doctrine second pass) `game.coverLeg118` / `game.coverDash118`: a leg's end moves onto cover within
+// COVER118_LEG_R cells when that beats the point by COVER118_GAIN after COVER118_OFF a unit of displacement
+const COVER118_LEG_R = 2, COVER118_GAIN = 0.1, COVER118_OFF = 0.08;
 const SUP117_ARC = Math.PI / 3, SUP117_ARC_SEEN = 3;   // (round 117 v2) `_gunSpot117`: the 60-degree arc, and 3 of its 5 points seen
 const GUNLINE_HOLD  = 5.0;
 // (round 111) The gun team goes firm together (`Game._gunTeamJoin`): a man of
@@ -34545,7 +34548,7 @@ class Unit {
     this.closeAtLeft = undefined; this.closeAtCd = undefined; this.apAmmo = undefined; this.heAmmo = undefined;
     this.subAmmo = undefined; this.mgAmmo = undefined; this.smokeAmmo = undefined; this.shellType = undefined;
     this._burnT = undefined; this._seenT = undefined; this.posture = undefined; this.moveMode = undefined;
-    this._attackedT = undefined; this._lastHitBy = undefined; this.aMorale = undefined; this.aIntel = undefined; this._duckT118 = undefined;
+    this._attackedT = undefined; this._lastHitBy = undefined; this.aMorale = undefined; this.aIntel = undefined; this._duckT118 = undefined; this._chase118 = undefined; this._chase118No = undefined; this._dash118 = undefined; this._dash118T = undefined;
     this.aStrength = undefined; this.aExp = undefined; this.aLead = undefined; this.ccState = undefined; this.fear = undefined;
     this._ccRollT = undefined; this.strain = undefined; this.fatigue = undefined; this._refuseT = undefined;
     this._refuseWhy = undefined; this._rallyT = undefined; this._mood = undefined; this._overwatch = undefined;
@@ -38193,6 +38196,8 @@ class Unit {
         if (ccMove) { this._ccResume = { x: this.anchor.x, z: this.anchor.z, queue: this.queue.slice() }; this._ccSeenT = game.time; }
         this.target = best; this.state = 'attack'; this.explicit = false;
         if (this._underAI()) game.alertAllies(this, best);
+        // (round 118) `game.coverFight118`: a man on the player's Move who stops to fight does it from the cover beside him
+        if (ccMove && game.coverFight118 === true) game._fightFromCover118(this, best);
       } else if (sensed && !this.path.length &&
                  (!this._watchLocked || dist2(this.pos, sensed.pos) < this.def.rng * 0.55)) {
         // Nothing in the cone yet, but a threat is out there — turn and watch.
@@ -38256,7 +38261,7 @@ class Unit {
         if (this._closesWith(t, d)) this._chase(t);
         else if (d < 8 && !this.hold && !this._assault) this._kiteFrom(t);   // too close — back off
         else if (d > holdRng) this._chase(t);
-        else this.path = [];                                            // stand and fire
+        else if (!this._onCoverLeg118()) this.path = [];                // stand and fire ((round 118) once in the cover he was closing to)
       } else if (kind === 'hmg') {
         if (d > this.def.rng) this._chase(t);                           // gunners hold and hose
         else this.path = [];
@@ -38447,6 +38452,10 @@ class Unit {
 
   _chase(t) {
     if (this.hold) return;
+    // (round 118) `game.coverDash118`: a man running to cover under fire (`_survival`) gets there first
+    if (this.game.coverDash118 === true && this._coverGoal && this.path.length) return;
+    // (round 118) `game.coverChase118`: the computer's infantry close on him cover to cover (`_chaseLeg118`)
+    if (this.game.coverChase118 === true && this.game._chaseLeg118(this, t)) return;
     this.repathT -= 0.25;
     // Closing on a target is still movement, and movement is still his
     // section's business: he closes as far as his frontage allows and fires
@@ -38742,7 +38751,10 @@ class Unit {
         if (this.suppression < AICFG.calmSupp || now - (this._hunkerT || now) > 6) {
           const goal = this._coverGoal; this._coverGoal = null;
           if (this._proneReflex) { this._proneReflex = false; if (this.posture === 'prone') this.posture = 'normal'; }
-          this._setPathTo(goal.x, goal.z); this.state = 'advance';
+          // (round 118) a player's dash (`_dashPlayer118`): his own order again, on its storey, on his feet
+          const pl = goal.pl118;
+          if (pl) { this._dash118 = null; if (this.posture === 'prone') this.posture = pl.post || 'normal'; }
+          this._setPathTo(goal.x, goal.z, pl ? pl.lvl : undefined); this.state = pl && this.explicit ? 'move' : 'advance';
           return false;
         }
         if (!this._proneReflex && this.posture !== 'prone') this.posture = 'prone';
@@ -38761,6 +38773,9 @@ class Unit {
 
     // Player units keep their orders — only a pinned man in the open goes to ground.
     if (isPlayer) {
+      // (round 118) `game.coverPlayer118` (default ON; `= false` is the old rule): on a Move, shot at in the open, he
+      // dashes to cover a few metres off his way and goes on when the fire lifts (`_dashPlayer118`); the order stays his
+      if (this.game.coverPlayer118 !== false && moving && this._dashPlayer118(now)) return true;
       if (this._pinned()) this._reflexDown();
       return false;
     }
@@ -38785,6 +38800,9 @@ class Unit {
       this.path = [];
       return true;
     }
+    // (round 118) `game.coverDash118`: SUPPRESSED in the open with nowhere to get to, a moving man gets down and
+    // crawls on (`_reflexUp` stands him once the fire lifts) instead of walking on upright
+    if (this.game.coverDash118 === true && moving && this._suppressed()) this._reflexDown();
     return false;
   }
   /** IS THIS MAN BEING FOUGHT BY THE COMPUTER RIGHT NOW?
@@ -39420,7 +39438,9 @@ class Unit {
     // be. A man who has been pulled off by a target rejoins his section, not
     // the patch of grass he happened to be standing on when he acquired it.
     const back = this._sqAnchor() || this.anchor;
-    this._setPathTo(back.x, back.z);
+    // (round 118) `game.coverLeg118`: …to the best cover beside that point, for a man the computer is driving
+    const sn = this.game.coverLeg118 === true && !this.def.vehicle && this._underAI() ? this.game._coverSnap118(this, back.x, back.z, COVER118_LEG_R, null, null, null) : null;
+    this._setPathTo(sn ? sn.x : back.x, sn ? sn.z : back.z);
     this.state = 'return'; this.explicit = false;
   }
   _afterCombat() {
@@ -39567,7 +39587,9 @@ class Unit {
     const ranged = (kind === 'arrow' || kind === 'javelin' || kind === 'rifle' || kind === 'hmg' || kind === 'rocket' || kind === 'officer' || kind === 'engineer' || kind === 'sniper');
     const lobber = (kind === 'bomb' || kind === 'fireball');
     const fleeing = (ranged && d < 8) || (lobber && d < this.def.minRng);
+    const leg118 = !fleeing && this._onCoverLeg118() ? this.path : null;   // (round 118) a closing leg into cover is finished first
     if (!fleeing && this._marchT !== this.game.time) this.path = [];   // (marching fire keeps walking)
+    if (leg118) this.path = leg118;
 
     if (this.cd > 0) return;
     // Do not shoot through your own squad (see _friendlyInLine). Flat-trajectory
@@ -41644,6 +41666,8 @@ class Unit {
       this.pathIdx++;
       if (this.pathIdx >= this.path.length) {
         this.path = [];
+        // (round 118) the end of a player's dash to cover (`_dashPlayer118`) is not the end of his order: no arrival
+        if (this._dash118) { const D = this._dash118; this._dash118 = null; if (this._coverGoal && this._coverGoal.pl118 && hyp(this.pos.x - D.x, this.pos.z - D.z) < 1.5) return; }
         // Partial route exhausted but the real destination is still out there:
         // ask again from here. Capped, and only while we are still closing, so
         // a genuinely unreachable goal gives up instead of pathing forever.
@@ -44291,6 +44315,36 @@ class Unit {
    *  shell, the order gone. A defence, an ambush or a hide is a standing order
    *  (Close Combat's Defend and Ambush last until the next order — see
    *  assets/ccmenu.js), and it is what he goes back to. */
+  /** (round 118) GOING TO GROUND ON A MOVE (`game.coverPlayer118`, default ON). The player's man on a Move (not Move Fast, which
+   *  runs and stops for nothing, nor Sneak, already crawling) who is shot at in the open: the best cover within
+   *  COVER118_LEG_R cells of him that is no further from where he is going (`_coverSnap118`), at most once in 4 s
+   *  and not in the last 3 u. He runs to it, keeps his order (`explicit`, the route's end in `_coverGoal.pl118`; the
+   *  dash's own end is no arrival — `_dash118`), and `_survival` sends him on when the fire lifts, or after 3 s.
+   *  Nowhere better: false, and he walks on as before. Not the soldier the player is riding. */
+  _dashPlayer118(now) {
+    if (!this.explicit || this.state !== 'move' || this.moveMode === 'fast' || this.moveMode === 'sneak' || !this.path.length || this.def.vehicle || this.lvl) return false;
+    const g = this.game;
+    if (g.fpv && g.fpv.unit === this) return false;
+    if (now - (this._dash118T == null ? -99 : this._dash118T) < 4) return false;
+    this._dash118T = now;
+    const end = this.path[this.path.length - 1], dEnd = hyp(end.x - this.pos.x, end.z - this.pos.z);
+    if (dEnd < 3) return false;
+    const c = g._coverSnap118(this, this.pos.x, this.pos.z, COVER118_LEG_R, end, dEnd + 1, null);
+    if (!c || hyp(c.x - this.pos.x, c.z - this.pos.z) < 0.8) return false;
+    const goal = { x: end.x, z: end.z, pl118: { lvl: end.lvl, post: this.posture === 'prone' ? 'normal' : this.posture } };
+    this._setPathTo(c.x, c.z);
+    if (!this.path.length) { this._setPathTo(goal.x, goal.z, goal.pl118.lvl); return false; }
+    this._coverGoal = goal; this._hunkerT = now - 3; this._dash118 = { x: c.x, z: c.z };
+    return true;
+  }
+  /** (round 118) On a closing leg into cover (`_chaseLeg118`, `game.coverChase118`) with under 8 u of it left: he
+   *  finishes it before he stops to fight. False for any path that does not end where the leg does. */
+  _onCoverLeg118() {
+    const L = this._chase118;
+    if (!L || (this.game.coverChase118 !== true && this.game.coverFight118 !== true) || !this.path.length) return false;
+    const e = this.path[this.path.length - 1];
+    return !!e && hyp(e.x - L.x, e.z - L.z) < 0.6 && hyp(L.x - this.pos.x, L.z - this.pos.z) < 8;
+  }
   _reflexDown() {
     if (this.posture === 'prone') return;
     this._reflexWas = this.posture; this.posture = 'prone'; this._proneReflex = true;
@@ -54617,6 +54671,84 @@ class Game {
     if (c && c.cover >= Math.max(0.35, here + 0.1) && sees(c.x, c.z)) return { x: c.x, z: c.z };
     return null;
   }
+  /** (round 118, cover doctrine) THE COVER A MAN STANDING IN THIS CELL GETS, as the editor's Show cover draws it:
+   *  `_coverAtCell` (the ground and the nearest prop), with the standing crop and brush laid there
+   *  (`foliage.coverAt`, which `_coverValueCalc` counts when he is shot at and every cover SEARCH left out), and a
+   *  trench cell (occupancy 7) at dug-in cover. Reads only. */
+  _cellCover118(gx, gz) {
+    if (!inGrid(gx, gz)) return 0;
+    if (this.obstacles.occupied[gz * GRID + gx] === 7) return COMBAT.coverMax;
+    let c = this._coverAtCell(gx, gz);
+    const F = this.foliage;
+    if (F && F.coverAt) { const fc = F.coverAt(gx, gz); if (fc > 0) c = 1 - (1 - c) * (1 - fc); }
+    return c;
+  }
+  /** (round 118) THE BEST COVER WITHIN `R` CELLS OF THE POINT A MAN IS GOING TO (`game.coverLeg118`), or null when
+   *  nothing there beats the point itself by COVER118_GAIN. A cell he can stand in (`passable`, or foot-through wood
+   *  and scrub for a man on foot) inside his section's frontage (`_tetherAt`), scored by `_cellCover118` less
+   *  COVER118_OFF a unit off the point. `to`/`maxD`: the cell lies within maxD of `to` (a leg of an advance still
+   *  closes); `see` (a unit): the cell sees him by a sightline (a fire position that cannot fire is not one). */
+  _coverSnap118(u, x, z, R, to, maxD, see) {
+    const gx0 = worldToCell(x), gz0 = worldToCell(z), O = this.obstacles, foot = !u.def.vehicle;
+    let best = null, bs = this._cellCover118(gx0, gz0) + COVER118_GAIN;
+    const ex = see ? see.pos.x : 0, ez = see ? see.pos.z : 0, ety = see ? this.terrain.heightAt(ex, ez) + MARK_H : 0;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const gx = gx0 + dx, gz = gz0 + dz;
+      if (!inGrid(gx, gz)) continue;
+      const c = this._cellCover118(gx, gz);
+      if (c < AICFG.coverMin) continue;
+      const cx = cellCenter(gx), cz = cellCenter(gz), s = c - hyp(cx - x, cz - z) * COVER118_OFF;
+      if (s <= bs) continue;
+      if (!this.pathfinder.passable(gx, gz) && !(foot && O.footThrough(gx, gz) && this.terrain.typePassable(gx, gz))) continue;
+      if (to && maxD != null && hyp(to.x - cx, to.z - cz) > maxD) continue;
+      if (!u._tetherAt(cx, cz)) continue;
+      if (see && !this.sightClear(cx, this.terrain.heightAt(cx, cz) + 1.2, cz, ex, ety, ez)) continue;
+      bs = s; best = { x: cx, z: cz, cover: c };
+    }
+    return best;
+  }
+  /** (round 118) CLOSING ON A TARGET, COVER TO COVER (`game.coverChase118`). `_chase` walked the computer's infantry
+   *  straight at the man they meant to shoot, re-aimed every 0.6 s, and they stopped wherever the range came in:
+   *  on Village (seed 11) it gave the path of 40% of the US and 18% of the German man-seconds spent MOVING in the
+   *  open under fire. Now one leg of at most `boundLen` toward the point `_chase` aimed at, ending on the best cover
+   *  within COVER118_LEG_R cells of its end that still closes on him and — when the leg ends inside the man's reach
+   *  — sees him. Kept until walked, the target moves 4 u or 8 s pass. False (the old chase) for a man the player
+   *  drives, a charge, an assault, a vehicle, or when no cover lies near the leg's end (not asked again for 1 s). */
+  _chaseLeg118(u, t) {
+    const d0 = u.def;
+    if (d0.vehicle || d0.towed || u.explicit || u._assault || u._charging || !u._underAI()) return false;
+    const now = this.time, L = u._chase118;
+    if (L && L.t === t && u.path.length && now - L.at < 8 && hyp(t.pos.x - L.tx, t.pos.z - L.tz) < 4) return true;
+    u._chase118 = null;
+    if (now - (u._chase118No == null ? -99 : u._chase118No) < 1) return false;
+    const aim = u._tetherClamp(t.pos.x, t.pos.z), ax = aim.x - u.pos.x, az = aim.z - u.pos.z, da = hyp(ax, az);
+    const d = hyp(t.pos.x - u.pos.x, t.pos.z - u.pos.z), rng = d0.rng || 0;
+    const stand = (d0.kind === 'rifle' || d0.kind === 'officer' || d0.kind === 'engineer') ? rng * 0.6 : rng;
+    const len = Math.min(AICFG.boundLen, da, Math.max(2, d - stand * 0.8));
+    if (da < 2 || len < 2) { u._chase118No = now; return false; }
+    const px = u.pos.x + ax / da * len, pz = u.pos.z + az / da * len;
+    const s = this._coverSnap118(u, px, pz, COVER118_LEG_R, t.pos, d - 1.5, hyp(t.pos.x - px, t.pos.z - pz) <= rng ? t : null);
+    if (!s) { u._chase118No = now; return false; }
+    u._setPathTo(s.x, s.z);
+    if (!u.path.length) { u._chase118No = now; return false; }
+    u._aiLeg = true; u.repathT = 0.6;
+    u._chase118 = { t, tx: t.pos.x, tz: t.pos.z, at: now, x: s.x, z: s.z };
+    return true;
+  }
+  /** (round 118) STOP TO FIGHT FROM COVER (`game.coverFight118`, default OFF: it never fired in the player probe). On the player's Move a man who sees an enemy stops
+   *  to fight him (`_ccResume`, Close Combat's Move) — where he stood, in the open as often as not: measured, 6 of 6
+   *  and 5 of 13 men of a section on Village did. He now takes the best cover within COVER118_LEG_R cells that sees
+   *  the man (`_coverSnap118`) first, unless he is already behind something; the step is kept while he fights
+   *  (`_chase118`, `_onCoverLeg118`), and `_ccResumeMove` takes him on from there once the fight is over. */
+  _fightFromCover118(u, t) {
+    if (u.def.vehicle || u.garrison || u.dugin > 0 || !t || !t.pos) return;
+    if (this._cellCover118(worldToCell(u.pos.x), worldToCell(u.pos.z)) >= 0.35) return;
+    const s = this._coverSnap118(u, u.pos.x, u.pos.z, COVER118_LEG_R, null, null, t);
+    if (!s || hyp(s.x - u.pos.x, s.z - u.pos.z) < 0.8) return;
+    u._setPathTo(s.x, s.z);
+    if (!u.path.length) return;
+    u._chase118 = { t, tx: t.pos.x, tz: t.pos.z, at: this.time, x: s.x, z: s.z };
+  }
   /** (round 118) A player's move order (`commandMove`, `game.cover118`): each formation slot moves to the
    *  nearest trench cell, or cell the sim counts as cover (>= 0.35), within COVER118_SNAP of it, one man to a
    *  cell. The order is still his: the men go where he sent them, each onto the cover nearest his place. */
@@ -61323,6 +61455,7 @@ class Game {
     const gd = hyp(gx, gz) || 1;
     const dirG = Math.atan2(gx, gz);
     const here = u._coverValue();
+    const leg118 = g.coverLeg118 === true;     // (round 118) see below
     let best = null, bs = -Infinity;
     // Fan of candidate bounds: mostly forward, a couple wide, at two lengths.
     for (const spread of [0, 0.35, -0.35, 0.7, -0.7, 1.15, -1.15]) {
@@ -61330,10 +61463,15 @@ class Game {
         const len = Math.min(maxLen * frac, gd);
         if (len < 3) continue;
         const a = dirG + spread;
-        const tx = clamp(u.pos.x + Math.sin(a) * len, -HALF + 4, HALF - 4);
-        const tz = clamp(u.pos.z + Math.cos(a) * len, -HALF + 4, HALF - 4);
-        const cgx = worldToCell(tx), cgz = worldToCell(tz);
-        if (!g.pathfinder.passable(cgx, cgz)) continue;
+        let tx = clamp(u.pos.x + Math.sin(a) * len, -HALF + 4, HALF - 4);
+        let tz = clamp(u.pos.z + Math.cos(a) * len, -HALF + 4, HALF - 4);
+        let cgx = worldToCell(tx), cgz = worldToCell(tz);
+        // (round 118) A BOUND ENDS IN COVER (`game.coverLeg118`): each leg's far end moves onto the best cover within
+        // COVER118_LEG_R cells of it (`_coverSnap118`: a trench, a hedge, the crop laid there), so the fan offers the
+        // hedge three metres off its line rather than the open ground on it; scored below on what he will stand in
+        const sn = leg118 ? g._coverSnap118(u, tx, tz, COVER118_LEG_R, null, null, null) : null;
+        if (sn) { tx = sn.x; tz = sn.z; cgx = worldToCell(tx); cgz = worldToCell(tz); }
+        else if (!g.pathfinder.passable(cgx, cgz)) continue;
         // COHESION IS A VETO, not a weight. A leg that would take him out of
         // his section is not a worse leg, it is not a leg — score it and it
         // wins whenever the cover on the far side of the field is good enough,
@@ -61368,7 +61506,7 @@ class Game {
           const backAim = hyp(tx - u._legFrom.x, tz - u._legFrom.z);
           if (backAim < backNow - 0.5) continue;      // closer to where he set off: refuse
         }
-        const cov = g._coverAtCell(cgx, cgz);
+        const cov = leg118 ? g._cellCover118(cgx, cgz) : g._coverAtCell(cgx, cgz);
         const swept = g._sweptAt(tx, tz, u.team, false);
         // What he has to cross on the way — sampled, because the danger is the
         // gap in the middle, not the ends.
@@ -65720,9 +65858,11 @@ class Game {
       gone = !standing();
       through = made > 0 || gone;
     } else {
-      gone = power >= mat.hp;
+      // (round 118, `game.bunker118`) a bunker's slab is its roof times the kind's factor (`Structures.roofHpF`, 1 elsewhere)
+      const hpF118 = hit.kind === 'roof' && S.roofHpF ? S.roofHpF(hit.gx, hit.gz) : 1;
+      gone = power >= mat.hp * hpF118;
       through = gone;
-      S.damagePiece(hit, gone ? mat.hp * 3 : power, { fire: mat.fire > 0.4 && aoe > 1.4 });
+      S.damagePiece(hit, gone ? mat.hp * 3 * hpF118 : power, { fire: mat.fire > 0.4 && aoe > 1.4 });
     }
     // Where the burst actually happens. A shell that breaks through the panel
     // is a shell that goes off IN THE ROOM, and a burst in a room is a

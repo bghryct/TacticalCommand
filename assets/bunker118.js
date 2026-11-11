@@ -23,10 +23,15 @@
   // `half`: half the embrasure's field of fire, degrees. An MG casemate's embrasure gave 60-90 degrees; a Tobruk
   // (Ringstand 58c) fired all round from its ring; a dugout's firing slit was wider than a casemate's.
   var KINDS = {
-    casemate: { name: 'Casemate', mat: 'concrete', half: 40, ring: false, cap: 3 },
-    tobruk:   { name: 'Tobruk',   mat: 'concrete', half: 180, ring: true,  cap: 2 },
-    dugout:   { name: 'Dugout',   mat: 'wood',     half: 50, ring: false, cap: 4 },
+    casemate: { name: 'Casemate', mat: 'concrete', half: 40, ring: false, cap: 3, slab: 16 },
+    tobruk:   { name: 'Tobruk',   mat: 'concrete', half: 180, ring: true,  cap: 2, slab: 5 },
+    dugout:   { name: 'Dugout',   mat: 'wood',     half: 50, ring: false, cap: 4, slab: 8 },
   };
+  // `slab`: THE SLAB'S HP FACTOR on its roof (`Structures.roofHpF`, read by `damagePiece` and `shellIntoWall`). Before it
+  // the slab was a house roof of concrete (hp 800): a 105 mm, 120 mm or rocket round broke it in ONE hit (power =
+  // filler x BREACH_KG, 1,352 for a 105). A Regelbau field casemate had 0.6-1.2 m of roof (x16: 81 mm cannot mark it,
+  // a 105 mm battery needs ~10 rounds on it, 155 mm/naval ~3, a bomb one); a Tobruk's roof was thinner (x5: 105 mm ~3,
+  // 155 mm one); a dugout's logs under a metre of earth (wood hp 110, x8: 81 mm ~3-4 rounds, 105 mm one).
   var EDGE_D = [[0, -1], [1, 0], [0, 1], [-1, 0]];   // N, E, S, W — Structures' EDGE_D
   var GARRISON_R = 14;                                  // cells: how far an AI man is sent from to man a bunker
   var BLAST_CUT = 0.08;                                 // of a burst outside the walls or on the slab, what reaches him
@@ -52,9 +57,10 @@
     on: function (g) { return !!(g && g.bunker118 === true); },
     /** THE DEFAULT. `game.bunker118` set either way wins; left unset, a map load sets it from this (the editor's
      *  panel, built before the game exists, reads this too). false = the old game. */
-    ON: false,
+    ON: true,   // main, 04:55 UTC 11 Nov, from .claude/wip118/bunker2/sheet15_0432_bunkers.jpg: they look right
     clear: function () {
       this.list.length = 0; this.cells.clear(); this._acc = 0; if (this._undraw) this._undraw();
+      var S0 = window.game && window.game.structures; if (S0 && S0.slab118) S0.slab118 = null;
       if (this.ON === true && window.game && window.game.bunker118 == null) window.game.bunker118 = true;
     },
     /** The editor's prop angle (degrees) -> the embrasure's edge: 0 N (-z), 90 E, 180 S, 270 W. */
@@ -64,6 +70,16 @@
       var k = this._key(r.gx, r.gz), old = this.cells.get(k);
       if (old) this.list.splice(this.list.indexOf(old), 1);
       this.list.push(r); this.cells.set(k, r);
+      this._slab(window.game, r);
+    },
+    /** The slab factor of r's cell on the building layer (sim: `Structures.roofHpF`). Set on build and load, and checked
+     *  by the 1 Hz tick (a layer rebuilt or resized for a new map comes back without it). */
+    _slab: function (g, r) {
+      var S = g && g.structures, K = KINDS[r.kind];
+      if (!S || !K || !K.slab || !(g.bunker118 === true)) return;
+      var n = GRID * GRID;
+      if (!S.slab118 || S.slab118.length !== n) S.slab118 = new Float32Array(n);
+      S.slab118[r.gz * GRID + r.gx] = K.slab;
     },
     /** Build one at cell (gx, gz), its embrasure on edge `face`. Returns the record, or null. */
     build: function (g, gx, gz, kind, face) {
@@ -141,6 +157,7 @@
       for (var i = 0; i < this.list.length; i++) {
         var r = this.list[i], K = KINDS[r.kind];
         if (!g.structures || !g.structures.has(r.gx, r.gz)) continue;
+        if (K.slab && (!g.structures.slab118 || g.structures.slab118[r.gz * GRID + r.gx] !== K.slab)) this._slab(g, r);
         var cx = cellCenter(r.gx), cz = cellCenter(r.gz), n = 0, S = g.structures;
         for (var j = 0; j < units.length; j++) {
           var u = units[j];
@@ -194,12 +211,188 @@
     _undraw: function () {
       for (var i = 0; i < this._meshes.length; i++) { var m = this._meshes[i]; if (m.parent) m.parent.remove(m); if (m.geometry) m.geometry.dispose(); }
       this._meshes.length = 0;
+      // the cells whose house the building layer skipped for a model: drawn again (the chunk is rebuilt)
+      var S = window.game && window.game.structures;
+      if (S && S.skip118 && this._skipped.length) {
+        for (var k = 0; k < this._skipped.length; k++) {
+          var c = this._skipped[k], cgx = c % GRID, cgz = (c / GRID) | 0; S.skip118[c] = 0;
+          S.markDirty(cgx, cgz); S.markDirty(cgx + 1, cgz); S.markDirty(cgx - 1, cgz); S.markDirty(cgx, cgz + 1); S.markDirty(cgx, cgz - 1);
+        }
+        this._flush = S;
+      }
+      this._skipped.length = 0;
     },
     redraw: function (g) {
       this._undraw();
-      if (!g || g.bunker118 !== true || !this.list.length || !window.THREE || !g.scene) return;
-      var self = this, run = function () { for (var i = 0; i < self.list.length; i++) self._draw(g, self.list[i]); };
+      var self = this, S0 = this._flush;
+      this._flush = null;
+      if (!g || g.bunker118 !== true || !this.list.length || !window.THREE || !g.scene) {
+        if (S0 && S0.flush) { if (typeof cosmeticScope === 'function') cosmeticScope(function () { S0.flush(); }); else S0.flush(); }
+        return;
+      }
+      var model = this._canModel(), run = function () {
+        for (var i = 0; i < self.list.length; i++) { if (model) self._model(g, self.list[i]); else self._draw(g, self.list[i]); }
+        // rebuild the chunks now, on the cosmetic stream (three.js UUIDs draw Math.random), not in the next frame
+        var S = g.structures; if (S && S.flush) S.flush(); if (S0 && S0 !== S && S0.flush) S0.flush();
+      };
       if (typeof cosmeticScope === 'function') cosmeticScope(run); else run();
+    },
+    // ---- THE MODELS (round 118, second pass) -------------------------------------------------------------------------
+    // Built in Blender at true scale (tools/blender/bunker_kit.py -> assets/bunker118.pack.js, loaded on first use):
+    // a field casemate (board-marked concrete, a chamfered slab, a stepped open embrasure, a recessed steel door, earth
+    // banked on the sides and rear and turf on the slab), a Tobruk (a ring in a square apron in a mound, an MG pintle,
+    // a rear passage) and a log dugout (a log front with a slit, a log roof under turf). Drawn on the TRENCH KIT's
+    // trim sheet and material (assets/trenchkit118.js: the sheet, the near-eye fill, snow, the ground's spoil colour,
+    // the feathered foot). The house the building layer would draw in the cell is skipped by its mesher
+    // (`Structures.skip118`, set here only), so the slit is open and the inside is bare concrete or logs.
+    // `MODEL` false = the round-118 shell over the house (`_draw`). Nothing here is read by the simulation.
+    MODEL: true,
+    _skipped: [],
+    _packWait: false,
+    _pack: function () {
+      if (window.BUNKER118PACK) return window.BUNKER118PACK;
+      if (!this._packWait && typeof document !== 'undefined' && document.createElement && document.head) {
+        this._packWait = true;
+        var sc = document.createElement('script'), self = this;
+        sc.src = 'assets/bunker118.pack.js';
+        sc.onload = function () { if (window.game && self.list.length) self.redraw(window.game); };
+        document.head.appendChild(sc);
+      }
+      return null;
+    },
+    _canModel: function () {
+      var TK = window.TrenchKit118;
+      return this.MODEL === true && !!(TK && TK.material && TK.uniforms && window.TRENCHKIT118 && this._pack());
+    },
+    /** The spoil in the colour of the map's ground, as the trench kit sets it (the same uniforms). */
+    _ground: function (g) {
+      var u = window.TrenchKit118.uniforms(), obs = g.obstacles;
+      if (!u || !u.uSpoilTK) return;
+      var GROUND = { turf: [1, 1, 1, 0], sand: [0.52, 0.45, 0.31, 0.9], stone: [0.36, 0.35, 0.33, 0.7], ash: [0.20, 0.19, 0.18, 0.8], snow: [0.56, 0.58, 0.62, 0.85] };
+      var pal = obs && obs._spoilPal ? obs._spoilPal() : 'turf', gk = GROUND[pal] || GROUND.turf;
+      u.uSpoilTK.value.setRGB(gk[0] / 0.23, gk[1] / 0.23, gk[2] / 0.23); u.uSpoilMixTK.value = gk[3];
+    },
+    /** The field's own colour under a point against the sheet's turf (the kit's `turfTint`): the grassed earth's foot
+     *  takes the ground it stands on, so it does not end on an outline of another green (on snow it may only darken). */
+    _tint: function (g) {
+      var terr = g.terrain, obs = g.obstacles, tcol = terr && terr.mesh && terr.mesh.geometry && terr.mesh.geometry.attributes.color;
+      if (!tcol) return null;
+      var gpal = obs && obs._spoilPal ? obs._spoilPal() : 'turf';
+      var REF = { turf: [0.20, 0.26, 0.10], snow: [0.56, 0.58, 0.62], sand: [0.52, 0.45, 0.31], stone: [0.36, 0.35, 0.33], ash: [0.20, 0.19, 0.18] }[gpal] || [0.20, 0.26, 0.10];
+      var hiT = gpal === 'snow' ? 1.0 : 2.2, a = tcol.array;
+      return function (x, z) {
+        var gx = Math.max(0, Math.min(GRID - 1, Math.round((x + HALF - TILE / 2) / TILE))), gz = Math.max(0, Math.min(GRID - 1, Math.round((z + HALF - TILE / 2) / TILE)));
+        var i = (gz * GRID + gx) * 3;
+        return [Math.min(hiT, Math.max(0.3, a[i] / REF[0])), Math.min(hiT, Math.max(0.3, a[i + 1] / REF[1])), Math.min(hiT, Math.max(0.3, a[i + 2] / REF[2]))];
+      };
+    },
+    _model: function (g, r) {
+      var TH = window.THREE, P = window.BUNKER118PACK, K = P.kinds[r.kind], TK = window.TrenchKit118, KS = window.TRENCHKIT118;
+      if (!K) { this._draw(g, r); return; }
+      var mat = TK.material(false), matF = TK.material(true), self = this;
+      this._ground(g);
+      var U = 1 / METERS_PER_UNIT, d = EDGE_D[r.face], fx = d[0], fz = d[1], rx = fz, rz = -fx;   // local +Z -> the embrasure's edge
+      var cx = cellCenter(r.gx), cz = cellCenter(r.gz), S = g.structures, T = g.terrain;
+      var by = (S && S.baseY) ? S.baseY[S.ci(r.gx, r.gz)] : T.heightAt(cx, cz);
+      var BV = P.bands.map(function (b) { var q = KS.bands[b]; return q ? [q[0], q[1]] : [0.25, 0.26]; });
+      var spoil = P.bands.indexOf('spoil'), n = K.band.length, pos = K.pos, nor = K.nor, uv = K.uv, col = K.col, fd = K.fd, dr = K.dr;
+      var wp = new Float32Array(n * 3), wn = new Float32Array(n * 3), wuv = new Float32Array(n * 2), wc = new Float32Array(n * 3), wf = new Float32Array(n);
+      // THE EARTH MATCHED TO THE FIELD, by pixel windows on the bank's foot and on the field 3 m beyond it (26 m and 72 m):
+      // at 1.0 the foot drew 1.58x the field on turf (the tint matches the terrain's vertex colour, which the terrain's own
+      // shader darkens), 1.23x on snow, 1.2x on sand (at 0.70); these factors bring it to ~1.0
+      // (turf 0.45 matched the foot but drew the banks a dark olive mound at 26 m and 72 m; 0.62 between the two)
+      var BANK_MUL = { turf: 0.62, snow: 0.80, sand: 0.55, stone: 0.60, ash: 0.70 }, gpal = g.obstacles && g.obstacles._spoilPal ? g.obstacles._spoilPal() : 'turf';
+      var tint = this._tint(g), gm = BANK_MUL[gpal] != null ? BANK_MUL[gpal] : 0.6;
+      for (var v = 0; v < n; v++) {
+        var x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+        var b0 = K.band[v], yl = (b0 === spoil && dr[v] > 0.98 && y < 0.06) ? 2 * y - 0.06 : y;   // the earth's toe goes under the field
+        var wx = cx + (x * rx + z * fx) * U, wz = cz + (x * rz + z * fz) * U, wy = by + yl * U;
+        if (dr[v] > 0) wy += dr[v] * (T.heightAt(wx, wz) - by);   // the earth's foot follows the ground, its crest the bunker
+        wp[v * 3] = wx; wp[v * 3 + 1] = wy; wp[v * 3 + 2] = wz;
+        var nx = nor[v * 3], nz = nor[v * 3 + 2];
+        wn[v * 3] = nx * rx + nz * fx; wn[v * 3 + 1] = nor[v * 3 + 1]; wn[v * 3 + 2] = nx * rz + nz * fz;
+        var b = K.band[v], bv = BV[b], rows = (bv[1] - bv[0]) * 1024;
+        wuv[v * 2] = uv[v * 2]; wuv[v * 2 + 1] = bv[0] + (2 + (rows - 4) * uv[v * 2 + 1]) / 1024;
+        var c0 = col[v * 3], c1 = col[v * 3 + 1], c2 = col[v * 3 + 2];
+        if (b === spoil) { c0 *= gm; c1 *= gm; c2 *= gm; }   // the earth matched to the field (the trench kit's `groundMul`)
+        if (tint && b === spoil) {
+          var tw = Math.min(1, Math.max(0, (uv[v * 2 + 1] - 0.45) / 0.4));
+          if (tw > 0) { var q = tint(wx, wz); c0 *= 1 + (q[0] - 1) * tw; c1 *= 1 + (q[1] - 1) * tw; c2 *= 1 + (q[2] - 1) * tw; }
+        }
+        wc[v * 3] = c0; wc[v * 3 + 1] = c1; wc[v * 3 + 2] = c2; wf[v] = fd[v];
+      }
+      // a faded foot (the earth's last few centimetres, cut on a noise) goes on the kit's discarding program, the rest not
+      // THE EARTH IS THE FIELD'S OWN GROUND (main's review, 04:06: "the cover should take the terrain's own colour and
+      // texture under it ... grass on grass and snow on snow"): the mounds are drawn with the TERRAIN's material, their
+      // colour, surface weights (`assets/groundsplat.js`) and uv taken from the terrain under each vertex, so they are the
+      // field heaped up — on any ground, with no outline at the foot (the toe goes 6 cm under the field). Bare earth only
+      // where the pack's t says (the steepest faces, the door cut). No discard (cheaper than the kit's feathered foot).
+      var TM = T.mesh, TA = TM && TM.geometry && TM.geometry.attributes, SPL = ['splatA', 'splatB', 'splatC', 'splatD', 'splatE'];
+      var earthOK = !!(TA && TA.color && TM.material && SPL.every(function (k) { return TA[k]; }));
+      var I = K.idx, solid = [], feet = [], earth = [];
+      for (var t = 0; t < I.length; t += 3) {
+        var ia = I[t], ib = I[t + 1], ic = I[t + 2];
+        if (earthOK && K.band[ia] === spoil && K.band[ib] === spoil && K.band[ic] === spoil) { earth.push(ia, ib, ic); continue; }
+        ((fd[ia] < 0.999 || fd[ib] < 0.999 || fd[ic] < 0.999) ? feet : solid).push(ia, ib, ic);
+      }
+      var A = { position: new TH.BufferAttribute(wp, 3), normal: new TH.BufferAttribute(wn, 3), uv: new TH.BufferAttribute(wuv, 2),
+        color: new TH.BufferAttribute(wc, 3), fade: new TH.BufferAttribute(wf, 1) };
+      var mk = function (idx, m, name, shadow) {
+        if (!idx.length) return;
+        var geo = new TH.BufferGeometry();
+        for (var k in A) geo.setAttribute(k, A[k]);
+        geo.setIndex(idx); geo.computeBoundingSphere();
+        var me = new TH.Mesh(geo, m);
+        me.castShadow = shadow; me.receiveShadow = true; me.matrixAutoUpdate = false; me.updateMatrix(); me.name = name;
+        me.visible = false;
+        g.scene.add(me); self._meshes.push(me);
+      };
+      var m0 = this._meshes.length;
+      mk(solid, mat, 'bunker118:' + r.kind, true);
+      mk(feet, matF, 'bunker118:' + r.kind + ':feet', false);
+      var mine = this._meshes.slice(m0);
+      if (earth.length) {
+        var ec = new Float32Array(n * 3), euv = new Float32Array(n * 2), es = SPL.map(function () { return new Uint8Array(n * 4); });
+        var Wt = (GRID - 1) * TILE, c0w = cellCenter(0), tc = TA.color.array, sa = SPL.map(function (k) { return TA[k].array; });
+        for (var v2 = 0; v2 < n; v2++) {
+          if (K.band[v2] !== spoil) continue;
+          var ex = wp[v2 * 3], ez = wp[v2 * 3 + 2], fx2 = (ex - c0w) / TILE, fz2 = (ez - c0w) / TILE;
+          var gx0 = Math.max(0, Math.min(GRID - 2, Math.floor(fx2))), gz0 = Math.max(0, Math.min(GRID - 2, Math.floor(fz2)));
+          var ax2 = Math.min(1, Math.max(0, fx2 - gx0)), az2 = Math.min(1, Math.max(0, fz2 - gz0));
+          var i00 = gz0 * GRID + gx0, i10 = i00 + 1, i01 = i00 + GRID, i11 = i01 + 1;
+          var w00 = (1 - ax2) * (1 - az2), w10 = ax2 * (1 - az2), w01 = (1 - ax2) * az2, w11 = ax2 * az2;
+          // bare earth (the steepest faces, the door cut) is BROWN, blended toward a loam colour, never darkened toward
+          // black (main 04:27: "a dark, soot-like ring"); on snow only the very steepest show it
+          var bare = Math.min(1, Math.max(0, (0.86 - uv[v2 * 2 + 1]) / 0.4)) * (gpal === 'snow' ? 0.45 : 1), ao2 = col[v2 * 3], kb = 0.62 * bare;
+          ec[v2 * 3] = (tc[i00 * 3] * w00 + tc[i10 * 3] * w10 + tc[i01 * 3] * w01 + tc[i11 * 3] * w11) * ao2 * (1 - kb) + 0.17 * kb;
+          ec[v2 * 3 + 1] = (tc[i00 * 3 + 1] * w00 + tc[i10 * 3 + 1] * w10 + tc[i01 * 3 + 1] * w01 + tc[i11 * 3 + 1] * w11) * ao2 * (1 - kb) + 0.125 * kb;
+          ec[v2 * 3 + 2] = (tc[i00 * 3 + 2] * w00 + tc[i10 * 3 + 2] * w10 + tc[i01 * 3 + 2] * w01 + tc[i11 * 3 + 2] * w11) * ao2 * (1 - kb) + 0.08 * kb;
+          euv[v2 * 2] = (ex - c0w) / Wt; euv[v2 * 2 + 1] = 1 - (ez - c0w) / Wt;
+          for (var s3 = 0; s3 < 5; s3++) {
+            var A3 = sa[s3], O3 = es[s3];
+            for (var q4 = 0; q4 < 4; q4++) O3[v2 * 4 + q4] = Math.round(A3[i00 * 4 + q4] * w00 + A3[i10 * 4 + q4] * w10 + A3[i01 * 4 + q4] * w01 + A3[i11 * 4 + q4] * w11);
+          }
+        }
+        var eg = new TH.BufferGeometry();
+        eg.setAttribute('position', A.position); eg.setAttribute('normal', A.normal);
+        eg.setAttribute('color', new TH.BufferAttribute(ec, 3)); eg.setAttribute('uv', new TH.BufferAttribute(euv, 2));
+        for (var s4 = 0; s4 < 5; s4++) eg.setAttribute(SPL[s4], new TH.BufferAttribute(es[s4], 4, true));
+        eg.setIndex(earth); eg.computeBoundingSphere();
+        var em = new TH.Mesh(eg, TM.material);
+        em.castShadow = true; em.receiveShadow = true; em.matrixAutoUpdate = false; em.updateMatrix(); em.name = 'bunker118:' + r.kind + ':earth';
+        g.scene.add(em); self._meshes.push(em);
+      }
+      // the kit's meshes are shown once the sheet has decoded (a frame drawn before that is black)
+      var pr = TK.ready ? TK.ready() : null;
+      if (pr && pr.then) pr.then(function () { for (var q = 0; q < mine.length; q++) mine[q].visible = true; });
+      else for (var q2 = 0; q2 < mine.length; q2++) mine[q2].visible = true;
+      // the house the building layer would draw in this cell
+      if (S && S.markDirty) {
+        if (!S.skip118) S.skip118 = new Uint8Array(GRID * GRID);
+        var key = r.gz * GRID + r.gx; S.skip118[key] = 1; this._skipped.push(key);
+        // its walls are shared with the cells round it (a cell draws its N and W walls): those chunks too
+        S.markDirty(r.gx, r.gz); S.markDirty(r.gx + 1, r.gz); S.markDirty(r.gx - 1, r.gz); S.markDirty(r.gx, r.gz + 1); S.markDirty(r.gx, r.gz - 1);
+      }
     },
     _draw: function (g, r) {
       var TH = window.THREE, W3 = window.Structures || {}, S = W3.S || 0.25, H = W3.FLOOR_H || 0.75;
