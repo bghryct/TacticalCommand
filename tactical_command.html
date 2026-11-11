@@ -1573,6 +1573,7 @@ body.fpv #tacMap { display: none !important; }
      `game.trenchKit118`, default OFF. Drawing only; the simulation keeps its trench cells. -->
 <script src="assets/trenchkit118.pack.js"></script>
 <script src="assets/trenchkit118.js"></script>
+<script src="assets/bunker118.js"></script>
 <script>
 'use strict';
 /* ============================================================================
@@ -31631,6 +31632,8 @@ class Projectiles {
           // (round 116) …and if all the firer could see of him was his head over his cover, a
           // head is what there is to hit (`PRESENT.win`): he was 'up' and dead the moment he looked
           if (p.headOnly) pf = Math.min(pf, PRESENT.win);
+          // (round 118, `game.bunker118`) a man behind an embrasure shows a slit's worth of himself (assets/bunker118.js)
+          if (game.bunker118 === true && window.Bunker118 && window.Bunker118.list.length && window.Bunker118.at(game, victim.pos.x, victim.pos.z)) pf = Math.min(pf, window.Bunker118.SLIT_PRESENT);
           // (round 115) a man in a window frame is a small target until he is
           // close: the fade to certainty is PRESENT_NEAR_WIN for him, not the
           // 32 m that made him a 28% shot at fifty metres
@@ -38084,6 +38087,8 @@ class Unit {
       // rather dig in and fortify the approach than stand there uselessly aiming.
       if (this._underAI() && this.def.engineer) visR = Math.min(visR, this.def.rng + 3);
       let best = null, bs = Infinity, sensed = null, nSense = 0;
+      // (round 118, `game.bunker118`) a man in a bunker picks only what is inside its embrasure's arc (assets/bunker118.js)
+      const bArc118 = game.bunker118 === true && window.Bunker118 ? window.Bunker118.arcOf(game, this) : null;
       // Only the other side is a candidate (see `UnitGrid.enemiesOf`), and a
       // man beyond `visR * STEALTH_MAX` is rejected on squared distance before
       // his concealment is even asked for. The guards below are kept for the
@@ -38120,7 +38125,8 @@ class Unit {
         // candidate whenever none could be seen, and it is read only by a man
         // who found no target and has nowhere to go.
         if (nSense < SENSE_CAP) { SENSE_D[nSense] = d; SENSE_U[nSense] = u; nSense++; }
-        if (!indirect && !this._inView(u.pos.x, u.pos.z)) continue;   // must be inside the view cone (or point-blank) to actually acquire
+        if (!indirect && !this._inView(u.pos.x, u.pos.z)) continue;
+        if (bArc118 && !window.Bunker118.inArc(bArc118, u.pos.x, u.pos.z)) continue;   // must be inside the view cone (or point-blank) to actually acquire
         let threat = u.type === 'dwarf' ? 1.35 : u.type === 'archer' ? 1.2 : 1;
         // Anti-tank weapons hunt armour first; MG gunners prefer soft targets
         if ((this.def.kind === 'rocket' || this.def.kind === 'atgun') && u.def.vehicle
@@ -45487,6 +45493,9 @@ class Unit {
   }
 
   _holdsFire(target, d) {
+    // (round 118, `game.bunker118`) a man in a bunker does not fire out of its embrasure's arc: he lets the
+    // target go, and the scan (which reads the same arc) finds him one inside it
+    if (this.game.bunker118 === true && window.Bunker118 && window.Bunker118.holds(this.game, this, target)) { this.target = null; return true; }
     if (!this.def.vehicle && this.path.length && (this.moveMode === 'fast' || this.moveMode === 'sneak')) return true;
     // A BOUND IS CROSSED, NOT FOUGHT. A man on a tranche of an advance — or
     // rushing the next bound of an assault — is moving under somebody else's
@@ -47015,7 +47024,7 @@ class Editor {
       const key = gx + ',' + gz;
       if (this.stroke.cells.has(key)) return;
       // Objective tools act once per CLICK — dragging must not scatter flags/waypoints
-      if ((['vpflag', 'routeDraw', 'routeDel'].includes(t) || t.indexOf('sq:') === 0) && this.stroke.cells.size) return;
+      if ((['vpflag', 'routeDraw', 'routeDel'].includes(t) || t.indexOf('sq:') === 0 || t.indexOf('bunker118:') === 0) && this.stroke.cells.size) return;
       this.stroke.cells.add(key);
       this._stamp(gx, gz);
     }
@@ -47144,6 +47153,10 @@ class Editor {
 
   _applyPlacement(gx, gz, tool) {
     const game = this.game;
+    if (tool && tool.indexOf('bunker118:') === 0) {   // (round 118) a bunker: a one-cell building, its embrasure to the Angle
+      if (window.Bunker118 && window.Bunker118.build(game, gx, gz, tool.slice(10), window.Bunker118.faceFromDeg(this.propAngle))) game.sfx.place();
+      return;
+    }
     if (tool === 'prop:trench') tool = 'trench';   // (round 118) the Props panel's trench
     if (OBS_DEF[tool]) {
       const def = OBS_DEF[tool];
@@ -47815,6 +47828,9 @@ class UI {
       // (round 118) the trench PROP's button: 'trench' is also a ground type (Paint), and every tool lookup asks the
       // ground types first, so this button painted the carved ground and the prop could not be placed at all
       obsRow.appendChild(mkBtn(k === 'trench' && trench118On() ? 'prop:trench' : k, cap(k) + (def.explosive ? '💥' : ''), def.color));
+    // (round 118, `game.bunker118`) Casemate · Tobruk · Dugout: the embrasure faces the prop Angle (0 N, 90 E, 180 S, 270 W)
+    if (window.game && window.game.bunker118 === true && window.Bunker118) for (const k of Object.keys(window.Bunker118.KINDS))
+      obsRow.appendChild(mkBtn('bunker118:' + k, window.Bunker118.KINDS[k].name, k === 'dugout' ? 0x5a4530 : 0x8e8b83));
     obsRow.appendChild(mkBtn('removeObs', '✕', 0x4a2a2a));
     obsRow.appendChild(mkBtn('turnObs', '⟳ Turn', 0x3a4a5a));     // (round 113) turn a placed prop to the Angle
     // Surface swatches live on their own tab now, generated from TYPE_DEF
@@ -50953,6 +50969,7 @@ class Game {
     if (!this.fpv) return;
     const u = this.fpv.unit;
     this.abortHk();                    // a missile in flight dies with the link
+    if (this.fpv._scopeHid118 && this.vmMount) this.vmMount.visible = true;   // (round 118) the rifle the scope hid
     this.fpv = null;
     document.body.classList.remove('fpv');
     this._fpvHideSelf(u, false);
@@ -53041,6 +53058,13 @@ class Game {
       const near = peep ? Math.max(FPV_NEAR, (u.rig.sightLine.relief * 0.82 + 0.012) * K_FIG)
                  : notch ? Math.max(FPV_NEAR, (u.rig.sightLine.relief * 0.82 - 0.02) * K_FIG) : FPV_NEAR;
       if (Math.abs(this.camera.near - near) > 1e-4) { this.camera.near = near; this.camera.updateProjectionMatrix(); }
+      // (round 118, `game.scopeView118`) THROUGH A SCOPE THE EYE SEES THE FIELD, NOT THE TUBE. The ocular is a
+      // few centimetres from the eye, and drawn it was a solid disc across the middle of the picture that filled
+      // it as the magnification went up: the owner, "sniper sight goes black when zoomed in" (measured: the
+      // centre of a 2.5x M1903A4 picture was the tube's end, not the field). Fully on the glass the held rifle is
+      // not drawn; the reticle and the dark ring round it are `#gsScope`, as the peep's disc is `#gsPeep`.
+      const scopedK = this.scopeView118 !== false && !!(sl && SA && SA.sight === 'scope') && (!A116 || f.adsK > 0.85);
+      if (this.vmMount && scopedK !== !!f._scopeHid118) { this.vmMount.visible = !scopedK; f._scopeHid118 = scopedK; }
       const gs = this.ui.el.gunsight;
       if (gs) {
         gs.classList.toggle('peep', peep);
@@ -53052,6 +53076,7 @@ class Game {
         }
       }
     } else if (this.camera.near !== 0.06) { this.camera.near = 0.06; this.camera.updateProjectionMatrix(); }
+    if (f && f._scopeHid118 && f.mode !== 'foot' && this.vmMount) { this.vmMount.visible = true; f._scopeHid118 = false; }   // (round 118) off the scope by leaving the foot
     // ---- Magnification -----------------------------------------------------
     // Unaimed, every view sits at the natural field of view — no artificial
     // gunsight crop, nothing between you and the ground. Sighted, the optic
@@ -65415,6 +65440,8 @@ class Game {
       if (d <= radius && u !== opts.hitUnit && this.frag115 !== false && !u.def.vehicle && this.structures && this.structures.any) slabCut *= this._fragWall(wx, wy, wz, u);
       // (round 116) …and a low line between them: sandbags, a low wall (`_fragLine116`)
       if (d <= radius && u !== opts.hitUnit && this.mortar116 !== false && this.line116 !== false && !u.def.vehicle) slabCut *= this._fragLine116(wx, wy, wz, u);
+      // (round 118, `game.bunker118`) …and a man in a bunker takes only what bursts inside it, or comes through a slab that is gone
+      if (d <= radius && u !== opts.hitUnit && this.bunker118 === true && window.Bunker118 && window.Bunker118.list.length && !u.def.vehicle) slabCut *= window.Bunker118.blastCut(this, u, wx, wy, wz, opts);
       // (round 117) `digHE117` reads the stance he was in when the bomb burst, not the one its blast puts him in
       if (this.digHE117 != null ? this.digHE117 : DIG117.heOn) u._heWas117 = u._heStance117();
       if (d <= supR) u.applySuppression(supPow * (1 - d / supR) * (slabCut < 1 ? 0.6 : 1));   // near-misses rattle infantry
@@ -68912,6 +68939,8 @@ class Game {
       // runtime state, the same rule the props follow, so a reloaded map opens
       // with its village intact rather than remembering yesterday's shelling.
       structures: this.structures ? this.structures.serialize() : null,
+      // (round 118) the bunkers' kinds and fronts (their walls are in `structures`); no key when there are none
+      ...(window.Bunker118 && window.Bunker118.list.length ? { bunkers118: window.Bunker118.serialize() } : {}),
       foliageIds: this.foliage && window.Foliage ? window.Foliage.DEFS.map(f => f.id) : undefined,
       units: this.units.filter(u => u.alive).map(u => ({
         x: worldToCell(u.pos.x), z: worldToCell(u.pos.z),
@@ -68996,6 +69025,7 @@ class Game {
     if (data.terrain) this.terrain.load(data.terrain, srcGrid, off);
     if (data.obstacles) this.obstacles.load(data.obstacles, off);
     if (this.structures) this.structures.load(data.structures || null, off);
+    if (window.Bunker118) window.Bunker118.load(data.bunkers118 || null, off);   // (round 118)
     // Ground cover. Kinds are stored as 1-based indices, so — exactly as with
     // surfaces above — a map written when the kind list had a different shape
     // is remapped BY NAME before the cells are read; anything this build no
@@ -69077,6 +69107,7 @@ class Game {
     if (terrain) this.terrain.load(terrain, srcGrid, off);
     if (data.obstacles) this.obstacles.load(data.obstacles, off);
     if (this.structures) this.structures.load(data.structures || null, off);
+    if (window.Bunker118) window.Bunker118.load(data.bunkers118 || null, off);   // (round 118)
   }
   /** …and its crops, by kind NAME as `load` reads them. */
   _applyMapFoliage(data) {
@@ -70475,6 +70506,7 @@ class Game {
     // default the last German map's side stuck to every field loaded after it —
     // the eighteen maps that declare no side with them. A setting that is only
     // ever written one way is a latch.
+    if (window.Bunker118) window.Bunker118.clear();   // (round 118) a map built by code has no bunkers of the last one
     if (!this.campaignDeploy) this.playerTeam = 1;
     // No map, or one that does not exist: the default map (DEFAULT_MAP_NAME).
     if (idx <= 0 || !MAPS[idx - 1]) idx = defaultMapIdx();
@@ -72384,6 +72416,7 @@ class Game {
     this._updateAssaults(dt);                    // bounding-overwatch assault controller
     this._updateMoods(dt);                       // what each section is feeling about this
     this._keepPlayerSections();                  // (round 110) the player's sections draw in their stragglers
+    if (this.bunker118 === true && window.Bunker118) window.Bunker118.tick(this, dt);   // (round 118) bunkers take their crews
     this._windowShuffle(dt);                     // (round 110) …and men in a house go to the side the enemy is on
     this._stackTick(dt);                         // (round 115) …and men going into a fight go in at a door, one at a time
     this._houseFallBack(dt);                     // (round 115) …and a house that cannot be held is left by the far side
@@ -73177,7 +73210,8 @@ cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);   // (round 118) a felled t
 // `VFX.burst`/`fire`/`strike` (assets/vfx.js), `Projectiles` (the ground strike) and `_smokeBank`.
 Game.prototype.snipers118 = true;     // (round 118) a sniper pair each side on Village and in the platoon/company presets
 Game.prototype.setupMem118 = true;
-Game.prototype.sniperKit118 = true;   // (round 118) the generic (American) sniper on a German or Soviet side is that army's own    // (round 118) the battle setup forgets a force remembered for a map whose own forces changed
+Game.prototype.sniperKit118 = true;
+Game.prototype.scopeView118 = true;   // (round 118) on a scope's glass the held rifle is not drawn: its ocular blacked out the zoomed view   // (round 118) the generic (American) sniper on a German or Soviet side is that army's own    // (round 118) the battle setup forgets a force remembered for a map whose own forces changed
 Game.prototype.fxBlast118 = true;     // HE: flash, hot core and a dust skirt on the baked ground burst (ON: better in every capture, no frame cost)
 Game.prototype.fxFire118 = true;      // fires: taller tongues, a wider glow (ON: better in the captures, no extra particles)
 Game.prototype.fxImpact118 = false;   // bullets into the ground: a puff in the colour of the surface
