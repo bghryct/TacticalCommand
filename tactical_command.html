@@ -1574,6 +1574,7 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/trenchkit118.pack.js"></script>
 <script src="assets/trenchkit118.js"></script>
 <script src="assets/bunker118.js"></script>
+<script src="assets/covertab118.js"></script>
 <script>
 'use strict';
 /* ============================================================================
@@ -47829,7 +47830,7 @@ class UI {
       // ground types first, so this button painted the carved ground and the prop could not be placed at all
       obsRow.appendChild(mkBtn(k === 'trench' && trench118On() ? 'prop:trench' : k, cap(k) + (def.explosive ? '💥' : ''), def.color));
     // (round 118, `game.bunker118`) Casemate · Tobruk · Dugout: the embrasure faces the prop Angle (0 N, 90 E, 180 S, 270 W)
-    if (window.game && window.game.bunker118 === true && window.Bunker118) for (const k of Object.keys(window.Bunker118.KINDS))
+    if (window.Bunker118 && (window.game && window.game.bunker118 != null ? window.game.bunker118 === true : window.Bunker118.ON === true)) for (const k of Object.keys(window.Bunker118.KINDS))
       obsRow.appendChild(mkBtn('bunker118:' + k, window.Bunker118.KINDS[k].name, k === 'dugout' ? 0x5a4530 : 0x8e8b83));
     obsRow.appendChild(mkBtn('removeObs', '✕', 0x4a2a2a));
     obsRow.appendChild(mkBtn('turnObs', '⟳ Turn', 0x3a4a5a));     // (round 113) turn a placed prop to the Angle
@@ -73487,6 +73488,7 @@ function boot() {
   if (typeof ui117Install === 'function') ui117Install();   // (117) game.ui117
   game.loadMap(defaultMapIdx());   // the opening field — see DEFAULT_MAP_NAME
   game.setMode('edit');
+  if (typeof coverTab118Install === 'function') coverTab118Install();   // (118) game.coverTab118: the editor's Cover tab (assets/covertab118.js)
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();
