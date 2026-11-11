@@ -1119,8 +1119,9 @@
       var CN = window.Canopy;
       if (CN && CN.near && CN.nearSky && CN.nearSun && folDL.test(sh.fragmentShader)) {
         sh.uniforms.uFolNear = CN.near; sh.uniforms.uFolNearSky = CN.nearSky; sh.uniforms.uFolNearSun = CN.nearSun; sh.uniforms.uFolNearCap = CN.nearCap || { value: 0.35 };
+        sh.uniforms.uFolField = CN.nearField || { value: new THREE.Vector4(0, 0, 0, 0) };   // (round 118, `fpvField118`)
         sh.fragmentShader = sh.fragmentShader.replace('varying float vFolSun;',
-          'varying float vFolSun;\nvarying float vFolD;\nuniform float uFolNear;\nuniform vec4 uFolNearSky;\nuniform float uFolNearSun;\nuniform float uFolNearCap;');
+          'varying float vFolSun;\nvarying float vFolD;\nuniform float uFolNear;\nuniform vec4 uFolNearSky;\nuniform float uFolNearSun;\nuniform float uFolNearCap;\nuniform vec4 uFolField;');
         sh.fragmentShader = sh.fragmentShader.replace(folDL, function (m) { return m + [
           '',
           '\tif (uFolNear > 0.0) {',
@@ -1131,6 +1132,9 @@
           '\t\tfloat folInE = dot(reflectedLight.indirectDiffuse, folLw) / max(dot(diffuseColor.rgb, folLw), 1e-5);',
           '\t\tfloat folMul = 1.0 + (uFolNearSky.y - 1.0) * 0.5 * folShd * folNr * uFolNear;',
           '\t\treflectedLight.indirectDiffuse *= min(folMul, max(1.0, uFolNearCap * uFolNearSun / max(folInE, 1e-5)));',
+          // (round 118, `Canopy.nearField`) on a bright field the eye adapts to the shade it looks into:
+          // a fern in a pine's shadow on snow was black with the lift on (w 0 when off: not taken)
+          '\t\tif (uFolField.w > 0.0) reflectedLight.indirectDiffuse *= 1.0 + (uFolField.w - 1.0) * folShd * folNr * uFolNear;',
           '\t}',
         ].join('\n'); });
       }

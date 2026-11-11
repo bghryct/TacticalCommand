@@ -20568,6 +20568,11 @@ class Sky {
   /** Bake one weather's equirectangular sky: gradient + haze + cloud decks. */
   _bake(key) {
     if (this.cache[key]) return this.cache[key];
+    // (round 118, `game.reset118b`) ON THE COSMETIC STREAM. A sky is baked the first time the PAGE meets its weather
+    // (this cache), inside `loadMap`'s `setWeather`, and its CanvasTexture took a UUID from `Math.random`, the SIM's:
+    // the first battle of a session under a new sky drew rolls the next one under it did not (Ortona after Village and
+    // Ponyri, unprimed: 8 rolls at its load, and another battle).
+    if (window.game && window.game.reset118b !== false && Math.random !== vrandom) return cosmeticScope(this._bake, this, arguments);
     const d = SKY_DEF[key] || SKY_DEF.clear;
     const W = 1024, H = 512;
     const cv = document.createElement('canvas');
@@ -20659,6 +20664,7 @@ class Sky {
   _bakeDeck(key) {
     this._deckCache = this._deckCache || {};
     if (this._deckCache[key]) return this._deckCache[key];
+    if (window.game && window.game.reset118b !== false && Math.random !== vrandom) return cosmeticScope(this._bakeDeck, this, arguments);   // (round 118) as `_bake`
     const d = SKY_DEF[key] || SKY_DEF.clear;
     const W = 512, H = 256;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -43442,6 +43448,14 @@ class Unit {
    *  scanning every other man, which was 137 × 137 a tick and three milliseconds
    *  of the frame on its own. */
   _leaderBonus() {
+    // (round 118, `game.reset118b`) NOT ON A FRESH PAGE'S FIRST STEP. Until `_updateCommand` first stamps anybody (it
+    // runs after `_updateUnits`), `game._cmdStamp` and a new man's `_leadT` are both undefined, `undefined ===
+    // undefined`, and this returned `_leadV` — undefined. In the first step of the first battle of a page that made
+    // `rally` NaN in `_decayFear`, and a man shot at in that step kept fear NaN for the whole battle (`_decayFear`
+    // runs only while fear > 0, and `NaN > 0` is false): never frightened, never pinned, never broken. Every later
+    // battle has a stamp and was clean, so the first battle of a session was another battle (Villers-Bocage seed 7,
+    // two grenadiers, parted at step 612). `_obedience`, the nerve and steel sums read it too, that one step.
+    if (this._leadT === undefined && this.game.reset118b !== false) return 0;
     return this._leadT === this.game._cmdStamp ? this._leadV : 0;
   }
 
@@ -67230,7 +67244,13 @@ class Game {
       // Fresh objectives for a fresh battle — but stepping out to the Forge and
       // back mid-fight keeps the flags exactly as they stood.
       if (was === 'edit' || !this.victoryPoints.length) {
-        this._setupVictoryPoints();
+        // (round 118, `game.reset118b`) ON THE COSMETIC STREAM. `loadMap` has already set the objectives up; out of
+        // the editor this second pass rebuilt each ring's geometry (`_vpRingGeo`: four UUID rolls a ring, 28 on seven),
+        // so a battle begun from the editor drew 28 more sim rolls than the same battle loaded in play (the map
+        // picker; every battle after the first in a harness page) and was another battle from step 0. Nothing in it
+        // draws for a decision (`_vp116Fill`, `_autoObjectives`, `_resetBattleClock`: no randomness).
+        if (this.reset118b !== false && Math.random !== vrandom) cosmeticScope(this._setupVictoryPoints, this, []);
+        else this._setupVictoryPoints();
         this._prepareDefence();                 // …and the defender is back in its holes
         this._activateRoutes();                 // the drawn plans take command of their groups
         if (this.editor) this.editor.routeDraft = null;
@@ -70791,6 +70811,13 @@ class Game {
    *  different at a new size — so the field is cleared and the caller (always
    *  `loadMap`) regenerates it immediately afterwards. */
   _resizeWorld() {
+    // (round 118, `game.reset118b`) A FIELD OF ANOTHER SIZE IS BUILT ON THE COSMETIC STREAM. Loading a map whose GRID
+    // differs from the last one's (Village 224 after a 448 map, or the other way) rebuilds the terrain's planes, the
+    // foliage field and the building layer here, and three.js gave each new geometry and material a UUID from
+    // `Math.random` — 72 rolls of the SIM's stream, paid only when the map before was of another size. So the same
+    // seeded battle came out one way after Vierville Draw and another after Villers-Bocage (Village: draw 0 of the
+    // load). Nothing here decides anything; every roll it made was a UUID.
+    if (this.reset118b !== false && Math.random !== vrandom) return cosmeticScope(this._resizeWorld, this, arguments);
     this.select([], false);
     for (const u of this.units.slice()) u.dispose();
     this.units = []; this.squads = []; this.assaults = []; this._cmd = null; this._cmds = null;   // the per-team plan dies with the map
@@ -71293,6 +71320,20 @@ class Game {
     // `game.flora113 = false` before a load keeps the eight kinds alone.
     if (this.foliage && this.foliage.flora && this.flora113 !== false) this.foliage.flora(this.mapDef && this.mapDef.era, this.mapDef && this.mapDef.name);
 
+    // (round 118, `game.reset118b`) THE LINES ARE TURNED BEFORE ANYBODY ASKS WHERE THEY RUN. `Obstacles.lineOf` — the
+    // run of a sandbag row, a low wall, a fence or a trench, for sightlines and rounds (`lineBlocks`), the side a man
+    // takes cover on, crossing and vaulting — reads the piece's MESH, which `_orientHedges` turns along its line only
+    // at a bake, and keeps the first answer (`_line`). Out of the editor `setMode('play')` bakes before the battle; a
+    // map loaded in play is baked by the render loop after the first step, and a headless or parked page never. So the
+    // same battle had its low lines along their run on one path and across it on the other (Vierville Draw seeds 7
+    // and 23 parted at steps 1,585 and 1,620). Turned here, on the cosmetic stream (the variants build geometry), as
+    // the bake turns them; the bake that follows sets the same angles.
+    if (this.reset118b !== false && this.obstacles._orientHedges) {
+      const O = this.obstacles;
+      O._orientHedges();   // cosmeticClass(Obstacles, ['_orientHedges', ...])
+      if (typeof trenchCurve118On === 'function' && trenchCurve118On() && O._curveTrenches118) cosmeticScope(O._curveTrenches118, O, []);
+      for (const o of O.list) o._line = null;
+    }
     // Clear the field and deploy the map's WW2 order of battle
     this.select([], false); this.projectiles.clear(); if (this.mines) { for (const m of this.mines) this.scene.remove(m.mesh); this.mines = []; } this.groundFires = []; this.effects.clear();
     for (const u of this.units.slice()) u.dispose();
@@ -71811,6 +71852,21 @@ class Game {
     // first battle of a fresh page was the only one that started at -99: Village seed 7 diverged from the second at
     // step 100. `_urgNow` (the urgency read before the first doctrine pass) and `_refuseToastT` (a toast's throttle) too.
     if (this.reset118 !== false) { this._boomSmokeT = null; this._urgNow = null; this._refuseToastT = null; }
+    // (round 118, `game.reset118b`) …and two more cadences that were missing from the list below: `victoryT`, the
+    // victory check's half-second beat (set only in the constructor; it gates `battleActive`, so the battle clock, the
+    // urgency read off it and the first-contact score started up to 0.45 s late after another battle), and `_fbCur`,
+    // `_houseFallBack`'s cursor into an army that no longer exists (the `_slices` shape). Zero is a fresh page's value.
+    // AND THE THREAT TABLE, the `_sweptMemo` shape again: `_threatTable(T)` memoises every live enemy's position, reach
+    // and power ON THE CLOCK (`e.t === this.time`), on the Game. Villers-Bocage's last call for team 1 was at its step 3
+    // (t = 0.15000000000000002); Village's scout asks at its own step 3, the same float — and was handed V-B's 27
+    // enemies, and went to another place (Village seed 7 parted at step 4; cleared, it is the fresh page's battle).
+    // `_auraC` (the officers by side, keyed on `_frameN`, which restarts at 0) goes with it, before it collides.
+    // AND THE CREWS STILL WAITING TO BAIL OUT. `_crewOut` queues a knocked-out hull's men (`_bailQ`, "emptied with the
+    // map" said its comment) and only `endDeployment` emptied it: a battle begun any other way had the last battle's
+    // tankers climb out at the old hull's coordinates on the new field (Villers-Bocage seed 11 after seed 7: a crewman
+    // of the last battle at step 6, 189.7, -38.2). `_bounds`, the men waiting for `_runBounds` to choose their leg, is
+    // the same: a queue of the last battle's men.
+    if (this.reset118b !== false) { this.victoryT = 0; this._fbCur = 0; this._threatTables = null; this._auraC = null; this._bailQ = null; this._bounds = null; }
     // EVERY SUBSYSTEM CADENCE GOES BACK TO THE START LINE.
     //
     // A dozen countdowns live on the Game and gate a subsystem each — the
@@ -73609,6 +73665,10 @@ Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 1
 // (round 118) CARRIED STATE: what a battle builds once per PAGE must not move the next battle's sim stream. ON: the
 // felled tree's log kit and still crown are built on the cosmetic stream; `Obstacles.clear` drops the last map's falls.
 Game.prototype.reset118 = true;       // ON: Village seed 7 repeats over six battles in a page (handoff, round 118 carried state)
+// (round 118, second pass) A BATTLE IS THE SAME BATTLE WHATEVER WAS PLAYED BEFORE IT IN THE PAGE: a field of another size
+// is built on the cosmetic stream, edit -> play builds the objectives' rings there too, the first step of a page's first
+// battle no longer reads `undefined === undefined` as "under an officer", and two cadences start the battle at zero.
+Game.prototype.reset118b = true;      // ON: Village, Vierville Draw, Villers-Bocage: battle N = a fresh page's battle 1 (handoff, carried state second pass)
 Game.prototype.destroy118 = false;
 // (round 118, second effects pass) the pool evicts by visibility, a burst's flash stays local to a first-person eye,
 // tracers are instanced streaks by the belt mix
@@ -73619,6 +73679,13 @@ Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and
 // get back, near the eye and where the sun does not reach, the sky the Lambert's sun-shadow mask took from them
 // (assets/canopy.js `C.near`; OFF is the old drawing exactly, the branch is not taken)
 Game.prototype.fpvNear118 = true;     // ON: against the sun a fence 16->41/255, a hedge 33->70 (r118near s7); playing camera = null
+// (round 118, first-person visuals) near the eye: the shade on a bright field (Canopy.nearField), bark at arm's length
+// (Canopy.nearBark), the ground's textures no finer than a mip (GroundSplat uGFloor), the lift under a covered sky
+// (Canopy.coverGate). All cosmetic; OFF is the old drawing.
+Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of px under 30/255, the pine's crown 66% -> 53% (r118vis s4)
+Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
+Game.prototype.fpvGround118 = false;
+Game.prototype.fpvFog118 = true;     // ON: Village fog, the posts in shade 109.5 -> ~106 (clear sunlit 105); against the sun 29 -> ~59
 const TRACER_EVERY = { axis: 4, allied: 5, soviet: 5, british: 4 };   // MG42/34 one in 3-5, Browning one in 5, Bren/Vickers one in 4
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
 cosmeticClass(Game, ['_prewarm']);

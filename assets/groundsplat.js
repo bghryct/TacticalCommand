@@ -41,6 +41,9 @@
               'grass3', 'moss', 'mud', 'bog', 'track', 'tarmac', 'needles', 'plough'];
   G.enabled = true;
   G.ready = false;
+  let FLOOR_V = null;
+  G.floor = 0.5;
+  G.soft = 0;
   const U = {
     uGAlb: { value: null },
     uGNh: { value: null },
@@ -64,6 +67,20 @@
     // world unit; `uGTile`: 0 plain tiling, 1 the two offsets, 2 hexagons.
     uGHex: { value: 3.3 },
     uGTile: { value: 2 },
+    // (round 118, `game.fpvGround118`) THE GROUND AT THE EYE. A tile of fine detail — straw, blades, grit —
+    // seen at its full resolution a metre or two away is pixel-scale contrast with nothing bigger in it,
+    // and the tone curve's toe multiplies it on dark ground: Hedgerow Hell standing measured 0.39 of the
+    // mean in single-pixel deviation (Village's grass 0.09). Near the eye no fetch is finer than mip
+    // `floor` along the footprint's MINOR axis: the strands soften, the clumps stay (r118vis s8, floor 0.5:
+    // HH stand 0.39 -> 0.24 and prone 0.36 -> 0.13 with the 12-pixel structure kept, Village's crop field
+    // 0.15 -> 0.05). Beyond a pixel footprint of 0.02 units — every pixel of the playing camera — it is not
+    // evaluated. x the floor (0 off), y the texture's size, z `soft`: the hexagon blend's height sharpening
+    // let go where the floor holds (0 by default: at floor 0.75 it was needed, and darkened more).
+    // DEFAULT OFF, AND WHY: dark ground near the eye reads 10-18% darker (mip 0 is brighter than its own
+    // mean: the taller sample wins the blend, and a low sun's micro relight lifts rough ground), and with
+    // the grain gone the terrain's per-vertex triangles show faintly (they are there with it off, masked).
+    uGFloor: { get value() { const v = FLOOR_V || (FLOOR_V = new THREE.Vector4()); const g = root.game, T = root.GROUND_TEX;
+      return g && g.fpvGround118 ? v.set(G.floor, (T && T.size) || 512, G.soft, 0) : v.set(0, 512, 0, 0); } },
     // (round 113) THE LIE OF THE LAND. Every surface was one colour for as far
     // as it ran: the cell colour carries the type and the map's patch noise,
     // and from the playing camera a grass tile (~1.8 m) is a few pixels, so its
@@ -85,6 +102,11 @@
     // giant, so a pattern of things (road, setts, gravel, rubble) takes none
     // and the organic ones (grass, crops, litter, snow) all of it
     uGFarL: { value: new Float32Array(N) },
+    // (round 118, `fpvGround118`) each surface's first mip against its full size, in linear light: GL builds
+    // the chain by averaging the ENCODED bytes, so a straw-on-dark-soil tile one mip down is up to a third
+    // darker than its own mean (Hedgerow Hell at the eye, floored: 49 -> 31). Where the floor lifts a
+    // pixel's mip, its albedo is scaled back by the ratio it lifted it through.
+    uGMip1: { value: new Float32Array(N).fill(1) },
     uGMacLo: { value: [] },
     uGMacHi: { value: [] },
   };
@@ -180,6 +202,18 @@
       for (let p = 0; p < a.length; p += 4) { r += lut[a[p]]; g += lut[a[p + 1]]; bl += lut[a[p + 2]]; }
       const n = a.length / 4;
       U.uGMean.value[i].set(r / n, g / n, bl / n);
+      // (round 118) the first mip as GL will build it (2x2 averages of the encoded bytes), linearised
+      {
+        let m1 = 0, n1 = 0;
+        const L4 = G._lut4 || (G._lut4 = Float32Array.from({ length: 1021 }, (_, q) => s2l(q / 1020)));
+        const Lw = (R_, G_, B_) => 0.2126 * L4[R_] + 0.7152 * L4[G_] + 0.0722 * L4[B_];
+        for (let y = 0; y + 1 < S; y += 2) for (let x = 0; x + 1 < S; x += 2) {
+          const p0 = (y * S + x) * 4, p1 = p0 + 4, p2 = p0 + S * 4, p3 = p2 + 4;
+          m1 += Lw(a[p0] + a[p1] + a[p2] + a[p3], a[p0 + 1] + a[p1 + 1] + a[p2 + 1] + a[p3 + 1], a[p0 + 2] + a[p1 + 2] + a[p2 + 2] + a[p3 + 2]); n1++;
+        }
+        const L0 = 0.2126 * r / n + 0.7152 * g / n + 0.0722 * bl / n;
+        U.uGMip1.value[i] = L0 > 1e-6 ? Math.min(1, (m1 / n1) / L0) : 1;
+      }
     }))).then(() => {
       const mk = (data, srgb) => {
         const t = new THREE.DataTexture2DArray(data, S, S, N);
@@ -213,9 +247,10 @@ vGNrm = normalize(mat3(modelMatrix) * objectNormal);
   const F_PARS = `
 precision highp sampler2DArray;
 uniform sampler2DArray uGAlb; uniform sampler2DArray uGNh;
-uniform float uGScale[${N}]; uniform vec3 uGMean[${N}];
+uniform float uGScale[${N}]; uniform vec3 uGMean[${N}]; uniform float uGMip1[${N}];
 uniform vec3 uGSun; uniform float uGMicro; uniform float uGDetail; uniform float uGAO; uniform float uGNoTile;
 uniform float uGHex;
+uniform vec4 uGFloor;
 uniform vec3 uGMacro; uniform float uGMacAmt; uniform vec3 uGMacLo[${N}]; uniform vec3 uGMacHi[${N}];
 uniform float uGFar; uniform float uGFarAmt; uniform float uGFarL[${N}];
 varying vec4 vGSplatA; varying vec4 vGSplatB; varying vec4 vGSplatC; varying vec4 vGSplatD; varying vec4 vGSplatE;
@@ -229,6 +264,7 @@ vec2 gN2 = vec2(0.0); float gH = 0.5; float gNear = 0.0;
 // no two stretches of ground are the same stretch (after Quilez, "texture
 // repetition"). One noise per pixel serves every layer; its scale is metres.
 float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+vec3 gLin(vec3 c) { return c * (c * (c * 0.305306011 + 0.682171111) + 0.012522878); }
 vec2 gHash2(vec2 p) { return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
 float gVNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
@@ -256,6 +292,8 @@ float gVNoise(vec2 p) {
   // close in and 0 by the time a pixel spans ~5 texels of the finest layer.
   float gPix = length(fwidth(vGPos.xz));
   gNear = clamp(1.6 - gPix * 45.0, 0.0, 1.0);
+  bool gFl = uGFloor.x > 0.0 && gPix < 0.02;
+  float gSoft = gFl ? (1.0 - smoothstep(0.004, 0.012, gPix)) * uGFloor.z : 0.0;
   // (round 113) how far into the range where the tile is only its mean
   float gFarW = clamp(gPix * 45.0 - 1.2, 0.0, 1.0) * uGFarAmt;
   // (round 108) THE TILING IS COMPILED IN, not chosen per pixel: with all
@@ -285,6 +323,9 @@ float gVNoise(vec2 p) {
     if (w > 0.01) {
       vec2 uv = vGPos.xz * uGScale[i];
       vec2 ddx = dFdx(uv), ddy = dFdy(uv);
+      float gCo = 1.0;
+      if (gFl) { float gLm = log2(max(min(length(ddx), length(ddy)) * uGFloor.y, 1e-6)); float gKf = exp2(max(0.0, uGFloor.x - gLm)); ddx *= gKf; ddy *= gKf;
+        float gL0 = clamp(gLm, 0.0, 1.0); gCo = mix(1.0, uGMip1[i], gL0) / mix(1.0, uGMip1[i], max(gL0, min(uGFloor.x, 1.0))); }
       float li = float(i);
 #if G_TILE == 2
       // three corners, each its own stretch of the texture; the taller
@@ -293,13 +334,16 @@ float gVNoise(vec2 p) {
       // weights as gW^3 (a + 0.15)^4 normalised, without three samples and
       // three coordinates held at once (round 108).
       vec4 c = textureGrad(uGAlb, vec3(uv + gO1, li), ddx, ddy);
-      float q = c.a + 0.15; q *= q; float h1 = gW3.x * q * q;
+      if (gFl) c.rgb = gLin(c.rgb);
+      float q = c.a + 0.15; q *= q; float h1 = gW3.x * q * q; h1 = mix(h1, gW.x, gSoft);
       vec4 at = c * h1;
       c = textureGrad(uGAlb, vec3(uv + gO2, li), ddx, ddy);
-      q = c.a + 0.15; q *= q; float h2 = gW3.y * q * q;
+      if (gFl) c.rgb = gLin(c.rgb);
+      q = c.a + 0.15; q *= q; float h2 = gW3.y * q * q; h2 = mix(h2, gW.y, gSoft);
       at += c * h2;
       c = textureGrad(uGAlb, vec3(uv + gO3, li), ddx, ddy);
-      q = c.a + 0.15; q *= q; float h3 = gW3.z * q * q;
+      if (gFl) c.rgb = gLin(c.rgb);
+      q = c.a + 0.15; q *= q; float h3 = gW3.z * q * q; h3 = mix(h3, gW.z, gSoft);
       at += c * h3;
       float hI = 1.0 / max(1e-5, h1 + h2 + h3);
       at *= hI;
@@ -323,7 +367,10 @@ float gVNoise(vec2 p) {
       float x = 0.15 + at.a, x2 = x * x;
       float b = w * x2 * x2 * x;
       vec3 a = at.rgb * (at.rgb * (at.rgb * 0.305306011 + 0.682171111) + 0.012522878);   // sRGB -> linear, fitted
-      ga += b * a / uGMean[i];
+#if G_TILE == 2
+      if (gFl) a = at.rgb;   // (round 118) the three samples were linearised before the blend
+#endif
+      ga += b * a / uGMean[i] * gCo;
       gMac += b * mix(uGMacLo[i], uGMacHi[i], gMv);
       if (gNear > 0.0) {
 #if G_TILE == 2

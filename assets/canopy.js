@@ -455,7 +455,7 @@
     var g = root.game; if (!g || !g.fpvNear118) return 0;
     var s = g.sun ? g.sun.intensity : 0, a = (g.ambientLight ? g.ambientLight.intensity : 0) + (g.hemiLight ? g.hemiLight.intensity : 0);
     var t = Math.min(1, Math.max(0, (s / Math.max(a, 1e-3) - 1.5) / 2));
-    return t * t * (3 - 2 * t);
+    return t * t * (3 - 2 * t) * C.coverGate(g);
   } };
   // x3.6 is the buildings' own sky; leaves x5 (a crown against the sun read 11/255,
   // x3.6 47, x5-6 a hedge), the verge's blades half way (x6 made them glow)
@@ -517,6 +517,7 @@
       sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.uWind; sh.uniforms.uHgSway = { value: o.sway };
       sh.uniforms.uHgSnow = C.snow; sh.uniforms.uHgStoneGamma = C.stoneGamma;
       sh.uniforms.uHgNear = C.near; sh.uniforms.uHgNearSky = C.nearSky; sh.uniforms.uHgNearSun = C.nearSun; sh.uniforms.uHgNearCap = C.nearCap;
+      sh.uniforms.uHgField = C.nearField; sh.uniforms.uHgBark = C.nearBark;
       sh.vertexShader = rep(sh.vertexShader, '#include <common>',
         '#include <common>\n' + HEAD + 'attribute vec3 hedgeRim;\nattribute vec2 hedgeUP;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;');
       // `vHgPH`: one number per PROP, from where it stands — a wood is a range of
@@ -548,7 +549,7 @@
         '#include <project_vertex>\nvHgVP = -mvPosition.xyz;');
 
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
-        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nuniform float uHgNear;\nuniform vec4 uHgNearSky;\nuniform float uHgNearSun;\nuniform float uHgNearCap;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
+        '#include <common>\nuniform float uHgSnow;\nuniform float uHgStoneGamma;\nuniform float uHgNear;\nuniform vec4 uHgNearSky;\nuniform float uHgNearSun;\nuniform float uHgNearCap;\nuniform vec4 uHgField;\nuniform vec4 uHgBark;\nvarying vec3 vHgW;\nvarying vec3 vHgVN;\nvarying vec3 vHgVP;\nvarying vec4 vHgK;\nvarying float vHgU;\nvarying float vHgPH;\n' + glslNoise() +
         '\nfloat hgBlade(float u, float n, float o){ float b = u * n + o; float h = 0.42 + 0.58 * fract(sin(floor(b) * 12.9898 + o) * 43758.5453); return h * pow(1.0 - abs(fract(b) - 0.5) * 2.0, 0.55); }');
       sh.fragmentShader = rep(sh.fragmentShader, '#include <clipping_planes_fragment>', [
         '#include <clipping_planes_fragment>',
@@ -600,7 +601,13 @@
         // …which on a face turned to the sky (a cart's bed, the top of a
         // crate) is not grain but blotches: it fades there
         '    float hgGA = 1.0 - 0.75 * abs(vHgK.w);',
-        '    diffuseColor.rgb *= (1.0 + (hgG1 - 0.5) * 0.55 * hgGA) * (1.0 - smoothstep(0.46, 0.74, hgG2) * 0.5 * hgFine * hgGA);',
+        // (round 118, `C.nearBark`) …tuned to read at range: at arm's length the plates were dark smears a
+        // third of a post wide. Near the eye they lose contrast, the fissures some of theirs, and a fine grain
+        // comes in. Off (w 0) every factor is exactly 1.
+        '    float hgBk = uHgBark.w > 0.0 ? 1.0 - smoothstep(uHgBark.z, uHgBark.w, hgD) : 0.0;',
+        '    float hgG3 = hgBk > 0.0 ? cnNoise(vec3(vHgW.x * 61.0, vHgW.y * 5.5, vHgW.z * 61.0) + 23.7) : 0.5;',
+        '    diffuseColor.rgb *= (1.0 + (hgG1 - 0.5) * 0.55 * mix(1.0, uHgBark.x, hgBk) * hgGA) * (1.0 - smoothstep(0.46, 0.74, hgG2) * 0.5 * mix(1.0, uHgBark.y, hgBk) * hgFine * hgGA)'
+          + ' * (1.0 + (hgG3 - 0.5) * 0.30 * hgBk * hgGA);',
         '  } else if (vHgK.x > 1.5) {',
         '    diffuseColor.rgb *= hgTone;',
         '  } else if (vHgK.x > 0.5) {',
@@ -654,6 +661,13 @@
           '\t\tfloat hgInE = dot(reflectedLight.indirectDiffuse, hgLw) / max(dot(diffuseColor.rgb, hgLw), 1e-5);',
           '\t\tfloat hgMul = 1.0 + (hgSk - 1.0) * hgShd * hgNr * uHgNear;',
           '\t\treflectedLight.indirectDiffuse *= min(hgMul, max(1.0, uHgNearCap * uHgNearSun / max(hgInE, 1e-5)));',
+          // (round 118, `C.nearField`) on a bright field: the eye's adaptation to the shade it looks into (w)
+          // and the field's bounce on a face turned to the ground (rgb). w 0 when off: not taken.
+          '\t\tif (uHgField.w > 0.0) {',
+          '\t\t\tfloat hgNS = hgShd * hgNr * uHgNear;',
+          '\t\t\treflectedLight.indirectDiffuse += diffuseColor.rgb * uHgField.rgb * clamp(0.5 - 0.5 * vHgK.w, 0.0, 1.0) * hgNS;',
+          '\t\t\treflectedLight.indirectDiffuse *= 1.0 + (uHgField.w - 1.0) * hgNS;',
+          '\t\t}',
           '\t}',
         ].join('\n'));
       }
@@ -690,6 +704,56 @@
   };
 
   /** Apply to an array (the palette variants) and return it, for chaining. */
+  /** (round 118, first-person visuals, `game.fpvField118`) THE FIELD'S OWN LIGHT, NEAR THE EYE.
+   *  On Winter Crossroads the ferns under a pine and the pine's crown a metre over the eye stayed black
+   *  with `C.near` on (r118vis s3: 40% of the fern px under 30/255 standing, 62% prone; the crown 68%).
+   *  The camera stops down for a bright field (the game's `albedoStop`: x0.61 on snow) and the lifted
+   *  shade lands in the tone curve's toe; and a face turned to the ground gets the hemisphere's ground
+   *  half, about a sixth of what sunlit snow throws back. So, near the eye and in shade (the same weights
+   *  as `C.near`): w = 1 / albedoStop — the eye adapting to the shade it looks into, 1.64 on snow, 1 on
+   *  grass — and rgb = the field's colour x the sun on the ground x `fieldK`, weighted in the shader by
+   *  how far the face turns to the ground (0 up, 0.5 upright, 1 straight down). w 0 when off.
+   *  The bounce is taken at half on a meadow and in full on snow (the field's key, 0.24 -> 0.5): on grass
+   *  `C.near`'s own lift already stands in for it, and the whole of it made Village's posts in shade paler
+   *  than in sun (r118vis s5: 100.7 -> 112.9). */
+  var FIELD_V = null, BARK_V = null;
+  C.fieldK = { value: 1.0 };
+  C.nearField = { get value() {
+    var v = FIELD_V || (FIELD_V = new THREE.Vector4());
+    var g = root.game;
+    if (!g || !g.fpvField118 || !g.fpvNear118 || !g.sun) return v.set(0, 0, 0, 0);
+    var REF = typeof GROUND_KEY_REF === 'number' ? GROUND_KEY_REF : 0.24, POW = typeof GROUND_KEY_POW === 'number' ? GROUND_KEY_POW : 0.65;
+    var t = g.terrain, gk = (t && t.groundKey) || REF;
+    var stop = gk > REF ? Math.max(0.5, Math.pow(REF / gk, POW)) : 1;
+    var s = g.sun, sp = s.position, tp = s.target ? s.target.position : { x: 0, y: 0, z: 0 };
+    var dx = sp.x - tp.x, dy = sp.y - tp.y, dz = sp.z - tp.z;
+    var kf = C.fieldK.value * (0.5 + 0.5 * Math.min(1, Math.max(0, (gk - REF) / (0.5 - REF))));
+    var e = s.intensity * Math.max(0, dy / (Math.sqrt(dx * dx + dy * dy + dz * dz) || 1)) * kf;
+    var gc = t && t.groundColor;
+    if (!gc) return v.set(0, 0, 0, 1 / stop);
+    return v.set(gc.r * e * s.color.r, gc.g * e * s.color.g, gc.b * e * s.color.b, 1 / stop);
+  } };
+  /** (round 118, `game.fpvBark118`) BARK AND WOOD AT ARM'S LENGTH: near the eye the grain's broad plates
+   *  keep x of their contrast and the fissures y, a fine grain comes in, faded out between z and w world
+   *  units (the playing camera, 82 away, never sees it). w 0 when off. */
+  C.nearBark = { get value() {
+    var v = BARK_V || (BARK_V = new THREE.Vector4());
+    var g = root.game;
+    return g && g.fpvBark118 ? v.set(0.35, 0.6, 6.0, 14.0) : v.set(0, 0, 0, 0);
+  } };
+  /** (round 118, `game.fpvFog118`) THE LIFT KNOWS THE SKY. `C.near` weighs the sun against the sky's
+   *  intensities, and the game's fog keeps its sun (1.95) and its hard shadows, so a face in shade in fog
+   *  was lifted like one under a clear sky and the posts with the sun behind read paler than in sun. Under
+   *  a covered sky (the sky's own `cover`: clear 0.34, overcast 0.86, fog 0.95) the lift is cut by up to
+   *  `coverCut`. 1 when off. */
+  C.coverCut = { value: 0.5 };
+  C.coverGate = function (g) {
+    if (!g || !g.fpvFog118) return 1;
+    var d = g.sky && g.sky.def, c = d && typeof d.cover === 'number' ? d.cover : 0.34;
+    var u = Math.min(1, Math.max(0, (c - 0.6) / 0.35));
+    return 1 - C.coverCut.value * u * u * (3 - 2 * u);
+  };
+
   C.all = function (arr, opts) {
     for (var i = 0; i < arr.length; i++) C.material(arr[i], opts);
     return arr;
