@@ -286,10 +286,18 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
   }
 
   // ---------------------------------------------------------------- the build
-  function build(obs) {
-    if (S.group) { if (S.group.parent) S.group.parent.remove(S.group); S.group.traverse(n => { if (n.isMesh && n.geometry) n.geometry.dispose(); }); S.group = null; }
+  // (round 118, the editor-kit agent) `opts.editor`: THE SAME BUILD FOR THE EDITOR (assets/editorkit118.js,
+  // `game.editorKit118`). Nothing is added to the scene, `S.group` and `S.hidden` are not touched (the editor layer
+  // owns its group and the pieces it hides). `opts.sigs` (an object) receives each sector's signature: the runs that
+  // lay a piece in it, with their cells, ends, revetment, front, gaps and a lone cell's turn, so the editor can tell
+  // which sectors an edit changed. `opts.plan` stops there; `opts.only` (a Set of sector keys) lays only those
+  // sectors' pieces. Returns { st, sigs, sect: Map(key -> Group) }. A lone cell is turned as `_orientHedges` turns it
+  // at Play (its hand-set angle, else along X), so the editor draws the bay that the battle will.
+  function build(obs, opts) {
+    const ed = !!(opts && opts.editor), only = ed && opts.only ? opts.only : null, sigs = ed ? (opts.sigs || {}) : null, plan = ed && !!opts.plan;
+    if (!ed && S.group) { if (S.group.parent) S.group.parent.remove(S.group); S.group.traverse(n => { if (n.isMesh && n.geometry) n.geometry.dispose(); }); S.group = null; }
     const g = window.game, K = window.TRENCHKIT118;
-    if (!on(g) || !obs || !obs.list || !S.hidden.length) return null;
+    if (!on(g) || !obs || !obs.list || (!ed && !S.hidden.length)) return null;
     const t0 = performance.now(), U = 1 / METERS_PER_UNIT, terr = obs.terrain;
     const H = (x, z) => terr && terr.heightAt ? terr.heightAt(x, z) : 0;
     const R = runs(obs);
@@ -298,10 +306,13 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     const bags = K.bag, bagN = bags.ao.length;
     // sector buckets
     const B = new Map();
-    const bucket = (x, z) => {
+    const bkey = (x, z) => {
       const sx = Math.max(0, Math.min(SECT - 1, Math.floor((x + HALF) / (WORLD / SECT))));
       const sz = Math.max(0, Math.min(SECT - 1, Math.floor((z + HALF) / (WORLD / SECT))));
-      const key = sz * SECT + sx;
+      return sz * SECT + sx;
+    };
+    const bucket = (x, z) => {
+      const key = bkey(x, z);
       let b = B.get(key); if (!b) { b = { p: [], n: [], uv: [], c: [], m: [], f: [] }; b.feet = { p: [], n: [], uv: [], c: [], f: [] }; b.e = { p: [], n: [] }; B.set(key, b); }
       return b;
     };
@@ -340,6 +351,20 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       return [Math.min(hiT, Math.max(0.3, a[i] / REF[0])), Math.min(hiT, Math.max(0.3, a[i + 1] / REF[1])), Math.min(hiT, Math.max(0.3, a[i + 2] / REF[2]))];
     } : null;
     const fr = { x: 0, z: 0, tx: 0, tz: 0, nx: 0, nz: 0 };
+    const groundSig = ch => {
+      const TH = terr && terr.h, TT = terr && terr.type, TS = terr && terr.scorch;
+      if (!TH) return '';
+      let a = 0, b = 0, c = 0; const seen = new Set();
+      for (const k of ch) {
+        const x0 = k % GRID, z0 = (k / GRID) | 0;
+        for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+          const x = x0 + dx, z = z0 + dz; if (x < 0 || z < 0 || x >= GRID || z >= GRID) continue;
+          const i = z * GRID + x; if (seen.has(i)) continue; seen.add(i);
+          const w = (i % 251) + 1; a += TH[i] * w; b += (TT ? TT[i] : 0) * w; c += (TS ? TS[i] : 0) * w;
+        }
+      }
+      return a.toFixed(4) + ',' + b + ',' + c.toFixed(4);
+    };
     // emit one piece through a mapping fn(x, y, z) -> [wx, wy, wz] and nfn(nx, ny, nz) -> world normal
     // (`flip`: the mapping is a reflection, so each triangle is wound the other way)
     const tmpP = [0, 0, 0];
@@ -430,10 +455,11 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       for (const k of chain) { const o = R.cell.get(k); const rv = REVS.includes(o.rev) ? o.rev : revDef; cnt[rv]++; }
       const rev = REVS.reduce((a, b) => (cnt[b] > cnt[a] ? b : a), REVS[0]);
       const bay = K.pieces['bay_' + rev], endp = K.pieces['end_' + rev];
-      let P, capA, capB;
+      let P, capA, capB, P0th = null;
       if (chain.length === 1) {
         // a lone cell: a 6 m bay along the piece's own line, bowed toward its front, shut at both ends
-        const th = o0.mesh.rotation.y, ax = Math.cos(th), az = -Math.sin(th), [cx, cz] = R.XZ(chain[0]);
+        const th = ed ? (o0.rot != null ? o0.rot : (o0.mesh.userData.hedgeFlip ? Math.PI : 0)) : o0.mesh.rotation.y, ax = Math.cos(th), az = -Math.sin(th), [cx, cz] = R.XZ(chain[0]);
+        if (ed) P0th = th;
         let nx = az, nz = -ax; if (nx * -cx + nz * -cz < 0) { nx = -nx; nz = -nz; }
         const h = TILE * 0.5, bow = 0.35 * U;
         P = [[cx - ax * h, cz - az * h], [cx + nx * bow, cz + nz * bow], [cx + ax * h, cz + az * h]];
@@ -451,7 +477,7 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       }
       const C = curve(P, 0.25 * U);
       if (C.len < 0.5 * U) continue;
-      C.chain = chain; C.capA = capA; C.capB = capB; C.rev = rev; C.bay = bay; C.endp = endp;
+      C.chain = chain; C.capA = capA; C.capB = capB; C.rev = rev; C.bay = bay; C.endp = endp; C.th = P0th;
       // the front faces the map's middle
       let snx = 0, snz = 0, mx = 0, mz = 0;
       for (let i = 0; i < C.X.length; i += 4) { frame(C, C.S[i], fr); snx += fr.nx; snz += fr.nz; mx += fr.x; mz += fr.z; }
@@ -475,6 +501,10 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     }
     for (const C of (R.runsC || [])) {
       st.runs++;
+      // …and the ground the run is laid on (heights, surfaces, scorch within two cells of its cells, and the map's palette):
+      // an undo, a sculpt or a crater beside it changes the berm's heights and the field's colour it takes
+      const sigC = ed ? C.chain.join(',') + '|' + C.capA + C.capB + C.rev + C.fs + '|' + C.gaps.map(q => q.map(v => +v.toFixed(3)).join(':')).join(';') + (C.th != null ? '|' + C.th.toFixed(4) : '') + '|' + gpal + '|' + groundSig(C.chain) : null;
+      const skipSect = kk => { if (!ed) return false; const a = sigs[kk] || (sigs[kk] = []); if (a[a.length - 1] !== sigC) a.push(sigC); return plan || (only && !only.has(kk)); };
       const fs = C.fs, trimA = C.capA === 'branch' ? 0.45 * U : 0, trimB = C.capB === 'branch' ? 0.45 * U : 0;
       const sA = trimA, sB = C.len - trimB, Leff = sB - sA;
       if (Leff <= 0.2 * U) continue;
@@ -483,6 +513,7 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       for (let i = 0; i < n; i++) {
         const s0 = sA + i * len;
         frame(C, s0 + len * 0.5, fr);
+        if (skipSect(bkey(fr.x, fr.z))) continue;
         const b = bucket(fr.x, fr.z);
         const m = bent(C, s0, k, fs);
         const sAt = x => s0 + x * U * k;
@@ -501,6 +532,7 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       for (const [cap, s, dir] of [[C.capA, sA, 1], [C.capB, sB, -1]]) {
         if (cap !== 'cap') continue;
         frame(C, s, fr);
+        if (skipSect(bkey(fr.x, fr.z))) continue;
         const ax = fr.tx * dir, az = fr.tz * dir, sx = fr.nx * fs, sz = fr.nz * fs;
         const m = rigid(fr.x, fr.z, ax, az, sx, sz), b = bucket(fr.x, fr.z);
         emit(C.endp, m.mp, m.mn, m.flip, null, b, 0);
@@ -508,15 +540,19 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
         st.ends++;
       }
     }
+    if (ed) for (const kk in sigs) if (Array.isArray(sigs[kk])) sigs[kk] = sigs[kk].sort().join('\n');
+    if (plan) return { st, sigs, sect: new Map() };
     // one mesh a sector
     const T = THREE, grp = new T.Group(); grp.name = 'trenchKit118';
+    const sect = new Map(), tgt = bk => { if (!ed) return grp; let q = sect.get(bk); if (!q) { q = new T.Group(); q.name = 'trenchKitEd118'; q.matrixAutoUpdate = false; sect.set(bk, q); } return q; };
     const mat = material();
     // the spoil in the colour of the map's commonest ground (turf: as drawn), divided by the sheet's spoil luminance (~0.23)
     const GROUND = { turf: [1, 1, 1, 0], sand: [0.52, 0.45, 0.31, 0.9], stone: [0.36, 0.35, 0.33, 0.7], ash: [0.20, 0.19, 0.18, 0.8], snow: [0.56, 0.58, 0.62, 0.85] };
     const pal = obs._spoilPal ? obs._spoilPal() : 'turf', gk = GROUND[pal] || GROUND.turf;
     S.u.uSpoilTK.value.setRGB(gk[0] / 0.23, gk[1] / 0.23, gk[2] / 0.23); S.u.uSpoilMixTK.value = gk[3]; st.ground = pal;
-    for (const [, b] of B) {
+    for (const [bk, b] of B) {
       if (!b.p.length) continue;
+      const grp = tgt(bk);
       const geo = new T.BufferGeometry();
       geo.setAttribute('position', new T.Float32BufferAttribute(b.p, 3));
       geo.setAttribute('normal', new T.Float32BufferAttribute(b.n, 3));
@@ -551,6 +587,7 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
         }
       }
     }
+    if (ed) { st.ms = +(performance.now() - t0).toFixed(1); S.edStats = st; return { st, sigs, sect }; }
     // the ground draws first, so the hole can be cut in its depth before anything else is drawn
     const tm = obs.terrain && obs.terrain.mesh;
     if (tm && st.holes) { if (S.tro == null) S.tro = tm.renderOrder; tm.renderOrder = -2; S.terrainMesh = tm; }
@@ -579,4 +616,6 @@ float nTK(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     _runs: runs, _curve: curve, ready: C(() => { material(); return S.ready; }),
     // (round 118, bunkers) the kit's material and its ground uniforms, shared by assets/bunker118.js's models
     material: C(material), uniforms: () => S.u, groundMul };
+  // (round 118) for the editor's layer (assets/editorkit118.js), which builds through `build(obs, { editor: true, ... })`
+  Object.assign(window.TrenchKit118, { SECT, edStats: () => S.edStats, isTrench, loaded: () => !!S.loaded });
 })();

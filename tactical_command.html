@@ -1576,6 +1576,7 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/bunker118.js"></script>
 <script src="assets/bunkermaps118.js"></script>
 <script src="assets/covertab118.js"></script>
+<script src="assets/editorkit118.js"></script>
 <script>
 'use strict';
 /* ============================================================================
@@ -73862,6 +73863,7 @@ function boot() {
   if (typeof ui117Install === 'function') ui117Install();   // (117) game.ui117
   game.loadMap(defaultMapIdx());   // the opening field — see DEFAULT_MAP_NAME
   game.setMode('edit');
+  if (typeof editorKit118Install === 'function') editorKit118Install();   // (118) game.editorKit118, game.craterTool118 (assets/editorkit118.js): before the Cover tab lists its tools
   if (typeof coverTab118Install === 'function') coverTab118Install();   // (118) game.coverTab118: the editor's Cover tab (assets/covertab118.js)
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

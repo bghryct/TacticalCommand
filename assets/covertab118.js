@@ -59,7 +59,7 @@
     _bunk: 'Click to build; its embrasure faces the Angle (R turns it).',
   };
   var SECTIONS = [
-    ['Dig in', ['trench', 'trenchseg', 'foxhole', 'gunpit', 'emplacement']],
+    ['Dig in', ['trench', 'trenchseg', 'foxhole', 'gunpit', 'emplacement', '_crater']],
     ['Walls', ['sandbags', 'sandbagwall', 'lowwall', 'stonewall', 'brickwall', 'wall', 'logwall', 'concrete', 'gabion', 'barricade']],
     ['Hedges & plants', ['hedge', 'bush', 'scrub', '_fol']],
     ['Obstacles', ['wire', 'hedgehog', 'dragonteeth']],
@@ -118,6 +118,16 @@
           Object.keys(B.KINDS).forEach(function (bk) {
             list.push({ tool: 'bunker118:' + bk, key: bk, label: B.KINDS[bk].name, how: HOW._bunk, kind: 'bunk',
               gives: 'A one-cell bunker: men behind its embrasure show a slit of themselves', badge: '', swatch: bk === 'dugout' ? '#5a4530' : '#8e8b83' });
+          });
+          return;
+        }
+        if (k === '_crater') {   // (round 118, the editor-kit agent) the crater a shell digs: assets/editorkit118.js, `game.craterTool118`
+          var EKc = window.EditorKit118;
+          if (!EKc || !EKc.craterOn || !EKc.CRATERS) return;
+          Object.keys(EKc.CRATERS).forEach(function (ck) {
+            var cd = EKc.CRATERS[ck];
+            list.push({ tool: 'crater118:' + ck, key: 'crater_' + ck, label: cd.name, how: cd.how, kind: 'crater', gives: cd.gives, badge: '',
+              swatch: ck === 'bomb' ? '#3b2f22' : '#5f4d37' });
           });
           return;
         }
@@ -491,7 +501,7 @@
     var h = el('div', '', '<b>Trenches are in the new Cover tab</b> (top row, beside Props): every trench, foxhole, wall, hedge, plant and wire, with what each gives, and Show cover to tint the ground with it. <u>Open it</u><i title="Close">✕</i>');
     h.id = 'ct118Hint';
     var tabs = panel.querySelector('.ed-tabs'), pr = panel.getBoundingClientRect(), tr = CT.tab.getBoundingClientRect(), br = tabs.getBoundingClientRect();
-    h.style.top = (br.bottom - pr.top + 7) + 'px';
+    h.style.top = (tr.bottom - pr.top + 7) + 'px';   // (round 118) from the Cover tab's own row, not under the grid (it pointed at Map)
     h.style.setProperty('--ct-arrow', Math.max(8, tr.left - pr.left + tr.width / 2 - 13) + 'px');
     if (getComputedStyle(panel).position === 'static') panel.style.position = 'relative';
     panel.appendChild(h);
