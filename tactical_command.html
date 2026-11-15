@@ -1032,7 +1032,7 @@ body.fpv #tacMap { display: none !important; }
 <div id="controlsHint">
   <kbd>WASD</kbd> Pan <kbd>Q/E</kbd> Rotate <kbd>MMB</kbd> Orbit <kbd>Scroll</kbd> Zoom<br>
   <kbd>LMB</kbd> Select / Drag-box <kbd>RMB</kbd> Orders <kbd>Ctrl+Click</kbd> Attack ground<br>
-  <kbd>Space</kbd> Pause <kbd>Tab</kbd> Edit <kbd>Shift</kbd> Queue legs <kbd>1–9</kbd> Formations <kbd>0</kbd> Spacing <kbd>K</kbd> Smoke <kbd>O</kbd> Order lines <kbd>?</kbd> Help
+  <kbd>Space</kbd> Pause <kbd>Esc</kbd> Menu <kbd>Tab</kbd> Edit <kbd>Shift</kbd> Queue legs <kbd>1–9</kbd> Formations <kbd>0</kbd> Spacing <kbd>K</kbd> Smoke <kbd>O</kbd> Order lines <kbd>?</kbd> Help
 </div>
 
 <div id="banner"><div id="bannerBox">
@@ -1539,6 +1539,9 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/postfx.js"></script>
 <!-- ROUND 117: the baked sky (one dome, a scattering table, a cloud tile), behind game.sky117 -->
 <script src="assets/sky117.js"></script>
+<!-- (round 119) weather you can see: rain, drizzle and snow as GPU streaks and flakes, wet ground and buildings,
+     puddles, snow on roofs. `game.weather119`, default OFF. Drawing only: nothing the simulation reads. -->
+<script src="assets/weather119.js"></script>
 <script src="assets/boxart.js"></script>
 <!-- The baked flipbooks the particle engine draws with (Cycles volumes: the shell
      burst, the fireball, smoke, flame and side-on muzzle plumes) - tools/blender/vfx_bake.py,
@@ -1575,6 +1578,10 @@ body.fpv #tacMap { display: none !important; }
      and fire support. Exposes window.BattleSetup. Builds on assets/squads.js. -->
 <script src="assets/battlesetup.js"></script>
 <script src="assets/ui117.js"></script>
+<!-- (round 119) the pause menu: Esc in a battle with nothing left to close. game.pause119 -->
+<script src="assets/pause119.js"></script>
+<!-- (round 119) "Scale models arriving" while a battle's models download. game.loading119 -->
+<script src="assets/loading119.js"></script>
 <script src="assets/editfps118.js"></script>
 <!-- (round 118) the trench kit, built in Blender (tools/blender/trench_kit.py), and its layer along smooth runs:
      `game.trenchKit118`, default OFF. Drawing only; the simulation keeps its trench cells. -->
@@ -1750,6 +1757,21 @@ const SURVEY_LOS = 12, SURVEY_D2 = new Float64Array(SURVEY_LOS), SURVEY_U = new 
  *  how low; reused while nothing has changed, but never past SURVEY_NEG_AGE —
  *  one pass later, not two. */
 const SURVEY_NEG_AGE = 2.0;
+/** (round 119, `game.concealKnow119`) WHAT A SHOT GIVES AWAY, by weapon: [share of an observer's reach, seconds].
+ *  For that long after a man last fired (`_shot119`, stamped by every `Projectiles.fire*`) the contact survey finds
+ *  him out to that share of an observer's reach, however well he is hidden (`Game._knowMul119`): the flash, the
+ *  smoke, the dust a gun's blast throws up, the tracer, the noise. A rifle's is the old `_justFired` floor, held for
+ *  a few seconds; a machine gun's long bursts and tracer give it away for longest among the small arms; a sniper's
+ *  single shot from deep cover, flash hider and smokeless powder, hardly at all — that is his whole art. */
+const KNOW119_SIG = { rifle: [1.25, 4], auto: [1.4, 6], hmg: [1.7, 10], sniper: [0.85, 2], mortar: [1.0, 6],
+  artillery: [2.0, 12], atgun: [1.8, 10], tank: [2.0, 8], rocket: [1.6, 6], flame: [2.6, 6], other: [1.25, 4] };
+function knowSig119(def) {
+  const k = def.kind;
+  if (k === 'rifle' || k === 'officer' || k === 'engineer') return def.burst ? KNOW119_SIG.auto : KNOW119_SIG.rifle;
+  if (k === 'flametank') return KNOW119_SIG.flame;
+  if (k === 'apc') return KNOW119_SIG.tank;
+  return KNOW119_SIG[k] || KNOW119_SIG.other;
+}
 function svNegRec() { return { n: 0, u: [], t: [], pf: [], ux: [], uz: [], ex: [], ez: [], epf: [] }; }
 const SV_NEG_CUR = svNegRec();
 function svNegPush(r, u, t, pf, ux, uz, ex, ez, epf) {
@@ -7583,7 +7605,7 @@ const VEH_BODY = {
   ukchallenger: { L: 5.13, W: 2.22, H: 1.24, zc: -0.02, deck: 1.24, top: 1.97, tz: 0.44, tw: 0.7, tb: 0.96 },
   ukcentaur: { L: 4.84, W: 2.14, H: 1.28, zc: -0.11, deck: 1.28, top: 1.78, tz: 0.35, tw: 0.59, tb: 0.66 },
   ukchurchill3: { L: 4.91, W: 2.48, H: 1.32, zc: -0.06, deck: 1.32, top: 1.86, tz: 0.42, tw: 0.64, tb: 0.76 },
-  ukhumber: { L: 3.3, W: 1.5, H: 1.26, zc: -0.01, deck: 1.26, top: 1.63, tz: 0.08, tw: 0.51, tb: 0.52 },
+  ukhumber: { L: 3.25, W: 1.62, H: 1.29, zc: 0, deck: 1.29, top: 1.78, tz: 0.08, tw: 0.47, tb: 0.51 },
   ukstaghound: { L: 4.01, W: 1.8, H: 1.29, zc: -0.02, deck: 1.29, top: 1.71, tz: 0.19, tw: 0.53, tb: 0.7 },
   ukdingo: { L: 2.29, W: 1.24, H: 1.01, zc: 0 },
   frr35: { L: 3, W: 1.4, H: 1.06, zc: 0.02, deck: 1.06, top: 1.45, tz: 0.17, tw: 0.42, tb: 0.43 },
@@ -7591,9 +7613,9 @@ const VEH_BODY = {
   frfcm36: { L: 3.33, W: 1.6, H: 1.07, zc: 0.03, deck: 1.07, top: 1.49, tz: 0.25, tw: 0.44, tb: 0.46 },
   framr35: { L: 2.88, W: 1.28, H: 1, zc: 0, deck: 1, top: 1.34, tz: 0.19, tw: 0.21, tb: 0.33 },
   frd2: { L: 4.09, W: 1.68, H: 1.42, zc: 0.05, deck: 1.42, top: 1.84, tz: 0.38, tw: 0.42, tb: 0.54 },
-  frpanhard: { L: 3.14, W: 1.4, H: 1.21, zc: -0.02, deck: 1.21, top: 1.6, tz: 0.23, tw: 0.44, tb: 0.44 },
+  frpanhard: { L: 3.25, W: 1.5, H: 1.24, zc: 0.02, deck: 1.24, top: 1.69, tz: 0.23, tw: 0.39, tb: 0.41 },
   frlaffly: { L: 3.69, W: 1.42, H: 1.38, zc: 0.09 },
-  frue: { L: 2.1, W: 1.26, H: 0.71, zc: 0 },
+  frue: { L: 2.11, W: 1.3, H: 0.81, zc: 0 },
   frm4a2: { L: 4.55, W: 1.96, H: 1.43, zc: 0.03, deck: 1.43, top: 1.98, tz: 0.27, tw: 0.62, tb: 0.81 },
   frm10: { L: 4.52, W: 2.26, H: 1.41, zc: 0.06, deck: 1.41, top: 1.88, tz: 0.11, tw: 0.65, tb: 0.84 },
   frm8: { L: 3.69, W: 1.72, H: 1.13, zc: 0, deck: 1.13, top: 1.54, tz: 0.06, tw: 0.5, tb: 0.49 },
@@ -10519,6 +10541,9 @@ function cloudShadeMaterial(mat, perVertex) {
  *    Lambert it stayed at the origin, and every reflection circled one spot. */
 const WATER_U = {
   uWaterT: { value: 0 },
+  // (round 119, `game.water119`) the waves in the vertex shader: on/off, and the plane's half-width and cells a unit
+  uWaterGpu: { value: 0 },
+  uWaterGrid: { value: new THREE.Vector2(0, 1) },
   uWaterEye: { value: new THREE.Vector3() },
   uWaterSun: { value: new THREE.Vector3(0.4, 0.8, 0.3) },
   uWaterSky: { value: new THREE.Color(0.55, 0.62, 0.72) },
@@ -10567,6 +10592,23 @@ vec3 waterSurface(vec3 col, inout float alpha) {
   return mix(col, sky, fres) + uWaterSunC * glint;
 }
 `;
+/** (round 119, `game.water119`) THE SWELL IN THE VERTEX SHADER. `Terrain.ambient` wrote every wet vertex of the
+ *  water's bounding box on the CPU each frame — two sines a vertex, then the rows re-uploaded: 2.2 ms a frame on
+ *  Purple Heart Lane (its box is most of the field), 0.2-0.4 on the river maps. The same two sines, on the same
+ *  vertex grid (the plane's own row and column, recovered from its position), are free here. A dry vertex (its base
+ *  below the backdrop) is left where `_maskWater` put it, as before; `uWaterGpu` 0 is the CPU picture exactly. */
+const WATER_GLSL_V119 = `
+uniform float uWaterT;
+uniform float uWaterGpu;
+uniform vec2 uWaterGrid;
+void waterWave119(inout vec3 p) {
+  if (uWaterGpu > 0.5 && p.y > -1.0) {
+    float vx = floor((p.x + uWaterGrid.x) * uWaterGrid.y + 0.5), vz = floor((p.z + uWaterGrid.x) * uWaterGrid.y + 0.5);
+    float t = uWaterT * 1.35;
+    p.y = sin(t + vx * 0.55 + vz * 0.31) * 0.028 + sin(t * 0.62 + vz * 0.47) * 0.022;
+  }
+}
+`;
 function waterSurfaceMaterial(mat) {
   if (!mat || mat.userData.waterSurface) return mat;
   mat.userData.waterSurface = true;
@@ -10575,7 +10617,8 @@ function waterSurfaceMaterial(mat) {
   mat.onBeforeCompile = function (sh, renderer) {
     if (prev) prev.call(this, sh, renderer);
     Object.assign(sh.uniforms, WATER_U);
-    sh.vertexShader = 'varying vec3 vWaterW;\n' + sh.vertexShader.replace(
+    sh.vertexShader = 'varying vec3 vWaterW;\n' + WATER_GLSL_V119 + sh.vertexShader.replace(
+      '#include <begin_vertex>', '#include <begin_vertex>\n  waterWave119(transformed);').replace(
       '#include <project_vertex>',
       'vWaterW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#include <project_vertex>');
     sh.fragmentShader = WATER_GLSL_F + sh.fragmentShader.replace(
@@ -10583,7 +10626,7 @@ function waterSurfaceMaterial(mat) {
       '{ float wa = gl_FragColor.a; gl_FragColor.rgb = waterSurface(gl_FragColor.rgb, wa); gl_FragColor.a = wa; }\n#include <tonemapping_fragment>');
   };
   const key = mat.customProgramCacheKey;
-  mat.customProgramCacheKey = function () { return (key ? key.call(this) : '') + '|water2'; };
+  mat.customProgramCacheKey = function () { return (key ? key.call(this) : '') + '|water2|w119'; };
   mat.needsUpdate = true;
   return mat;
 }
@@ -10736,6 +10779,12 @@ const COVER_SEEK_S = 9.0;
 const FE118 = { reach: 8, cool: 1.0, legMax: 8, pad: 0.75, lee: 3, resumeMax: 90 };
 const BZ118 = { note: 2.2, fresh: 14, minN: 2, reach: 9, legMax: 10, margin: 1.5, hole: 0.12, try: 1.5 };
 const BZ_NEAR118 = [];
+// (round 119) MEN STOP WALKING INTO FIRES (`game.firePath119`, see `Game._fireDest119` and `Pathfinder.fire`). `enter`
+// and `cell` are cells of detour on a route on foot: the step INTO burning ground from ground that is not, and each
+// burning cell walked (so an unavoidable crossing is the shortest one); `reach` cells round a burning destination is
+// where the ground it moves to is looked for when the line back to the man burns all the way; `resumeMax` s is how
+// long the player's man waits at the edge for the ground he was sent to.
+const FP119 = { enter: 12, cell: 3, reach: 10, resumeMax: 90 };
 const MOVE_COMMIT_S = 3.4;      // an infantry bound, once given, is run
 /** How long a man remembers where his last bound started, so the next one is
  *  not allowed to walk him back to it. Longer than a bound takes to run and
@@ -19594,6 +19643,15 @@ class Terrain {
     if (!this._hasWater) return;
     this.waveT += dt;
     WATER_U.uWaterT.value = this.waveT;
+    // (round 119, `game.water119`) the swell is drawn by the vertex shader (WATER_GLSL_V119): nothing to write here.
+    // Off, the CPU writes it as before, and a vertex it left mid-swell is overridden by the shader when it comes on.
+    const g119 = window.game;
+    if (g119 && g119.water119) {
+      WATER_U.uWaterGpu.value = 1;
+      WATER_U.uWaterGrid.value.set((GRID - 1) * TILE * 0.5, 1 / TILE);
+      return;
+    }
+    WATER_U.uWaterGpu.value = 0;
     const pos = this.water.geometry.attributes.position;
     const t = this.waveT * 1.35;
     const B = this._waterBox || { x0: 0, z0: 0, x1: GRID - 1, z1: GRID - 1 };
@@ -28683,10 +28741,27 @@ class Pathfinder {
     }
     return s;
   }
+  /** (round 119) `game.firePath119`: the burning cells (`this.fire`, `Game._burnGrid118` 1) the straight line from one
+   *  cell to another walks through — sampled like `_losLine`, the first cell (where he stands) left out. What the
+   *  early-out may not cut across at all, and the string-pull no more of than the cells it replaces. */
+  _fireLine119(x1, z1, x2, z2) {
+    const F = this.fire;
+    if (!F) return 0;
+    const dx = x2 - x1, dz = z2 - z1, steps = Math.ceil(hyp(dx, dz) / 0.4);
+    let px = Math.round(x1), pz = Math.round(z1), s = 0;
+    for (let i = 1; i <= steps; i++) {
+      const cx = Math.round(x1 + dx * i / steps), cz = Math.round(z1 + dz * i / steps);
+      if (cx === px && cz === pz) continue;
+      px = cx; pz = cz;
+      if (cx >= 0 && cz >= 0 && cx < GRID && cz < GRID && F[cz * GRID + cx] === 1) s++;
+    }
+    return s;
+  }
   /** `losWalk`, but demanding a line with nothing to pay on it. This is what
    *  the early-out and the string-pull actually need. */
   losFree(x1, z1, x2, z2, L) {
     if (this._expoStrict && L === 0 && this._expoLine118(x1, z1, x2, z2) > 0) return false;   // (round 118) the early-out only
+    if (this._fireStrict && L === 0 && this._fireLine119(x1, z1, x2, z2) > 0) return false;   // (round 119) firePath119: the same
     return this.losWalk(x1, z1, x2, z2, L) && !this.walkCost;
   }
 
@@ -28784,8 +28859,10 @@ class Pathfinder {
     // (round 113) a search on foot crosses trees, scrub and small props —
     // exactly the searches `_wasmSearch` runs, whose grid blocks on 1 alone
     this.foot = !this.floating && !this.crushing && !this.amphibious;
+    if (!this.foot) this.fire = null;     // (round 119) `firePath119`: burning ground is priced for a man on foot
     const out = this._find(sx, sz, ex, ez, sL | 0, eL | 0);
     this.expo = null; this._expoStrict = false;   // (round 118) `coverRoute118`: priced for one search only
+    this.fire = null; this._fireStrict = false;   // (round 119) `firePath119`: so is the fire
     this.foot = false;
     this.floating = false;
     this.climbMax = CLIMB;
@@ -28847,11 +28924,16 @@ class Pathfinder {
     // 53 of them (66%) crossed a crushable wall, 425 crossings in all, and 18
     // of the 43 single-waypoint paths drove through one. At a 41% chance of
     // throwing a track per brick crossing, that is a tank that does not arrive.
+    // (round 119) `firePath119`: nor across burning ground — and a goal that is itself burning (`Game._fireDest119`
+    // found no ground to move it to) is exempt, as the water is (`wadeFree`): that search stays the old one
+    if (this.fire && eL === 0 && this.fire[ez * GRID + ex] === 1) this.fire = null;
+    this._fireStrict = !!this.fire;
     this._expoStrict = !!this.expo;       // (round 118) `coverRoute118`: no straight line across priced ground (`losFree`)
     if (sL === eL && this.losFree(sx, sz, ex, ez, sL)) {
       return [{ x: cellCenter(ex), z: cellCenter(ez), lvl: eL }];
     }
     this._expoStrict = false;
+    this._fireStrict = false;
 
     // THE SAME SEARCH, IN WEBASSEMBLY, when this is a search it can run — a
     // man on foot, on the arrays it shares with the game. See `_wasmSearch`.
@@ -28860,6 +28942,7 @@ class Pathfinder {
 
     const { g, closed, from, stamp } = this;
     const EXV = this.expo ? this.expo.vis : null, EXP = EXV ? this.expo.price : null;   // (round 118) coverRoute118
+    const FB = this.fire || null;         // (round 119) `firePath119`: `Game._burnGrid118`
     const gen = ++this._gen;
     const heap = new MinHeap();
     const PLANE = GRID * GRID;
@@ -28968,6 +29051,7 @@ class Pathfinder {
           climbCost = Math.max(0, nh - ch) * 0.4;
         } else if (dx !== 0 && dz !== 0 && (!this.passableL(cx + dx, cz, cl) || !this.passableL(cx, cz + dz, cl))) continue;
         if (EXV !== null && cl === 0 && EXV[nz * GRID + nx] !== 0) climbCost += EXP(nx, nz);   // (round 118) `coverRoute118`: ground the enemy sees
+        if (FB !== null && cl === 0 && FB[nz * GRID + nx] === 1) climbCost += FP119.cell + (FB[cz * GRID + cx] !== 1 ? FP119.enter : 0);   // (round 119) burning ground
         const move = (dx !== 0 && dz !== 0) ? 1.414 : 1;
         const terr = cl === 0 ? 1 / Math.max(this.terrain.speedAt(nx, nz), 0.2) : 1;
         const ng = g[ci] + move * (0.6 + terr * 0.4) + climbCost + wallCost
@@ -29064,8 +29148,18 @@ class Pathfinder {
       EXc = new Float64Array(cells.length + 1);
       for (let i = 0; i < cells.length; i++) { const q = cells[i]; EXc[i + 1] = EXc[i] + (q.lvl === 0 && EXq.vis[q.z * GRID + q.x] ? EXq.price(q.x, q.z) : 0); }
     }
+    // (round 119) `firePath119`: …nor more burning cells than the cells it replaces (`_fireLine119`)
+    const FBq = this.fire || null;
+    let FCc = null;
+    if (FBq) {
+      FCc = new Int32Array(cells.length + 1);
+      for (let i = 0; i < cells.length; i++) { const q = cells[i]; FCc[i + 1] = FCc[i] + (q.lvl === 0 && FBq[q.z * GRID + q.x] === 1 ? 1 : 0); }
+    }
     const free = EXc ? (a, k, al) => this.losFree(cells[a].x, cells[a].z, cells[k].x, cells[k].z, al)
-      && (al !== 0 || this._expoLine118(cells[a].x, cells[a].z, cells[k].x, cells[k].z) <= EXc[k + 1] - EXc[a + 1] + 0.25) : null;
+      && (al !== 0 || this._expoLine118(cells[a].x, cells[a].z, cells[k].x, cells[k].z) <= EXc[k + 1] - EXc[a + 1] + 0.25)
+      && (!FCc || al !== 0 || this._fireLine119(cells[a].x, cells[a].z, cells[k].x, cells[k].z) <= FCc[k + 1] - FCc[a + 1])
+      : FCc ? (a, k, al) => this.losFree(cells[a].x, cells[a].z, cells[k].x, cells[k].z, al)
+      && (al !== 0 || this._fireLine119(cells[a].x, cells[a].z, cells[k].x, cells[k].z) <= FCc[k + 1] - FCc[a + 1]) : null;
     // String-pull: keep only waypoints where LOS breaks. Pulling only happens
     // WITHIN a storey — a staircase is a fixed route and smoothing across one
     // would cut the corner straight through the floor.
@@ -29127,6 +29221,10 @@ class Pathfinder {
     if (!W || !W.ready || (gm && gm._wasmPath === false)) return null;
     if (this.floating || this.crushing || this.wading || this.amphibious) return null;
     if (this.expo) return null;           // (round 118) `coverRoute118`: the module has no price layer — a priced search is JS
+    // (round 119) `firePath119`: the fire's price layer IS in the module (`set_fire`), over the burn grid allocated in its
+    // memory (`Game._burnGrid118`, `wasmSlot('BURN')`); a grid it cannot read, or an old module, is the JavaScript's
+    const FB = this.fire || null;
+    if (FB && !(W.exports && W.exports.set_fire && W.owns(FB, 'BURN'))) return null;
     if (GRID > W.maxg || LV > W.lvmax) return null;
     const T = this.terrain, O = this.obstacles, S = this.structures;
     if (!W.owns(T.h, 'H') || !W.owns(T.type, 'TY') || !W.owns(O.occupied, 'OCC')) return null;
@@ -29160,6 +29258,7 @@ class Pathfinder {
     const t0 = performance.now();
     const deadline = starved ? Infinity : t0 + left / rate;
     if (W.setHedgeCost) W.setHedgeCost(HEDGE_FOOT_COST);   // (round 113) a hedgerow scrambled through
+    if (W.setFire) W.setFire(!!FB, FP119.enter, FP119.cell);   // (round 119) every search: on for this one, or off
     if (W.setCrossCost) for (let k = 4; k < 8; k++) W.setCrossCost(k, FOOT_CROSS_COST[k]);   // (round 116) a low line climbed
     let n = W.find(GRID, LV, any, walls, sx, sz, sL, ex, ez, eL, this.climbMax, CAP, deadline, PATH_CLOCK_EVERY);
     const ms = performance.now() - t0;
@@ -30443,6 +30542,7 @@ class Projectiles {
 
   /** Rifle / MG round: a fast flat tracer. */
   fireBullet(shooter, target, opts) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     if (!this.game._contact116) this.game._contactShot116(shooter, target);   // (round 116) first contact
     // `opts.origin`: a gun that is NOT at the barrel tip. A tank's bow gun is
     // a ball mount low in the glacis; drawn from the main gun's muzzle, its
@@ -30711,6 +30811,7 @@ class Projectiles {
 
   /** Tank main-gun round: flat, fast, explodes on impact. */
   fireShell(shooter, tx, tz, opts) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     if (!this.game._contact116) this.game._contactShot116(shooter, shooter && shooter.target, tx, tz);   // (round 116) first contact
     const s = this._gunOrigin(shooter, tx, tz);
     const range = hyp(tx - s.x, tz - s.z);
@@ -30777,6 +30878,7 @@ class Projectiles {
   /** Mortar bomb: a steep indirect lob that clears terrain and bursts as area
    *  HE. Scatter grows with range and with crew suppression. */
   fireMortar(shooter, tx, tz, opts) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     const s = this._gunOrigin(shooter, tx, tz);
     const range = hyp(tx - s.x, tz - s.z);
     // …AND HOW FAR THE TUBE STILL IS FROM BEING RANGED ON THIS GROUND.
@@ -30851,6 +30953,7 @@ class Projectiles {
    *  HE rocket with a screaming smoky exhaust. `delay` staggers the salvo into
    *  a rippling barrage; `spread` scatters impacts across the beaten zone. */
   fireSalvoRocket(shooter, tx, tz, opts) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     const s = this._gunOrigin(shooter, tx, tz);
     const spread = opts.spread || 8;
     const e = new THREE.Vector3(tx + rand(-spread, spread), 0, tz + rand(-spread, spread));
@@ -30904,6 +31007,7 @@ class Projectiles {
 
   /** Hand grenade: pineapple or stielhandgranate, tumbling in flight. */
   fireGrenade(shooter, tx, tz, gDef, cook, from, tight, fl118) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     // `from`: the player's throwing hand in first person (`Game._fpvHand`)
     const s = from ? from.clone() : shooter.pos.clone(); if (!from) s.y += shooter.def.size * 1.1;
     // (round 117) `tight`: a grenade put through a doorway from beside it lands
@@ -30966,6 +31070,7 @@ class Projectiles {
   /** Anti-tank rocket (bazooka / panzerfaust): a finned round with a fiery,
    *  smoky trail and an armour-piercing warhead. */
   fireRocket(shooter, tx, tz, opts) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     const s = this._gunOrigin(shooter, tx, tz);
     const sf = (1 + (shooter.suppression || 0) * 1.6) * (2 - this.game.weather.accuracy) * (opts.aimErr != null ? opts.aimErr : 1)
       * (opts.player ? 1 : K_VEH);   // the computer's scatter was set against the drawn tank (round 105)
@@ -31001,6 +31106,7 @@ class Projectiles {
   /** Flame gout: a short-range projectile that trails heavy fire and bursts
    *  into a small burning cloud (ignores most armour, murders infantry). */
   fireFlame(shooter, tx, tz, opts) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     const s = this._gunOrigin(shooter, tx, tz);
     const e = new THREE.Vector3(tx + rand(-1, 1), 0, tz + rand(-1, 1));
     e.y = this.game.terrain.heightAt(e.x, e.z) + 0.5;
@@ -31042,6 +31148,7 @@ class Projectiles {
    *             less accurate, but can clear crests and walls.
    */
   fireArrow(shooter, target, loft) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     const s = shooter.pos.clone(); s.y += shooter.def.size * 1.25;
     const e = target.pos.clone(); e.y += target.def.size * 0.6;
     const d = s.distanceTo(e);
@@ -31061,6 +31168,7 @@ class Projectiles {
 
   /** Javelin: fast, flat, and vicious. */
   fireJavelin(shooter, target) {
+    if (shooter && this.game.concealKnow119 === true) shooter._shot119 = this.game.time;   // (round 119) the signature clock (`Game._knowMul119`)
     const s = shooter.pos.clone(); s.y += shooter.def.size * 1.1 + (shooter.def.hover || 0);
     const e = target.pos.clone(); e.y += target.def.size * 0.6;
     const d = s.distanceTo(e);
@@ -34693,7 +34801,7 @@ class Unit {
     this._stepPh = undefined; this._lastThink = undefined; this._faceT = undefined; this._threatNextT = undefined;
     this._threatU = undefined; this._covT = undefined; this._covV = undefined; this._vHalf = undefined; this._vdT = undefined;
     this._vdV = undefined; this._aiInitT = undefined; this._incomingT = undefined; this._bzStamp = undefined;
-    this._fireArcs = undefined; this._charging = undefined; this._contactT = undefined; this._contactAt = undefined;
+    this._fireArcs = undefined; this._charging = undefined; this._contactT = undefined; this._contactAt = undefined; this._shot119 = undefined;
     this._fearWhy = undefined; this._aiSmokeT = undefined; this._maskT = undefined; this._maskBear = undefined;
     this._tracerN = undefined; this._pathPartial = undefined; this.limbered = undefined; this.setupT = undefined;
     this.crew = undefined; this.maxCrew = undefined; this._limberIdleT = undefined; this._gpOf = undefined;
@@ -36230,9 +36338,24 @@ class Unit {
     }
     // (round 118) `game.coverRoute118`: a leg on foot under contact is priced by what the enemy it knows of sees
     if (this.game.coverRoute118 === true && !this.def.vehicle) this.game.pathfinder.expo = this.game._expoFor118(this, wx, wz);
+    // (round 119) `game.firePath119`: A MAN ON FOOT IS NOT SENT INTO A FIRE, AND HIS ROUTE GOES ROUND ONE. A destination
+    // on burning ground moves to the nearest ground that is not, toward him (`Game._fireDest119`) — whoever set it: the
+    // computer's orders, a section's bound, a chase, the way back to his post, a close-up, a cover pick. The player's
+    // man only where he would otherwise END in the fire, and he goes on once it is out (`_fdResume119`). The route is
+    // priced over the same grid (`Pathfinder.fire`, `FP119`), in the WebAssembly search as in the JavaScript one.
+    let fdx = wx, fdz = wz;
+    const gF = this.game;
+    if (gF.firePath119 === true && !this.def.vehicle && gF.groundFires.length && !(gF.fpv && gF.fpv.unit === this)) {
+      const s = !(wlvl > 0) ? gF._fireDest119(this, wx, wz) : null;
+      if (s) {
+        fdx = s.x; fdz = s.z;
+        if (this.team === gF.playerTeam && !this._underAI()) this._fd119 = { x: wx, z: wz, lvl: wlvl | 0, t: gF.time, chkT: gF.time, mode: null };
+      }
+      gF.pathfinder.fire = gF._burnGrid118();
+    }
     const path = this.game.pathfinder.find(
       worldToCell(this.pos.x), worldToCell(this.pos.z),
-      worldToCell(wx), worldToCell(wz), this.def.floats, climbOf(this.def),
+      worldToCell(fdx), worldToCell(fdz), this.def.floats, climbOf(this.def),
       this.def.vehicle ? 0 : this.lvl, this.def.vehicle ? 0 : (wlvl | 0),
       this._crushPower(), this.def.amphib);
     if (this.def.vehicle && path.length) this._firstLegFix(path);
@@ -38498,6 +38621,11 @@ class Unit {
                   && G.time - (this._medicT || 0) < COMBAT.medicGiveUp)) {
       best = this._medicCase = null;
     }
+    // (round 119) `game.firePath119`: NOT A MAN LYING IN A FIRE. His route stops at the fire's edge (`_setPathTo`), and
+    // measured on Bloody Gulch the aid man then stood there re-asking every 0.7 s — 152 of the 194 destinations the
+    // switch moved in one battle were his. He takes the next case instead (`burnt` below), and this one when it is out.
+    const burnt = G.firePath119 === true && G.groundFires.length ? u => G._burnAt118(worldToCell(u.pos.x), worldToCell(u.pos.z)) === 1 : null;
+    if (best && burnt && burnt(best)) best = this._medicCase = null;
     // `urgent` is the pass that runs ABOVE the cover logic, and only a man
     // bleeding out earns that. A dressing on a flesh wound does not.
     if (urgent && best && !best.downed) return false;
@@ -38511,6 +38639,7 @@ class Unit {
         if (missing < 15 && !u.downed) continue;
         const d = dist2(this.pos, u.pos);
         if (d > reach) continue;
+        if (burnt && burnt(u)) continue;                // (round 119) firePath119: not into the fire for him
         // A dying man first, and among the dying the one he can still reach —
         // subtracting the distance rather than ignoring it is what makes him
         // pick the near casualty over the far one instead of the other way.
@@ -38737,6 +38866,7 @@ class Unit {
       const cover = g._coverAtCell(gx, gz);
       if (cover < AICFG.coverMin) continue;                 // cheap gate — skip open ground
       if (g.fireEscape118 === true && g._burnAt118(gx, gz) === 1) continue;   // (round 118) not into a fire
+      if (g.firePath119 === true && g._burnAt118(gx, gz) === 1) continue;     // (round 119) firePath119: nor is a cover pick
       // (round 113) a man takes cover IN a wood or the scrub, not only beside it
       if (!g.pathfinder.passable(gx, gz) && !(!this.def.vehicle && g.obstacles.footThrough(gx, gz) && g.terrain.typePassable(gx, gz))) continue;
       let wx = cellCenter(gx), wz = cellCenter(gz), lineBonus = 0;
@@ -39055,7 +39185,22 @@ class Unit {
    *  hunkers under fire; the player's troops hit the dirt when pinned in the open
    *  and get back up on their own once it's over (no loss of control). Returns
    *  true when it has taken over this unit's movement for the tick. */
+  /** (round 119) `game.firePath119`: THE PLAYER'S MAN SENT INTO A FIRE stopped at its edge (`_setPathTo`). Once the
+   *  ground he was sent to has stopped burning he goes on to it, in the mode he was walking; a new order of yours, the
+   *  autopilot taking him back, or `FP119.resumeMax` s, and he stays where he stopped. Checked once a second. */
+  _fdResume119() {
+    const F = this._fd119, g = this.game, now = g.time;
+    if (g.firePath119 !== true || !this.alive || this.downed || this._underAI() || now - F.t > FP119.resumeMax
+        || (this._lastOrderT != null && this._lastOrderT > F.t)) { this._fd119 = null; return; }
+    if (this.path.length) { if (F.mode == null) F.mode = this.moveMode; return; }
+    if (now - F.chkT < 1) return;
+    F.chkT = now;
+    if (g._burnAt118(worldToCell(F.x), worldToCell(F.z)) === 1) return;
+    this._fd119 = null;
+    if (hyp(this.pos.x - F.x, this.pos.z - F.z) > 1) this.orderMove(F.x, F.z, true, F.mode || 'normal', F.lvl);
+  }
   _survival() {
+    if (this._fd119) this._fdResume119();   // (round 119) firePath119: the player's order, once its ground is out
     if (this._fe118 && (this.game.fireEscape118 === true || this.game.fireOrder118 !== false) && this._feLeg118()) return true;   // (round 118) out of the fire first
     if (this.def.vehicle || this.downed || this.digT > 0 || this.garrison || this.embarkedIn || this._assault) return false;
     if (this.def.kind === 'atgun' || this.def.kind === 'artillery' || this.def.towed || this.def.kind === 'suicide') return false;
@@ -41426,6 +41571,15 @@ class Unit {
     }
   }
 
+  /** (round 119, `game.concealKnow119`) A TUBE GIVES UP A TARGET NOBODY HAS SEEN OR REPORTED (`_mortarAim` found
+   *  nothing to lay on), and goes back to looking for one somebody can see: with the switch its own target no longer
+   *  keeps itself known (`_aiContactSurvey`). Counted in `game._k119.drop`. */
+  _unseen119() {
+    this.target = null;
+    if (this.game._k119) this.game._k119.drop++;
+    if (this.state === 'attack') this._afterCombat();
+  }
+
   /** Mortar team: indirect high-arc HE. No line of sight of its own needed —
    *  but the target must be within [minRng, rng] AND spotted by a teammate. */
   _mortarCombat(t, d) {
@@ -41440,7 +41594,7 @@ class Unit {
     if (!mount || !this._inArc(t.pos.x, t.pos.z)) this.targetFace = Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z);
     if (this.cd > 0 || d < def.minRng || d > def.rng) return;
     const aim = this._mortarAim(t);                     // observed, or the last reported reference
-    if (!aim) return;
+    if (!aim) { if (this.game.concealKnow119 === true) this._unseen119(); return; }   // (round 119) `_unseen119`
     // (round 105) …AND THE TUBE HAS TO POINT THAT WAY. `targetFace` above swings
     // the mount round, at the hull's rate for a Priest and the trail's for a
     // 105, and nothing waited for it: an SP gun fired a mission ninety degrees
@@ -41589,7 +41743,7 @@ class Unit {
     for (let i = 0; i < list.length && !v; i++) {
       const o = list[i];
       if (!o.alive || o.team !== T) continue;
-      const dx = o.pos.x - t.pos.x, dz = o.pos.z - t.pos.z, r = o._vis();
+      const dx = o.pos.x - t.pos.x, dz = o.pos.z - t.pos.z, r = o._vis() * (g.concealKnow119 === true ? g._knowMul119(t) : 1);   // (round 119)
       if (dx * dx + dz * dz <= r * r && g.hasLOS(o, t)) v = true;
     }
     if (m) { m.t = now; m.v = v; } else memo[T] = { t: now, v };
@@ -49929,6 +50083,8 @@ class Input {
       this.keys = {};
       return;
     }
+    // (round 119) the pause menu owns the keyboard while it is open: nothing typed orders the troops
+    if (down && window.Pause119 && Pause119.onKey(g, e)) return;
     this.keys[e.code] = down;
     // a cooked grenade is thrown when G is let go (round 101)
     if (!down && e.code === 'KeyG' && g.fpv) g.fpvGrenadeRelease();
@@ -49939,6 +50095,8 @@ class Input {
       if (g.fpv) { g.exitFpv(); return; }
       if (g.ui.el.helpOverlay.classList.contains('visible')) { g.ui.el.helpOverlay.classList.remove('visible'); return; }
       if (g.pendingRoute) { g.cancelRoute(); return; }
+      // (round 119, `game.pause119`) nothing left to close in a battle: the pause menu
+      if (window.Pause119 && Pause119.canOpen(g)) { Pause119.show(g); return; }
       g.select([], false);
     }
     if ((e.code === 'Enter' || e.code === 'NumpadEnter') && g.pendingRoute && !g.fpv) { g.commitRoute(); return; }
@@ -50688,6 +50846,11 @@ class Game {
     this.sky117 = true;    // default ON: no dearer than the old sky, and better in every first-person capture (handoff, round 117)
     this.skyNew = null;
     try { if (window.Sky117 && window.Sky117.create) this.skyNew = window.Sky117.create(this); } catch (e) { console.warn('sky117', e); }
+    // ROUND 119 — WEATHER YOU CAN SEE (assets/weather119.js): what falls, what gets wet, where snow lies. OFF is the
+    // round-24 picture exactly (its 2,200 dots); ON draws instead of them. A picture of the weather state, never read by it.
+    this.weather119 = true;   // (round 119) ON: main judged the captures (.claude/wip119/weather/captures_final); dry weather costs nothing
+    this.wx119 = null;
+    try { if (window.Weather119 && window.Weather119.create) this.wx119 = cosmeticScope(() => window.Weather119.create(this)); } catch (e) { console.warn('weather119', e); }
     this.fogBanks = new FogBanks(this.scene, this);
     // Base light/fog values weather scales against
     // `sun` carries a quarter more than it used to, to pay for the fill that
@@ -54183,14 +54346,26 @@ class Game {
     // was. Nothing in the survey changes a target, so this is the same answer.
     // A player's man not free to report (`_autoFree`) still does not count.
     const TG = this._svTgt || (this._svTgt = {});
+    // (round 119, `game.concealKnow119`) A SILENT MAN IS NOT A TARGET. Measured with the switch off
+    // (tools/probe_conceal119.js): a side's contact stamps were a sightline from anywhere inside an observer's reach,
+    // however the man lay — his `_stealthMul`, which every man's own acquisition and the player's fog of war divide
+    // by, was never read here — and "his own target is a contact at any range" kept a man known for as long as
+    // anybody held him as a target, sightline or none: a mortar's target was a contact BECAUSE it was the mortar's
+    // target, and the tube laid "observed" fire on his true position for the rest of the battle. With the switch a
+    // man is known only where an observer has a sightline inside his reach x `_knowMul119` (concealment, or what the
+    // man's last shot gave away), and holding a target is no knowledge in itself. The knowledge then decays at the
+    // rate its readers already ask for (a tube's 1.9 s / MORTAR_REG_T, area fire's FIRE_KNOWN_S, a commander's
+    // contactMemory): nothing re-stamps a man nobody sees.
+    const ck = this.concealKnow119 === true, K = ck ? (this._k119 || (this._k119 = { st: 0, cut: 0, drop: 0 })) : null;
     for (const T of sides) {
       const set = TG[T] || (TG[T] = new Set());
       set.clear();
       const obs = grid.byTeam[T];
-      if (obs) for (let i = 0; i < obs.length; i++) { const u = obs[i], t = u.target; if (t && (T !== pt || u._autoFree())) set.add(t); }
+      if (obs && !ck) for (let i = 0; i < obs.length; i++) { const u = obs[i], t = u.target; if (t && (T !== pt || u._autoFree())) set.add(t); }
     }
     this._slice('contacts', this.units, AICFG.doctrineT, dt, e => {
       if (!e.alive || e.downed || e.crewBailed || e.embarkedIn || e.team === 0) return;
+      const km = ck ? this._knowMul119(e) : 1, km2 = km * km;
       for (const T of sides) {
         if (T === e.team) continue;
         const obs = grid.byTeam[T];
@@ -54210,11 +54385,14 @@ class Game {
           const ex = e.pos.x, ez = e.pos.z;
           for (let i = 0; i < obs.length; i++) {
             const dx = OX[i] - ex, dz = OZ[i] - ez, d2 = dx * dx + dz * dz;
-            if (d2 > R2[i]) continue;
+            // (round 119) with `concealKnow119`, only as far as he can be made out: reach x his concealment, or x what his
+            // last shot gave away (a machine gun's tracer is seen past the observer's plain reach)
+            if (d2 > (ck ? R2[i] * km2 : R2[i])) { if (ck && d2 <= R2[i]) K.cut++; continue; }
             const u = obs[i];
             // his own target is a contact at any range (a tube's reaches past its eyes) —
             // the set above; one whose target this is and who may not report it is not asked
-            if (u.target === e) continue;
+            // ((round 119) with `concealKnow119` there is no such set: he is asked like anybody else)
+            if (u.target === e && !ck) continue;
             if (T === pt && !u._autoFree()) continue;
             // insert into the short list, nearest first
             if (nc === SURVEY_LOS && d2 >= CD[nc - 1]) continue;
@@ -54252,6 +54430,7 @@ class Game {
           for (let k = 0; k < cur.n; k++) cur.u[k] = null;
         }
         if (seen) {
+          if (K) K.st++;
           (e._contactT || (e._contactT = {}))[T] = this.time;
           // …AND WHERE. The time alone was enough for `_foeCentre` to steer a
           // commander, but not for a tube to shoot: observed fire is laid on a
@@ -54263,6 +54442,20 @@ class Game {
         }
       }
     });
+  }
+
+  /** (round 119, `game.concealKnow119`) HOW FAR A SIDE CAN MAKE THIS MAN OUT, as a share of an observer's reach:
+   *  his concealment (`_stealthMul`: his posture, the crop, the house, the hole, his own camouflage, a lamp) — or,
+   *  for a while after his last shot, what his weapon gave away (KNOW119_SIG), whichever is the more. The survey
+   *  multiplies each observer's reach by it before it asks for a sightline. */
+  _knowMul119(e) {
+    let m = e._stealthMul();
+    const t = e._shot119;
+    if (t !== undefined) {
+      const sg = knowSig119(e.def), age = this.time - t;
+      if (age >= 0 && age < sg[1] && sg[0] > m) m = sg[0];
+    }
+    return m;
   }
 
   // =========================================================================
@@ -60147,14 +60340,18 @@ class Game {
     if (!ready.length) return;
     // The best aiming point: the densest cluster of enemy, weighted toward
     // troops that are STAYING somewhere — dug in, garrisoned, holding a flag.
+    // (round 119, `game.concealKnow119`) …as each was SEEN (`_contactAt`), not where he is now
+    const ck119 = this.concealKnow119 === true, at119 = e => (ck119 && e._contactAt && e._contactAt[T]) || e.pos;
     let best = null, bs = 0;
     for (const c of contacts) {
       let s = 0, sx = 0, sz = 0, n = 0;
+      const cp = at119(c);
       for (const e of contacts) {
-        if (dist2(c.pos, e.pos) > 16) continue;
+        const ep = at119(e);
+        if (dist2(cp, ep) > 16) continue;
         const w = (e.def.vehicle ? 1.2 : 1) * (e.dugin ? 1.5 : 1) * (e.garrison ? 1.4 : 1)
           * (e.path.length ? 0.5 : 1.3);       // stationary troops are worth shelling
-        s += w; sx += e.pos.x; sz += e.pos.z; n++;
+        s += w; sx += ep.x; sz += ep.z; n++;
       }
       if (n < 2 || s <= bs) continue;
       bs = s; best = { x: sx / n, z: sz / n, n };
@@ -70342,6 +70539,7 @@ class Game {
   /** Animate rain/snow: local particle box that follows the camera; recycle. */
   _updateWeather(dt) {
     const fx = this.weatherFX; if (!fx) return;
+    if (this.weather119 === true && this.wx119) { fx.points.visible = false; return; }   // (round 119) assets/weather119.js draws it
     const a = fx.points.geometry.attributes.position.array;
     // Only the active fraction of the box falls. The rest is parked far below
     // the ground, which costs one write and no draw-call change.
@@ -70469,7 +70667,7 @@ class Game {
   _burnGrid118() {
     const N = GRID * GRID;
     let B = this._burn118;
-    if (!B || B.length !== N) { B = this._burn118 = new Uint8Array(N); this._burnGT118 = null; }
+    if (!B || B.length !== N) { B = this._burn118 = typeof wasmSlot === 'function' ? wasmSlot('BURN', N, Uint8Array) : new Uint8Array(N); this._burnGT118 = null; }   // (round 119) in the A*'s memory
     if (this._burnFires118 === this.groundFires && this._burnGT118 != null && this.time >= this._burnGT118
         && this.time - this._burnGT118 < 0.5) return B;
     this._burnGT118 = this.time; this._burnFires118 = this.groundFires;
@@ -70490,6 +70688,46 @@ class Game {
     return B;
   }
   _burnAt118(gx, gz) { return inGrid(gx, gz) ? this._burnGrid118()[gz * GRID + gx] : 0; }
+  /** (round 119) `game.firePath119`: WHERE A MAN SENT INTO A FIRE STOPS. Null when (wx, wz) is not burning ground
+   *  (`_burnGrid118` 1): the order stands. Else the first cell on the line back from it toward the man that is not
+   *  burning and that a man can stand on — one clear of the flames when the next cell is (fires creep), else that
+   *  first one — and when the whole line burns (he is in the same fire), the nearest such cell to it within
+   *  `FP119.reach` cells, nearer him and clear of the flames better. Null when there is none (a field alight). */
+  _fireDest119(u, wx, wz) {
+    const gx = worldToCell(wx), gz = worldToCell(wz);
+    if (!inGrid(gx, gz)) return null;
+    const B = this._burnGrid118();
+    if (B[gz * GRID + gx] !== 1) return null;
+    const pf = this.pathfinder, T = this.terrain, O = this.obstacles;
+    const ok = (cx, cz) => inGrid(cx, cz) && B[cz * GRID + cx] !== 1
+      && (pf.passable(cx, cz) || (!!O.footThrough && O.footThrough(cx, cz) && T.typePassable(cx, cz)));
+    const edge = (cx, cz) => {
+      for (let k = -1; k <= 1; k++) for (let j = -1; j <= 1; j++) if ((k || j) && inGrid(cx + j, cz + k) && B[(cz + k) * GRID + cx + j] === 1) return true;
+      return false;
+    };
+    const dx = u.pos.x - wx, dz = u.pos.z - wz, n = Math.ceil(hyp(dx, dz) / (TILE * 0.5));
+    let first = null, fk = 0, px = gx, pz = gz;
+    for (let k = 1; k <= n; k++) {
+      const cx = worldToCell(wx + dx * k / n), cz = worldToCell(wz + dz * k / n);
+      if (cx === px && cz === pz) continue;
+      px = cx; pz = cz;
+      if (!ok(cx, cz)) { if (first) break; continue; }
+      if (!first) { first = { x: cellCenter(cx), z: cellCenter(cz) }; fk = k; }
+      if (!edge(cx, cz)) return { x: cellCenter(cx), z: cellCenter(cz) };
+      if ((k - fk) * TILE * 0.5 >= TILE * 1.5) break;
+    }
+    if (first) return first;
+    const R = FP119.reach;
+    let best = null, bs = Infinity;
+    for (let oz = -R; oz <= R; oz++) for (let ox = -R; ox <= R; ox++) {
+      const d = hyp(ox, oz);
+      if (d > R || !ok(gx + ox, gz + oz)) continue;
+      const cx = cellCenter(gx + ox), cz = cellCenter(gz + oz);
+      const s = d + hyp(cx - u.pos.x, cz - u.pos.z) / TILE * 0.25 + (edge(gx + ox, gz + oz) ? 1.5 : 0);
+      if (s < bs) { bs = s; best = { x: cx, z: cz }; }
+    }
+    return best;
+  }
   /** A shell hole the grid can see: the cell sits below its four neighbours by `BZ118.hole` (world units). */
   _holeAt118(gx, gz) {
     if (!inGrid(gx - 1, gz - 1) || !inGrid(gx + 1, gz + 1)) return false;
@@ -72097,6 +72335,7 @@ class Game {
     if (typeof Unit === 'function') Unit._seq = 0;
     this._squadSeq = 0;
     this._shufCur = 0;                 // (round 110) `_windowShuffle`'s place in the army
+    this._k119 = null;                 // (round 119) `concealKnow119`'s counters (`_aiContactSurvey`)
     // (round 117) THE HOUSE ASSAULTS' STATE, which outlived its battle: a door's
     // stack queue is reused while `time - made < 120`, and `time` goes back to 0
     // on this path — so the next battle's section at the same door took up the
@@ -73894,6 +74133,7 @@ class Game {
     this._updateWeatherBlend(dt);                // a front coming over (always)
     this._updateWeatherFront(dt);                // …and deciding to send another
     this._updateWeather(dt);                     // rain/snow drift (always)
+    if (this.wx119) this.wx119.frame(this, dt);  // (round 119) rain, snow and the wet, drawn (game.weather119)
     this._updateDebris(dt);                      // launched turrets tumble & land
     if (this.obstacles && this.obstacles._updateFalls) this.obstacles._updateFalls(dt);   // (round 118) felled trees come down
     this._updateBlood(dt);                       // pools spread, wounds soak (round 106)
@@ -74010,6 +74250,7 @@ Game.prototype.fpvNear118 = true;     // ON: against the sun a fence 16->41/255,
 Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of px under 30/255, the pine's crown 66% -> 53% (r118vis s4)
 Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
 Game.prototype.fpvGround118 = false;
+Game.prototype.water119 = true;       // (round 119) the water's swell in the vertex shader, not 2 sines a vertex on the CPU (Terrain.ambient). ON: Terrain.ambient 2.0-3.3 ms -> 0 (Argenta Gap, Purple Heart Lane, A/B with a null arm), the same picture (0 mean abs, 1-10 px differ by 0.33/255 vs a null's 0-12)
 Game.prototype.fpvFog118 = true;     // ON: Village fog, the posts in shade 109.5 -> ~106 (clear sunlit 105); against the sun 29 -> ~59
 const TRACER_EVERY = { axis: 4, allied: 5, soviet: 5, british: 4 };   // MG42/34 one in 3-5, Browning one in 5, Bren/Vickers one in 4
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
@@ -74265,6 +74506,8 @@ function boot() {
   playerOrdersInstall();   // (round 110) after every module that puts a command on the prototype
   if (typeof editFps118Install === 'function') editFps118Install();   // (118) game.editFps118
   if (typeof ui117Install === 'function') ui117Install();   // (117) game.ui117
+  if (typeof pause119Install === 'function') pause119Install();   // (119) game.pause119: the pause menu (assets/pause119.js)
+  if (typeof loading119Install === 'function') loading119Install();   // (119) game.loading119: says when models are arriving
   game.loadMap(defaultMapIdx());   // the opening field — see DEFAULT_MAP_NAME
   game.setMode('edit');
   if (typeof editorKit118Install === 'function') editorKit118Install();   // (118) game.editorKit118, game.craterTool118 (assets/editorkit118.js): before the Cover tab lists its tools

@@ -6,6 +6,8 @@ with first-person control of any unit on the field.
 
 **Play it here: https://bghryct.github.io/TacticalCommand/**
 
+![Village a minute into the battle: fields, woods and a Normandy village with smoke rising](assets/landing/village.jpg)
+
 It runs in the browser with nothing to install. There are seven campaigns,
 ninety-six battlefields and a content editor (`editor.html`).
 
