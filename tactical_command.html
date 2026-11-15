@@ -30770,6 +30770,14 @@ class Projectiles {
           s.set(ap.x + ap.nx * side * WINDOW_INSET, clamp(s.y, ap.y0 + WINDOW_EDGE, ap.y1 - WINDOW_EDGE), ap.z + ap.nz * side * WINDOW_INSET);
           shooter._winT = g.time;
           shooter._winAp = { x: s.x, y: s.y, z: s.z };
+        } else if (g.winLean119 === true) {
+          // (round 119, `game.winLean119`) …AND A ROUND THAT WOULD STRIKE HIS OWN WALL GOES OUT OF THE WINDOW OF HIS
+          // ROOM ON THAT SIDE. Sight takes a window's whole edge as open for a man in its cell (`sightCross`, the end
+          // cells), the round only the opening: a man at a window saw a target off to the side of it and put his
+          // round into the brick beside the frame — 50 rounds a battle on Arnhem Bridge with `urbanDef119` (95 went
+          // out of windows). He leans into the opening on the side his target is (`_leanAp119`), as men at a window do.
+          const lp = this._leanAp119(S, shooter, ugx, ugz, s, e);
+          if (lp) { s.set(lp.x, lp.y, lp.z); shooter._winT = g.time; shooter._winAp = { x: lp.x, y: lp.y, z: lp.z }; g._lean119 = (g._lean119 || 0) + 1; }
         }
       }
     }
@@ -30805,6 +30813,25 @@ class Projectiles {
     return null;
   }
 
+  /** (round 119, `game.winLean119`) The opening his round can leave by when its line meets his own wall: an
+   *  aperture on an edge of his own cell (`gx`, `gz`, his storey) that faces his target (`e`) and opens onto the
+   *  outside, the line from just inside it to the target clear of any wall for the first 0.6 of a cell (a jamb, the
+   *  next house). The best-facing one, as {x, y, z} just inside its plane, or null. */
+  _leanAp119(S, shooter, gx, gz, s, e) {
+    const L = shooter.lvl | 0, dx = e.x - s.x, dz = e.z - s.z, dl = hyp(dx, dz) || 1;
+    let best = null, bd = -1;
+    for (let k = 0; k < 4; k++) {
+      const d = SHUFFLE_EDGE[k], dot = (d[0] * dx + d[1] * dz) / dl;
+      if (dot < 0.2 || S.insideAt(gx + d[0], gz + d[1], L) >= 0.5) continue;
+      const ap = S.aperture(gx, gz, L, k, cellCenter(gx), cellCenter(gz));
+      if (!ap) continue;
+      const y = clamp(s.y, ap.y0 + WINDOW_EDGE, ap.y1 - WINDOW_EDGE), px = ap.x - d[0] * WINDOW_INSET, pz = ap.z - d[1] * WINDOW_INSET;
+      const h = S.raySegment(px, y, pz, e.x, e.y, e.z);
+      if (h && h.kind === 'wall' && hyp(h.x - px, h.z - pz) < TILE * 0.6) continue;
+      if (dot > bd) { bd = dot; best = { x: px, y, z: pz }; }
+    }
+    return best;
+  }
   /** (round 118) The player's dispersion (`game.hitbox118`): a point in the disc of radius R square
    *  across the line s->e, evenly — the crosshair's gap is the disc's edge (`_fpvCross116`). The old
    *  spread was a square in world x and z (along the line as much as across it) and a 0.45 one in y. */
@@ -57457,7 +57484,7 @@ class Game {
           for (const u of rec._cover119) if (u._strSpot != null && !u._stack && !u._inRoom()) { u._strSpot = null; u.path = []; u.state = 'idle'; u.hold = false; }
         }
         const clearing = arrived && this._squadHoldsBuilding(rec, t, ar);
-        rec._clear119 = false;
+        rec._clear119 = false; rec._cover119 = null;     // (the record outlives the task: the hold case never sees them)
         if (clearing) sq.task = 'CLEARING THE BUILDING';
         const idle = live.filter(u => !u._assault && !u.def.vehicle && !u.def.towed
           && u._strSpot == null && !KIND_EMPLACED.has(u.def.kind));
@@ -62535,6 +62562,7 @@ class Game {
     for (const i of cells) { const x = i % GRID; cx += cellCenter(x); cz += cellCenter((i - x) / GRID); }
     h = { key, cells, set, x: cx / cells.length, z: cz / cells.length };
     H.set(key, h);
+    if (!b) for (const i of cells) H.set('c' + i, h);   // no building ids: every cell of it answers with the same house
     return h;
   }
   /** Where the men go: the open cell against the house's wall nearest to them (not its door — the entry chooses
@@ -62702,7 +62730,26 @@ class Game {
         }
         sq.task = A.phase === 'cross' ? 'Crossing to the wall' : 'Following to the wall';
         if (A.phase === 'cross') { this._squadFire(fire, A.aim.x, A.aim.z, true, true); this._ua119Support(T, A); }
-        if (rec.issue) this._squadFormMove(rec, w.x, w.z, { men: goers, form: 'loose', len: hyp(mx - w.x, mz - w.z) + 6, mode: 'fast', urgency: 1 });
+        // THE RUSH IS A RUSH. Not `_squadFormMove`: its legs go through `_boundToward`, whose `_safeLeg` refuses swept
+        // ground — the street the windows cover IS swept, so nobody moved (traced on Arnhem: 0 paths in 25 s). Each
+        // man runs to the wall, a pace from the next, his area fire dropped (a ground attack clears his path every
+        // tick) and the leg committed so the cover dash and the close-up do not take it back.
+        if (rec.issue) {
+          let k = 0;
+          for (const u of goers) {
+            k++;
+            if (u._assault || u.garrison || u.embarkedIn || u.downed || u._stack) continue;
+            // a claim on a firing position he never reached (he is in the street: a ground attack held him there) is
+            // given back, as the entry's fire team gives its back (`_cover119`); a man IN a room keeps his
+            if (u._strSpot != null) { if (u._inRoom()) continue; u._strSpot = null; }
+            if (u.path.length && u._ua119W === A) continue;
+            if (hyp(u.pos.x - w.x, u.pos.z - w.z) <= UA119_WALL) continue;
+            if (u.groundAtk) { u.groundAtk = null; if (u.state === 'attack' && !u.target) u.state = 'idle'; }
+            u.hold = false;
+            u._setPathTo(w.x + ((k % 3) - 1) * 0.8, w.z + (((k / 3) | 0) % 2) * 0.8);
+            if (u.path.length) { u.state = 'advance'; u.explicit = false; u.moveMode = 'fast'; u._ua119W = A; u._commitMove(UA119_CROSS_MAX); }
+          }
+        }
         return true;
       }
     }
@@ -73224,7 +73271,7 @@ class Game {
     this._k119 = null;                 // (round 119) `concealKnow119`'s counters (`_aiContactSurvey`)
     // (round 119, `urbanDef119`) the reserve and the counts: this battle's
     this._ud119Res = null; this._ud119At = -1;
-    this._ud119N = 0; this._ud119Arr = 0; this._ud119Back = 0; this._ud119LostN = 0; this._ud119Ctr = 0; this._ud119ResN = 0;
+    this._ud119N = 0; this._ud119Arr = 0; this._ud119Back = 0; this._ud119LostN = 0; this._ud119Ctr = 0; this._ud119ResN = 0; this._lean119 = 0;
     this._u119 = null; this._ua119K = null; this._ua119H = null;   // (round 119) `urbanAtk119`: counters, known houses, footprints
     // (round 117) THE HOUSE ASSAULTS' STATE, which outlived its battle: a door's
     // stack queue is reused while `time - made < 120`, and `time` goes back to 0
@@ -75146,6 +75193,7 @@ Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (
 Game.prototype.fpvGround118 = false;
 Game.prototype.water119 = true;       // (round 119) the water's swell in the vertex shader, not 2 sines a vertex on the CPU (Terrain.ambient). ON: Terrain.ambient 2.0-3.3 ms -> 0 (Argenta Gap, Purple Heart Lane, A/B with a null arm), the same picture (0 mean abs, 1-10 px differ by 0.33/255 vs a null's 0-12)
 Game.prototype.urbanAtk119 = false;   // (round 119, APPROACH) the attack between buildings: suppress the windows, smoke the street, to the wall (`_ua119Approach`); OFF until measured (handoff, round 119 the attack between buildings)
+Game.prototype.entry119 = true;   // ON by main (15 Nov): the door test took houses (Ortona 0/8 -> 4/8, Arnhem 1/8 -> 7/8) at level losses; battles inside the floor.   // (round 119, ENTRY) men sent into a house get there: hold fire on the walk in, walked again when the street empties it, a stack only near the door and at the wall when AT it, an assault into the rooms of its house with its fire team covering the door (`_entryTick119`, `_clearRoom119`). Door test houses taken Ortona 0/8 -> 4/8, Arnhem 1/8 -> 7/8; battles within the floor (handoff, round 119 men get into houses). OFF until main decides
 Game.prototype.concealKnow119 = true;   // (round 119) ON by main's decision (15 Nov): a side knows a man only by sight (reach x his concealment) or by his fire; holding a target is not knowledge. Rounds on unseen men -90..97%; casualties inside the floor on Village and Sedan, better on Longstop. `game.concealKnow119 = false` is the old omniscient survey
 Game.prototype.arcFight119 = true;   // (round 119) ON by main's decision (15 Nov): a casemate or tail gun in range of armour stops, turns its hull and fights from a position; it never flanks. Rounds per contact-minute up beyond the floor on 3 of 4 maps, flanking 2.2 -> 0; kills, losses and flags inside the floor. `game.arcFight119 = false` is the old behaviour
 Game.prototype.fpvFog118 = true;     // ON: Village fog, the posts in shade 109.5 -> ~106 (clear sunlit 105); against the sun 29 -> ~59
