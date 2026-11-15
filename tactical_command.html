@@ -1204,7 +1204,13 @@ body.fpv #tacMap { display: none !important; }
 <!-- Where each scale model's crew figures are (round 106, tools/blender/crew_boxes.py). -->
 <script src="assets/crewboxes.js"></script>
 <!-- Packed models: self-contained, so they work from file:// too.
-     Add one per model; see tools/pack_model.py. -->
+     Add one per model; see tools/pack_model.py.
+     (round 119) LISTED, NOT LOADED: a script tag inside a template is neither
+     fetched nor run. `ExtModels` reads this list and injects a pack the first
+     time its model is asked for (assets/extmodels.js, `packUrl`), so a battle
+     downloads the dozen or two models it fields, not all of them. Keep every
+     pack tag inside the template; `?eagerPacks=1` loads them all at boot. -->
+<template id="modelPacks">
 <script src="assets/models/nashorn.model.js"></script>
 <script src="assets/models/t3485.model.js"></script>
 <script src="assets/models/panzer4.model.js"></script>
@@ -1467,6 +1473,7 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/models/isu122s.model.js"></script>
 <script src="assets/models/isu1522.model.js"></script>
 <!-- <<< round 108 roster models -->
+</template>
 <!-- which paint variants exist (round 98); the variants themselves load on demand -->
 <script src="assets/models/variants/index.js"></script>
 <!-- assets/units_meta.js (sprite sheets from another game) quarantined in round 106: unused by any unit. See quarantine/myth2/README.md -->
@@ -24502,7 +24509,7 @@ class Obstacles {
    *  on a box with four wheels. One rusted material per model material, so
    *  every wreck batches. Null (the boxes) until the model has loaded. */
   _carWreck(rng) {
-    if (!window.ExtModels || !window.EXT_MODEL_DATA || !window.EXT_MODEL_DATA.traction) return null;
+    if (!window.ExtModels || !ExtModels.known('traction')) return null;   // (round 119) registered; its pack may not be here yet
     const ext = ExtModels.clone('traction', {});
     if (!ext) return null;
     this._rusted = this._rusted || new Map();
@@ -24580,7 +24587,7 @@ class Obstacles {
   }
   _wreckModel(pick, rng) {
     const file = pick && pick.file;
-    if (!file || !window.ExtModels || !(window.EXT_MODEL_DATA && window.EXT_MODEL_DATA[file])) return null;
+    if (!file || !window.ExtModels || !ExtModels.known(file)) return null;   // (round 119) registered; its pack may not be here yet
     const ext = ExtModels.clone(file, {});
     if (!ext) return null;
     // one charred material per model material, shared by every wreck of that

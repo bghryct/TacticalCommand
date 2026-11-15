@@ -73,6 +73,8 @@
     // (or `?eagerModels=1`) before boot is the old arm.
     var lazy = !!(opts && opts.lazy) && E.lazy !== false;
     cache[name] = { proto: null, state: lazy ? 'idle' : 'loading', onReady: [], url: url, opts: Object.assign({ crewKey: name }, opts || {}) };
+    if (E.eagerPacks === undefined) { try { E.eagerPacks = /[?&]eagerPacks=1/.test(root.location.search); } catch (e) { E.eagerPacks = false; } }
+    if (E.eagerPacks) E._fetchPack(name, function () {});   // (round 119) the old arm: every pack at boot
     if (!lazy) E._load(name);
   };
   /** (round 117) Ask for a lazily registered model: starts its decode, once. */
@@ -95,6 +97,51 @@
     for (var k in cache) c[cache[k].state] = (c[cache[k].state] || 0) + 1;
     return c;
   };
+  // ---- (round 119) THE PACKS DOWNLOAD WHEN ASKED FOR, TOO --------------------------
+  // Round 117 made the DECODE lazy, but every one of the 254 pack scripts was still
+  // fetched and run at boot: ~370 MB of base64 (184 MB over the wire from GitHub
+  // Pages, compressed) held as strings in the JS heap, for a battle that fields a
+  // dozen or two models. The page now lists them inside <template id="modelPacks">,
+  // which the browser neither fetches nor runs, and `_load` injects one <script>
+  // the first time its model is asked for: a <script> tag, not an XHR, so it still
+  // works from file://. The tags keep their text, so the tools that add them
+  // (register_baked.py, roster_r108.py, roster_r115.py) and the tests that look
+  // for them are unchanged. `?eagerPacks=1` is the old arm: every pack at boot.
+  var packs = null, fetching = {};
+  /** The pack script the page lists for `name`, or null (none listed, or no DOM yet). */
+  E.packUrl = function (name) {
+    if (!packs) {
+      var t = root.document && root.document.getElementById && root.document.getElementById('modelPacks');
+      if (!t) return null;   // asked before the list was parsed, or no DOM at all: ask again later
+      packs = {};
+      var list = (t.content || t).querySelectorAll('script[src]');
+      for (var i = 0; i < list.length; i++) {
+        var src = list[i].getAttribute('src'), m = /([\w-]+)\.model\.js(?:[?#].*)?$/.exec(src || '');   // (tools/devserver.py adds ?b=…)
+        if (m) packs[m[1]] = src;
+      }
+    }
+    return packs[name] || null;
+  };
+  /** Fetch `name`'s pack, once. `then` runs when it has loaded or failed. */
+  E._fetchPack = function (name, then) {
+    var src = E.packUrl(name), doc = root.document;
+    if (!src || !doc || !doc.createElement) return false;
+    var q = fetching[name];
+    if (q === true) { then(); return true; }   // here already (or failed): carry on
+    if (q) { q.push(then); return true; }
+    q = fetching[name] = [then];
+    var fin = function () { fetching[name] = true; for (var i = 0; i < q.length; i++) { try { q[i](); } catch (e) {} } };
+    var s = doc.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = fin;
+    s.onerror = function () { console.warn('[extmodels] ' + name + ': its pack did not load (' + src + ')'); fin(); };
+    (doc.head || doc.documentElement).appendChild(s);
+    return true;
+  };
+  /** Is `name` a model the page registered, and not one that failed? Whether it
+   *  has downloaded or decoded yet is `ready`'s question, not this one's. */
+  E.known = function (name) { var r = cache[name]; return !!r && r.state !== 'failed'; };
+
   E._load = function (name) {
     var rec = cache[name], url = rec.url;
     if (!root.THREE || !root.THREE.GLTFLoader) {
@@ -117,6 +164,12 @@
       if (typeof root.cosmeticScope === 'function') root.cosmeticScope(land, null, [gltf]); else land(gltf);
     };
     var packed = root.EXT_MODEL_DATA && root.EXT_MODEL_DATA[name];
+    // (round 119) not here yet: fetch its pack and come back (once; a failed fetch falls through to the .gltf)
+    if (!packed && !rec.packTried && E.packUrl(name)) {
+      rec.packTried = true;
+      E._fetchPack(name, function () { E._load(name); });
+      return;
+    }
     if (packed) {
       try {
         new root.THREE.GLTFLoader().parse(JSON.stringify(packed), '', done, function (err) {
