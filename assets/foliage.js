@@ -1403,6 +1403,9 @@
           if (!was) { touched++; continue; }
         } else {
           if (!this._plantable(x, z)) continue;
+          // (round 119) `notOn`: surfaces (by kin) this paint refuses. A crop is sown on ploughland, not a beach:
+          // Salerno's map sowed maize and wheat discs, scaled with the field, over 10,399 of its 16,716 sand cells.
+          if (opts.notOn) { var nsf = G.TYPE_DEF[this.terrain.type[i]]; if (nsf && opts.notOn.indexOf(nsf.kin || nsf.name) >= 0) continue; }
           if (this.kind[i] !== kv && this.dens[i] > 0 && !opts.replace) {
             // Painting a new kind over an old one thins the old first, so you
             // can blend a wheat field into its grass margin.

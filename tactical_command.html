@@ -71394,8 +71394,11 @@ class Game {
       // disc — see `Foliage.paint`. A crop field is the exception: a farmer
       // sows to the edge of what he ploughed, so wheat keeps its hard disc.
       const crop = id === 'wheat' || id === 'barley' || id === 'rye' || def.crop === true;   // (round 113) every sown kind
+      // (round 119, `game.cropSand119`) …but not on a beach: a sown crop leaves sand to its heather. Maize too,
+      // though `corn` is not flagged a crop (it clumps as the ground does, and keeps doing so).
+      const sown = crop || id === 'corn';
       this.foliage.paint(cx, cz, def.index, Math.max(1, r0 * MAPSCALE), dens === undefined ? 0.8 : dens,
-        { hard: true, replace: true, natural: !crop, floor: 0.36 });
+        { hard: true, replace: true, natural: !crop, floor: 0.36, notOn: sown && this.cropSand119 !== false ? ['sand'] : null });
     };
     // ---- REAL BUILDINGS ---------------------------------------------------
     // `assets/structures.js` builds modular, walk-in, room-by-room, storey-by-
@@ -74266,6 +74269,9 @@ function boot() {
   game.setMode('edit');
   if (typeof editorKit118Install === 'function') editorKit118Install();   // (118) game.editorKit118, game.craterTool118 (assets/editorkit118.js): before the Cover tab lists its tools
   if (typeof coverTab118Install === 'function') coverTab118Install();   // (118) game.coverTab118: the editor's Cover tab (assets/covertab118.js)
+  // (round 119) `?play=1`, the public page's Play button, opens on the battle setup, exactly as Play does; without
+  // it the game opens in the editor, where the owner works.
+  try { if (/[?&]play=1/.test(location.search)) game.playFromUi(); } catch (e) { console.warn('play=1', e); }
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();

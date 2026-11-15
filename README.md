@@ -9,7 +9,7 @@ with first-person control of any unit on the field.
 It runs in the browser with nothing to install. There are seven campaigns,
 ninety-six battlefields and a content editor (`editor.html`).
 
-- The scale models download as a battle needs them: about 40 MB for the opening
+- The scale models download as a battle needs them: about 25 MB for the opening
   battle, then only the models each new map fields. Tanks may show as plain
   shapes for a moment, and your browser keeps the models after that.
 - A desktop browser such as Chrome, Edge or Firefox works best.
