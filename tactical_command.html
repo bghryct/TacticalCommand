@@ -3613,6 +3613,17 @@ const TANK_LOOK_SOFT = 0.6;   // soft targets worth a shell
 const TANK_LOOK_MG = 0.6;     // the coax
 // Reconnaissance by fire (`Unit._tankAreaFire`).
 const TANK_AREA_FRESH = 3.0;    // (s) how long the troop's aim point stands
+// (round 119, `game.urbanAtk119`) THE ATTACK BETWEEN BUILDINGS — see `Game._ua119Approach`.
+const UA119_KNOWN_S = 20;      // (s) a contact last seen in a room this recently marks his house as held
+const UA119_OBJ_R = 24;        // (u) …within this of the assault's point: the house the assault is FOR
+const UA119_REACH = 80;        // (u) …and within this of the section: beyond it the approach march is not this drill
+const UA119_WALL = 3.5;        // (u) at the wall: the hand-over to the entry (the assault case below, `_entryPlan`)
+const UA119_SUPP_MIN = 6;      // (s) rounds on the windows at least this long before anybody stands up
+const UA119_SUPP_MAX = 20;     // (s) …and the crossing goes at this, quiet windows or not
+const UA119_QUIET = 3;         // (s) a window that has not fired for this long has its head down
+const UA119_SMOKE_WAIT = 3;    // (s) a screen takes about this to build (SmokeCloud buildTime)
+const UA119_CROSS_MAX = 25;    // (s) the crossing is the assault's after this, wherever the men are
+const UA119_HOUSE_MAX = 400;   // cells: a house footprint is searched this far at most
 const TANK_AREA_FOE_R = 16;     // (u) someone hostile this near it, or it is empty ground
 const TANK_AREA_SLOW = 3;       // an area HE round every this many reloads
 const TANK_AREA_HE_KEEP = 0.4;  // HE held back for what the crew can see
@@ -21844,6 +21855,19 @@ const PB_SWAY = 0.6;
  *  camera move under a shadow map drawn every other frame), and the longest
  *  stretch it will reckon with (a sun on the horizon). */
 const PB_SHADOW_PAD = 4, PB_SHADOW_MAX = 200;
+/** (round 119) THE SHADOW PASS DRAWS ONLY WHAT CASTS A SHADOW ANYONE CAN SEE (`game.shadowSet119`).
+ *  `PropBatcher.cull` packs one buffer a batch: the picture's instances and the
+ *  ones whose shadow falls in view. The shadow pass drew the whole buffer, so a
+ *  tree in view but outside the sun's box went through the shadow pass's
+ *  vertex work to be clipped: on Village at the zoom limit 1,997 of the 3,216
+ *  trees it drew (2.9 M of its 3.5 M triangles), at the playing camera 206 of
+ *  873, in first person 120 of 218. With the switch on, the instances whose
+ *  shadow can be seen are packed FIRST: `count` rests at that prefix (the
+ *  shadow pass, which calls no `onBeforeRender`), and the colour pass widens
+ *  it to the whole set and narrows it back. The shadow map is the same: what
+ *  the prefix leaves out lies outside the sun's box and could not write to it. */
+const PB_BEFORE119 = function () { const C = this.userData.cull; if (C && C.split) this.count = C.nv; };
+const PB_AFTER119 = function () { const C = this.userData.cull; if (C && C.split) this.count = C.ns; };
 // One wind for the whole field: the grass, the reeds, the smoke and now the
 // trees. `Game._syncPropWind` drives it from `game.wind` every frame.
 // A CLUMP OF LEAVES, drawn on a canvas at boot — nothing to download, and the
@@ -22151,6 +22175,7 @@ class PropBatcher {
    *  none differs. `PropBatcher.instCull = false` draws every instance again. */
   cull(camera, sun) {
     if (!this.active || !camera || PropBatcher.instCull === false) return 0;
+    const split = !!(typeof window !== 'undefined' && window.game && window.game.shadowSet119);   // (round 119) see PB_BEFORE119
     camera.updateMatrixWorld();
     const F1 = this._cF1 || (this._cF1 = new THREE.Frustum()), M = this._cM || (this._cM = new THREE.Matrix4());
     M.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -22162,9 +22187,9 @@ class PropBatcher {
     }
     // neither camera moved and nothing released: last frame's packing stands
     const sig = this._cullSig || (this._cullSig = new Float64Array(33)), me = M.elements, se = F2 ? sun.shadow.matrix.elements : null;
-    let same = sig[32] === 1;
+    let same = sig[32] === 1 && this._cullSplit === split;
     for (let k = 0; k < 16; k++) { if (sig[k] !== me[k]) { same = false; sig[k] = me[k]; } if (se && sig[16 + k] !== se[k]) { same = false; sig[16 + k] = se[k]; } }
-    sig[32] = 1;
+    sig[32] = 1; this._cullSplit = split;
     if (same) return 0;
     F1.setFromProjectionMatrix(M);
     const S = this._cS || (this._cS = new THREE.Sphere());
@@ -22177,12 +22202,32 @@ class PropBatcher {
     for (const im of this.batches) {
       const C = im.userData && im.userData.cull;
       if (!C) continue;
-      const cast = !!(F2 && im.castShadow && down > 0.02);
+      if (C.casts === undefined) C.casts = im.castShadow;   // (round 119) the batch's own flag: castShadow is set below
+      const cast = !!(F2 && C.casts && down > 0.02);
       // a batch neither camera can see is culled whole by three, as before
       if (im.boundingSphere && !F1.intersectsSphere(im.boundingSphere) && !(cast && F2.intersectsSphere(im.boundingSphere))) continue;
-      const sp = C.sph, vis = C.vis;
-      let k = 0, changed = false;
-      for (let i = 0; i < C.n; i++) {
+      const sp = C.sph, vis = C.vis, sp2 = split && cast;
+      let k = 0, ks = 0, changed = false;
+      if (sp2) {
+        // (round 119, `game.shadowSet119`) the instances whose shadow can be seen FIRST, then those only in view
+        const tail = C.tail || (C.tail = new Int32Array(C.n)); let kt = 0;
+        for (let i = 0; i < C.n; i++) {
+          const r = sp[i * 4 + 3];
+          if (r < 0) continue;
+          S.center.set(sp[i * 4], sp[i * 4 + 1], sp[i * 4 + 2]); S.radius = r;
+          const inC = F1.intersectsSphere(S);
+          if (!F2.intersectsSphere(S)) { if (inC) tail[kt++] = i; continue; }   // in view, outside the sun's box
+          if (!inC) {
+            const t = Math.min(PB_SHADOW_MAX, Math.max(0, S.center.y + r - (C.gy ? C.gy[i] : yLow)) / down) * 0.5;
+            S2.center.set(S.center.x + Ld.x * t, S.center.y + Ld.y * t, S.center.z + Ld.z * t); S2.radius = r + t + PB_SHADOW_PAD;
+            if (!F1.intersectsSphere(S2)) continue;
+          }
+          if (vis[k] !== i) changed = true;
+          vis[k++] = i;
+        }
+        ks = k;
+        for (let j = 0; j < kt; j++) { const i = tail[j]; if (vis[k] !== i) changed = true; vis[k++] = i; }
+      } else for (let i = 0; i < C.n; i++) {
         const r = sp[i * 4 + 3];
         if (r < 0) continue;                                   // released
         S.center.set(sp[i * 4], sp[i * 4 + 1], sp[i * 4 + 2]); S.radius = r;
@@ -22196,12 +22241,16 @@ class PropBatcher {
         if (vis[k] !== i) changed = true;
         vis[k++] = i;
       }
-      if (k !== C.nv) changed = true;
+      if (!sp2) ks = k;
+      if (k !== C.nv || ks !== C.ns || !!C.split !== sp2) changed = true;
       drawn += k;
       if (!changed) continue;
       const A = im.instanceMatrix.array, all = C.all;
       for (let j = 0; j < k; j++) { const i = vis[j]; for (let e = 0; e < 16; e++) A[j * 16 + e] = all[i * 16 + e]; }
-      im.count = k; C.nv = k;
+      C.nv = k; C.ns = ks; C.split = sp2;
+      if (sp2 && im.onBeforeRender !== PB_BEFORE119) { im.onBeforeRender = PB_BEFORE119; im.onAfterRender = PB_AFTER119; }
+      im.count = sp2 ? ks : k;   // at rest the shadow pass's prefix; the colour pass widens it (PB_BEFORE119)
+      im.castShadow = C.casts && (!sp2 || ks > 0);
       im.visible = k > 0;
       im.instanceMatrix.updateRange.offset = 0; im.instanceMatrix.updateRange.count = k * 16;
       im.instanceMatrix.needsUpdate = true;
@@ -27147,6 +27196,11 @@ const FRAG_WALL_MASONRY = 0.08;
 // count against a way out (`_fleeFire`).
 const STACK_R = 16, STACK_OFF = 0.36, STACK_STEP = 0.24, STACK_GAP = 1.2, NADE_ROOM_WAIT = 2.2, STACK_MAX = 25, STACK_ARRIVE = 0.3;
 const STACK_GAP_IN = 0.5, STACK_MAX_IN = 6;   // (round 115) at an inner door
+// (round 119) entry119 — men sent into a house get there (`Game._entryTick119`, `_stackWalk119`, `_sendIn119`,
+// `Unit._entryWalk119`). A stack is planned only within ENTRY_PLAN_R (u) of the door his route meets; he is AT the
+// wall within ENTRY_AT_R of his place on it; a walk the street emptied is ordered again ENTRY_RETRY_S apart,
+// ENTRY_TRIES times, and then the claim is given back.
+const ENTRY_PLAN_R = STACK_R * 1.5, ENTRY_AT_R = TILE * 0.6, ENTRY_RETRY_S = 1.5, ENTRY_TRIES = 6;
 // (round 117) assault117. The stack's grenade is cooked to burst A117_COOK s
 // after it is thrown, through the doorway A117_DEEP of a cell into the room, and
 // the stack goes in NADE_ENTER117 s after it BURSTS (on the burst, heads still
@@ -27170,6 +27224,19 @@ const STAIR_STEP = 0.12;
 // FALLBACK_R (u) at FALLBACK_ODDS to one against his side's men round him;
 // every man looked at every FALLBACK_S s; not sent back in for FALLBACK_HOLD s
 const FALLBACK_R = 22, FALLBACK_ODDS = 2.5, FALLBACK_S = 1.0, FALLBACK_HOLD = 45;
+// (round 119, `game.urbanDef119`) THE DEFENCE OF A TOWN BY DOCTRINE. A prepared defending section takes the firing
+// positions of the houses within UD119_R (u) of its ground (`Game._udGarrison119`), one man a step for the whole
+// field; a man refused is asked again after UD119_RETRY s, and a claim he is not walking to is dropped after
+// UD119_STALE s. Choosing the window (`_udCellWorth119`): a house another section of his side holds costs UD119_OTHER
+// a man in it (at most three); a house UD119_NEAR..UD119_SUPPORT_R (u) from another section's house earns
+// UD119_SUPPORT (houses that cover each other); a machine gun's window earns UD119_GRAZE_K a cell of clear street in
+// front of it, out to UD119_GRAZE cells (grazing fire). Falling back (`_udFallBack119`): to a firing position in
+// another house within UD119_BACK_R (u), at least UD119_BACK (u) further from the enemy, a house his side holds first
+// (+UD119_HELD). The counter-attack reserve (`_udPickReserve119`): the rifle section furthest from the enemy, in a
+// defence of at least UD119_RES_MIN rifle sections.
+const UD119_R = 12, UD119_RETRY = 20, UD119_STALE = 10, UD119_OTHER = 0.6, UD119_NEAR = 6, UD119_SUPPORT_R = 30,
+  UD119_SUPPORT = 0.8, UD119_GRAZE = 12, UD119_GRAZE_K = 0.12, UD119_BACK_R = 36, UD119_BACK = 6, UD119_HELD = 2,
+  UD119_RES_MIN = 3;
 // (round 115) how far a man's middle keeps off a wall: half his width (0.28 m)
 // and half the wall's thickness, in world units (`Game._wallClamp`)
 const MAN_CLEAR = 0.28 / METERS_PER_UNIT + 0.18 * K_BLD * 0.5;
@@ -38502,7 +38569,7 @@ class Unit {
       // (round 119) …but not a gun that points one way, fighting armour it can see inside its range
       // (`game.arcFight119`, `_arcFightNow119`): fetched back to its troop it turned its gun away, came round
       // onto the enemy again, and was fetched again — 43% of the paths a casemate was given in contact.
-      if (!this.explicit && dist2(this.pos, from) > leash && !this._arcFightNow119(t, d)) {
+      if (!this.explicit && dist2(this.pos, from) > leash && !this._arcFightNow119(t, d) && !(this.game.entry119 === true && this._entryWalk119())) {
         this.target = null; this._returnToAnchor(); return;
       }
       if (kind === 'arrow' || kind === 'javelin' || kind === 'rifle' || kind === 'officer' || kind === 'engineer') {
@@ -38512,7 +38579,8 @@ class Unit {
         // CLOSE WITH HIM (round 101): a man going in with the bayonet, or with
         // nothing left to fire, does not back away from the man he is going
         // for — and nobody in an assault backs away from the position.
-        if (this._closesWith(t, d)) this._chase(t);
+        if (this.game.entry119 === true && this._entryWalk119()) this._charging = null;   // (round 119) entry119: into the house first
+        else if (this._closesWith(t, d)) this._chase(t);
         else if (d < 8 && !this.hold && !this._assault) this._kiteFrom(t);   // too close — back off
         else if (d > holdRng) this._chase(t);
         else if (!this._onCoverLeg118()) this.path = [];                // stand and fire ((round 118) once in the cover he was closing to)
@@ -39292,6 +39360,9 @@ class Unit {
 
     // AI, caught exposed under fire — advancing units bound often; a pinned unit
     // holding in the open relocates to cover, but only every few seconds.
+    // (round 119) entry119: a man on a stack's walk to the wall, or going in from it, has the door for his cover: the
+    // dash found him a hedge across the street from it (traced, Ortona: every stack man was walked back from the door)
+    if (this.game.entry119 === true && this._entryWalk119() && ((this._stack && this._stack.at < 0) || now - (this._entryIn119 != null ? this._entryIn119 : -99) < 20)) return false;
     if (now - (this._coverT || -99) < (moving ? 1.2 : 3.5)) return false;
     this._coverT = now;
     const goal = this.path.length ? this.path[this.path.length - 1]
@@ -46182,6 +46253,7 @@ class Unit {
     // (round 118, `game.bunker118`) a man in a bunker does not fire out of its embrasure's arc: he lets the
     // target go, and the scan (which reads the same arc) finds him one inside it
     if (this.game.bunker118 === true && window.Bunker118 && window.Bunker118.holds(this.game, this, target)) { this.target = null; return true; }
+    if (this.game.entry119 === true && this._entryWalk119()) return true;   // (round 119) entry119: the street to the door is crossed, not fought
     if (!this.def.vehicle && this.path.length && (this.moveMode === 'fast' || this.moveMode === 'sneak')) return true;
     // A BOUND IS CROSSED, NOT FOUGHT. A man on a tranche of an advance — or
     // rushing the next bound of an assault — is moving under somebody else's
@@ -46453,6 +46525,17 @@ class Unit {
   /** (round 115) Standing in a room of a building — a cell with walls and a
    *  roof or floor over it (`insideAt` >= 0.5, the test `_windowFire` uses), on
    *  his own storey: the street outside a wall is not in it. */
+  /** (round 119) entry119: on his way into a house from the street — a claim (`_strSpot`) and a route, to it or to
+   *  his place on a stack's wall, and not yet in a room. He crosses the street; he does not stop in it to fight
+   *  (`_holdsFire`, `think`'s stand-and-fire, leash and kite). In a room the house is fought as before. Traced in the
+   *  door test: every walk into a house was emptied in the street the first tick a rifleman had a target inside 0.6
+   *  of his range, and he lay there holding his claim for the rest of the battle. */
+  _entryWalk119() {
+    if (this._strSpot == null || !this.path.length || this.game.entry119 !== true || this.def.vehicle) return false;
+    const s = this._stack;
+    if (s && (s.at >= 0 || s.wait117)) return false;
+    return !this._inRoom();
+  }
   _inRoom() {
     const S = this.game.structures;
     if (!S || !S.any) return !!this.garrison;
@@ -55738,8 +55821,10 @@ class Game {
       // firing from the street in front of the house he has been told to hold
       // is in the wrong place whatever he is firing at, and
       // `_aiOccupyStructure` drops his target as it orders him.
+      if (rec._cover119 && rec._cover119.has(u)) continue;   // (round 119) entry119: the fire team covers the door
       if (!want && !u.path.length && !(this.time - (u._fellBackT || -1e9) < FALLBACK_HOLD)) want = u;
     }
+    if (want && rec._clear119 && this.entry119 === true) { if (this._clearRoom119(want, t.x, t.z, r + 8)) inside++; want = null; }   // (round 119) entry119: an assault clears the house
     if (want && this._aiOccupyStructure(want, t.x, t.z, r + 8)) inside++;
     return inside > 0;
   }
@@ -56753,6 +56838,9 @@ class Game {
       sq.task = 'Holding ' + (t.label || 'its position');
       if (this.support117 === true) this._holdGunLine117(rec);
       if (this.cover118 === true) this._holdCover118(rec, t);
+      // (round 119, `urbanDef119`) …and a prepared defence in a town holds its houses: this branch returned before
+      // the `hold` case's `_squadHoldsBuilding`, so no defending section ever went indoors (`_udGarrison119`)
+      if (this.urbanDef119 === true) this._udGarrison119(rec, t);
       for (const u of live) {
         if (u._assault || u.garrison || u.embarkedIn || u._strSpot != null) continue;
         if (this.support117 === true && u._gunSpot != null) continue;   // (round 117) a gun gone to where it can see
@@ -57323,6 +57411,9 @@ class Game {
       // ----------------------------------------------------------- assault --
       case 'assault': {
         sq.task = 'ASSAULTING';
+        // (round 119, `game.urbanAtk119`) ONTO A HOUSE THAT HAS SHOWN FIRE, THE STREET IS CROSSED UNDER COVER: the
+        // windows suppressed first, smoke across the open ground, the men to the wall — and only then the entry below.
+        if (this.urbanAtk119 === true && this._ua119Approach(rec, t, cmd, D)) break;
         const ar = t.r || AICFG.vpRadius;
         // A SECTION STANDING ON ITS OBJECTIVE DOES NOT NEED ANOTHER BOUND — AND
         // LAUNCHING ONE IS WHAT KEPT IT OUT OF THE HOUSE.
@@ -57353,7 +57444,20 @@ class Game {
         // it returns false when there is no structure within `ar + 8` — so ask
         // it FIRST and let the bound stand as the fallback it always was.
         const arrived = range < ar * 1.6;
+        // (round 119) entry119: FIRE AND MOVEMENT AT THE DOOR. The whole section was sent in one man a tick, every
+        // one of them holding fire on the way (`Unit._entryWalk119`), so nobody kept the defenders' heads down while
+        // it crossed. While the house is contested (an enemy known on the objective) and nobody of the section is in a
+        // room yet, its fire team (`_squadFireTeam`: the guns, else a third of the rifles) is not sent: it keeps the
+        // windows under fire (`_squadFire` below) and goes in once the first man is through the door.
+        rec._cover119 = null; rec._clear119 = this.entry119 === true;
+        if (this.entry119 === true && arrived && live.length >= 3 && !live.some(u => u._strSpot != null && u._inRoom())
+          && this._knownFoeAt(live[0].team, t.x, t.z, ar + 8, 20)) {
+          rec._cover119 = new Set(this._squadFireTeam(live));
+          // (the claims went out before anybody was known: the fire team's men still in the street give theirs back)
+          for (const u of rec._cover119) if (u._strSpot != null && !u._stack && !u._inRoom()) { u._strSpot = null; u.path = []; u.state = 'idle'; u.hold = false; }
+        }
         const clearing = arrived && this._squadHoldsBuilding(rec, t, ar);
+        rec._clear119 = false;
         if (clearing) sq.task = 'CLEARING THE BUILDING';
         const idle = live.filter(u => !u._assault && !u.def.vehicle && !u.def.towed
           && u._strSpot == null && !KIND_EMPLACED.has(u.def.kind));
@@ -57872,9 +57976,11 @@ class Game {
     // `game._counterLost = false` is the old trigger, for an A/B.
     const alarm = this._counterLost !== false ? (this.lostAt && this.lostAt[T]) : (this.alarms && this.alarms[T]);
     if (alarm && this.time - alarm.t < 20 && Math.random() < D.counterAttack) {
-      const cands = free().filter(r => ARM_RIFLE.has(r.arm)
+      let cands = free().filter(r => ARM_RIFLE.has(r.arm)
         && hyp(r.cx - alarm.x, r.cz - alarm.z) < 120 && r.mood.commit >= 0.9);
       cands.sort((a, b) => hyp(a.cx - alarm.x, a.cz - alarm.z) - hyp(b.cx - alarm.x, b.cz - alarm.z));
+      // (round 119, `urbanDef119`) …the defence's reserve first, and never a section holding its windows
+      if (this.urbanDef119 === true && this._defendingSide(T)) cands = this._udReserveFirst119(T, cands);
       const n = Math.min(cands.length, D.counterAttack >= 0.9 ? 2 : 1);
       for (let i = 0; i < n; i++) {
         const r = cands[i];
@@ -57909,6 +58015,7 @@ class Game {
           if (r.sq._counterFor === alarm.t) continue;
           r.sq._counterFor = alarm.t;
         }
+        if (alarm.house119 && this.urbanDef119 === true) this._ud119Ctr = (this._ud119Ctr || 0) + 1;   // (round 119) a house lost (`_udGarrison119`)
         r.taken = true;
         this._squadTask(r, 'counter', alarm.x, alarm.z);
         for (const u of r.live) claimed.add(u);
@@ -57938,6 +58045,7 @@ class Game {
       // measured, attacks that culminated at 55% losses finished at 84–90%.
       // Exposed and engaged, it pulls back a bound towards its own lines first
       // (`CULM_BACK`), and holds from there.
+      if (this.urbanDef119 === true && this._defendingSide(T)) this._udPickReserve119(T, recs, foeC);   // (round 119)
       const spent = cmd.culminated && !(this._prepared !== false && this._defendingSide(T));
       for (const r of recs) {
         if (r.taken || r.arm === 'armour') continue;
@@ -59739,6 +59847,7 @@ class Game {
       for (const u of still) {
         // Never override a hand-given order, an assault role, or a man in a hole.
         if (!u._underAI() || u._assault || u.garrison || u.digT > 0) continue;
+        if (this.entry119 === true && u._entryWalk119()) continue;     // (round 119) entry119: a man on his way into a house is not left behind to watch
         u._overwatch = true;
         u.hold = true;                       // stay put, do not follow them out
         if (!u.dugin && u.posture !== 'defend' && u.posture !== 'ambush') u.posture = 'prone';
@@ -61017,6 +61126,7 @@ class Game {
       u._strSpot = c.key;                              // AFTER the order — orderMove releases it
       u.explicit = false;                              // an order from the player still overrides
       u._pendingCover = true;
+      if (this.entry119 === true) { (this._entryMen119 || (this._entryMen119 = new Set())).add(u); u._entryN119 = 0; u._entryT119 = this.time; }   // (round 119) …and walked again if the street empties it
       this._entryPlan(u, c.key, cellCenter(c.x), cellCenter(c.z), c.L, 'normal');   // (round 115) stack at the door first
       return true;
     }
@@ -61043,6 +61153,288 @@ class Game {
       }
     }
     return v + (mas > tim ? 0.6 : tim ? -0.6 : 0);
+  }
+  /**
+   * (round 119, `game.urbanDef119`) THE PREPARED DEFENCE OF A TOWN GOES INTO ITS HOUSES.
+   *
+   * A defending side holds its ground in place (`_aiSquadDoctrine` (2b): `hold`, `inPlace`), and `_squadRun`'s
+   * branch for that task kept each man in his own hole and returned before the `hold` case that calls
+   * `_squadHoldsBuilding` — so not one defending section ever went into a house. Measured (seed 11, 1800 s, the
+   * shared scoreboard and tools/probe_urbandef119.js): the defenders of Ortona spent 4% of their man-seconds in a
+   * room, Saint-Lô 3%, Arnhem Bridge 10% (only men the map put down inside), and died in the street.
+   *
+   * What the manuals of 1944 teach (US FM 31-50, "Combat in Towns"; the British and German drills say the same):
+   * a defence in a town is a set of strongpoints in solid buildings that cover one another; automatic weapons low,
+   * for grazing fire down the streets; riflemen and observers higher, for the long view and plunging fire; the men
+   * with sub-machine guns and the anti-tank weapons on the ground floor by the doors; a reserve held back to
+   * counter-attack a house that falls; and a house that cannot be held is left for the next one, not died in.
+   *
+   * So, for a section of a computer side on a prepared position: every man not already in a firing position takes
+   * one in the houses within UD119_R of its ground (`_aiOccupyStructure` with `ud`: the windows on the side the
+   * attack will come from, before anybody has seen it; the storey by his weapon; the houses other sections hold
+   * cost, the ones near them pay — see `_udCellWorth119`; the search is `_udOccupy119`), one man a step for the field. A man who reaches his
+   * window before the first shot of the battle has had the time to prepare it (`dugin`, as `_prepareDefence` gives
+   * a man indoors). The section's house is watched: emptied of it with the enemy inside, it is a position lost
+   * (`lostAt`, as a flag taken), and the counter-attack in (2) goes in on it, the reserve first.
+   */
+  _udGarrison119(rec, t) {
+    const S = this.structures, live = rec.live;
+    if (!S || !S.any || !live.length) return;
+    const T = live[0].team;
+    if (T === this.playerTeam) return;
+    let ud = t.ud119;
+    if (!ud) {
+      // the side the attack comes from: the enemy's own ground, which a defence prepared since dawn knows
+      let fx = 0, fz = 0, n = 0;
+      for (const o of this.units) if (o.alive && !o.downed && o.team > 0 && areHostile(T, o.team)) { fx += o.pos.x; fz += o.pos.z; n++; }
+      let ax = 0, az = 0;
+      if (n) { const dx = fx / n - rec.cx, dz = fz / n - rec.cz, L = hyp(dx, dz) || 1; ax = dx / L; az = dz / L; }
+      ud = t.ud119 = { ax, az, h: 0, had: false, lostT: 0, chk: 0 };
+    }
+    const now = this.time;
+    let nIn = 0, want = null;
+    for (const u of live) {
+      if (u._strSpot != null) {
+        if (!this._strSpotSound(u._strSpot)) { u._strSpot = null; u.hold = false; continue; }
+        if (this._atStrSpot(u)) {
+          if (!u.hold) {
+            u.hold = true; u.posture = 'defend'; u.anchor.copy(u.pos); u.path = [];
+            this._ud119Arr = (this._ud119Arr || 0) + 1;
+            if (!u.dugin && !this._contact116) { u.dugin = 0.85; u.digT = -1; }   // a house held since dawn is prepared
+          }
+          if (!ud.h) ud.h = this._house117(worldToCell(u.pos.x), worldToCell(u.pos.z));
+        } else if (!u.path.length && now - (u._ud119T || 0) > UD119_STALE) { u._strSpot = null; u.hold = false; continue; }
+      }
+      if (ud.h && u._inRoom() && this._house117(worldToCell(u.pos.x), worldToCell(u.pos.z)) === ud.h) nIn++;
+      if (want || u._strSpot != null || u.path.length || u.def.vehicle || u.def.towed || u.garrison || u._assault || u.embarkedIn || u.downed) continue;
+      if (KIND_EMPLACED.has(u.def.kind) || u.ccState === 'routed' || u.ccState === 'broken' || (u.suppression || 0) > 0.35) continue;
+      if (now - (u._ud119T || -1e9) < UD119_RETRY || now - (u._fellBackT || -1e9) < FALLBACK_HOLD) continue;
+      want = u;
+    }
+    if (want && this._ud119At !== now) {
+      this._ud119At = now;                                   // one claim a step for the whole field: a route each
+      want._ud119T = now;
+      if (this._udOccupy119(want, t.x, t.z, UD119_R, ud)) {
+        this._ud119N = (this._ud119N || 0) + 1;
+        if (!want.path.length && !this._atStrSpot(want)) want._strSpot = null;   // refused at the gate: no claim
+      }
+    }
+    // THE HOUSE LOST: the section had men in it, has none now, and the enemy is in it
+    if (ud.h) {
+      if (nIn) { ud.had = true; ud.lostT = 0; }
+      else if (ud.had && !ud.lostT && now >= ud.chk) {
+        ud.chk = now + 2;
+        for (const o of this.units) {
+          if (!o.alive || o.downed || o.def.vehicle || !(o.team > 0) || !areHostile(T, o.team) || !o._inRoom()) continue;
+          const ox = worldToCell(o.pos.x), oz = worldToCell(o.pos.z);
+          if (this._house117(ox, oz) !== ud.h) continue;
+          ud.lostT = now;
+          // a house is a position: lost, it is the immediate counter-attack's alarm (`lostAt`, as a flag taken)
+          (this.lostAt || (this.lostAt = {}))[T] = { x: o.pos.x, z: o.pos.z, t: now, house119: ud.h };
+          this._ud119LostN = (this._ud119LostN || 0) + 1;
+          break;
+        }
+      }
+    }
+  }
+  /** (round 119, `urbanDef119`) ONE MAN INTO A FIRING POSITION BY DOCTRINE: `_aiOccupyStructure`'s search and score
+   *  (the block round the nearest house cell within `radius`, a staircase to the storey, the windows of the room,
+   *  inside, height, distance, the thick wall on the enemy's side, rooms beside his section's), with the enemy's side
+   *  taken from `ud` (ax, az) until one is known, and `_udCellWorth119` on top: the storey for his weapon, grazing
+   *  fire, the other sections' houses. The best four that route are tried, as there. Its own method so that
+   *  `_aiOccupyStructure`, which the flag guards, the player's autopilot and the `hold` case use, stays as it was. */
+  _udOccupy119(u, wx, wz, radius, ud) {
+    const S = this.structures;
+    if (!S || !S.any || u.def.vehicle || u.def.towed) return false;
+    const gx = worldToCell(wx), gz = worldToCell(wz), r = Math.ceil(radius / TILE);
+    let seed = null, bd = 1e9;
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      const x = gx + dx, z = gz + dz;
+      if (!S.has(x, z) || S.insideAt(x, z, 0) < 0.35) continue;
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; seed = { x, z }; }
+    }
+    if (!seed) return false;
+    const taken = new Set();
+    for (const o of this.units) if (o.alive && o._strSpot && o !== u) taken.add(o._strSpot);
+    const mates = [];
+    if (u.squad) for (const o of u.squad.members) {
+      if (o === u || !o.alive || o.downed || o._strSpot == null) continue;
+      const k = o._strSpot;
+      mates.push({ x: cellCenter(k % GRID), z: cellCenter(Math.floor(k / GRID) % GRID) });
+    }
+    const foe = this._knownFoeAt(u.team, wx, wz, SHUFFLE_R * 1.5, 40);
+    let fdx = (ud && ud.ax) || 0, fdz = (ud && ud.az) || 0;
+    if (foe) { const fx = (foe.pos ? foe.pos.x : foe.x) - wx, fz = (foe.pos ? foe.pos.z : foe.z) - wz, fl = hyp(fx, fz) || 1; fdx = fx / fl; fdz = fz / fl; }
+    const role = this._udRole119(u), oth = this._udOthers119(u), cands = [];
+    for (const c of this._structureFootprint(seed.x, seed.z, 160)) {
+      for (let L = 0; L < window.Structures.LEVELS; L++) {
+        if (!S.standable(c.x, c.z, L) || S.featAt(c.x, c.z, L)) continue;
+        if (L > 0 && !S.floorMat(c.x, c.z, L)) continue;
+        const key = (L * GRID + c.z) * GRID + c.x;
+        if (S.fires.length && !this._strSpotSound(key)) continue;
+        if (L > 0) { const reach = this.pathfinder.levelReach(L); if (reach && !reach[c.z * GRID + c.x]) continue; }
+        if (taken.has(key)) continue;
+        const fire = S.firingValue(c.x, c.z, L);
+        if (fire <= 0) continue;
+        let sc = fire * 2 + S.insideAt(c.x, c.z, L) + L * 0.7 - hyp(c.x - gx, c.z - gz) * 0.25
+          + this._windowWorth(S, c.x, c.z, L, fdx, fdz) + this._udCellWorth119(S, c.x, c.z, L, fdx, fdz, role, oth);
+        if (mates.length) {
+          let dm = Infinity;
+          const mx = cellCenter(c.x), mz = cellCenter(c.z);
+          for (const m of mates) dm = Math.min(dm, hyp(mx - m.x, mz - m.z));
+          sc -= Math.max(0, dm - CLOSE_LONE * 0.5) * WIN_MATE_K;
+        }
+        cands.push({ x: c.x, z: c.z, L, key, sc });
+      }
+    }
+    if (!cands.length) return false;
+    cands.sort((p, q) => q.sc - p.sc);
+    for (let i = 0; i < cands.length && i < 4; i++) {
+      const c = cands[i];
+      u.target = null; u.groundAtk = null;
+      u.orderMove(cellCenter(c.x), cellCenter(c.z), false, 'normal', c.L);
+      if (u._pathPartial) continue;
+      u._strSpot = c.key; u.explicit = false; u._pendingCover = true;
+      this._entryPlan(u, c.key, cellCenter(c.x), cellCenter(c.z), c.L, 'normal');
+      return true;
+    }
+    u.path = []; u.state = 'idle'; u.explicit = false;
+    return false;
+  }
+  /** (round 119) What his weapon makes of a storey: 'mg' (a machine gun or an automatic rifle), 'sniper', 'at' (a
+   *  rocket or a flame gun), 'close' (a sub-machine gun) or 'rifle'. */
+  _udRole119(u) {
+    const d = u.def;
+    if (d.kind === 'hmg' || d.heavyMg || d.autoRifle) return 'mg';
+    if (d.kind === 'sniper') return 'sniper';
+    if (d.kind === 'rocket' || d.kind === 'flame') return 'at';
+    if (d.kind === 'rifle' && (d.atkTime || 1) <= 0.16) return 'close';
+    return 'rifle';
+  }
+  /** (round 119) The firing positions the OTHER sections of his side have claimed: cells and houses. */
+  _udOthers119(u) {
+    const out = { pts: [], h: new Map() }, N = GRID * GRID;
+    for (const o of this.units) {
+      if (o === u || !o.alive || o.downed || o.team !== u.team || o._strSpot == null || (u.squad && o.squad === u.squad)) continue;
+      const k = o._strSpot % N, x = k % GRID, z = Math.floor(k / GRID), h = this._house117(x, z);
+      out.pts.push({ x, z, h });
+      if (h) out.h.set(h, (out.h.get(h) || 0) + 1);
+    }
+    return out;
+  }
+  /** (round 119) A firing position by doctrine, over `_windowWorth`: the storey for his weapon — a machine gun low,
+   *  with the clear street in front of its window on the enemy's side counted (grazing fire), a rifle and a sniper
+   *  high, a sub-machine gun and an anti-tank weapon at the ground floor (the first floor for the rocket) — and the
+   *  other sections' houses: one already held costs, one near another held house pays (houses that cover each other). */
+  _udCellWorth119(S, x, z, L, fdx, fdz, role, oth) {
+    let v = 0;
+    if (role === 'mg') {
+      v += L === 0 ? 1.5 : L === 1 ? 0.8 : -0.4 * (L - 1);
+      let run = 0;
+      for (let e = 0; e < 4; e++) {
+        const d = SHUFFLE_EDGE[e];
+        if (!S.wallMat(x, z, L, e) || S.wallKind(x, z, L, e) === window.Structures.K_SOLID) continue;
+        if ((fdx || fdz) && d[0] * fdx + d[1] * fdz < 0.3) continue;
+        if (S.insideAt(x + d[0], z + d[1], L) >= 0.5) continue;
+        let k = 0;
+        for (let i = 1; i <= UD119_GRAZE; i++) {
+          const cx = x + d[0] * i, cz = z + d[1] * i;
+          if (!inGrid(cx, cz) || (S.has(cx, cz) && S.insideAt(cx, cz, 0) >= 0.35) || !this.pathfinder.passable(cx, cz)) break;
+          k++;
+        }
+        if (k > run) run = k;
+      }
+      v += run * UD119_GRAZE_K * (L === 0 ? 1 : 0.5);
+    } else if (role === 'sniper') v += L * 1.2;
+    else if (role === 'rifle') v += L * 0.6;
+    else if (role === 'close') v += L === 0 ? 1.2 : 0;
+    else if (role === 'at') v += L === 1 ? 1.0 : L === 0 ? 0.6 : 0;
+    if (oth && oth.pts.length) {
+      const h = this._house117(x, z), nh = h ? (oth.h.get(h) || 0) : 0;
+      v -= Math.min(3, nh) * UD119_OTHER;
+      if (!nh) {
+        let dm = Infinity;
+        for (const p of oth.pts) if (p.h !== h) { const dd = hyp(p.x - x, p.z - z) * TILE; if (dd < dm) dm = dd; }
+        if (dm >= UD119_NEAR && dm <= UD119_SUPPORT_R) v += UD119_SUPPORT;
+      }
+    }
+    return v;
+  }
+  /** (round 119, `urbanDef119`) FALLING BACK HOUSE TO HOUSE. `_houseFallBack`'s man who is losing his house went
+   *  out of it to the nearest open ground further from the enemy (`_fallOut`), which is the street the next house
+   *  covers. By the drill he goes to the next house: a firing position in another house within UD119_BACK_R, at
+   *  least UD119_BACK further from the enemy (fx, fz), one his own side holds first, facing back at the enemy. False
+   *  when there is none he can walk to (the caller then falls out as before). */
+  _udFallBack119(u, fx, fz) {
+    const S = this.structures, P = this.pathfinder;
+    if (!S || !S.any || u.def.vehicle) return false;
+    const gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z), h0 = this._house117(gx, gz);
+    const d0 = hyp(u.pos.x - fx, u.pos.z - fz), R = Math.ceil(UD119_BACK_R / TILE), N = GRID * GRID;
+    const taken = new Set(), held = new Set();
+    for (const o of this.units) {
+      if (!o.alive || o === u || o._strSpot == null) continue;
+      taken.add(o._strSpot);
+      if (o.team === u.team && !o.downed) { const k = o._strSpot % N; held.add(this._house117(k % GRID, Math.floor(k / GRID))); }
+    }
+    const cands = [];
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const x = gx + dx, z = gz + dz;
+      if (!inGrid(x, z) || !S.has(x, z)) continue;
+      const h = this._house117(x, z);
+      if (h0 && h === h0) continue;
+      const wx = cellCenter(x), wz = cellCenter(z);
+      if (hyp(wx - fx, wz - fz) < d0 + UD119_BACK) continue;
+      const ex = fx - wx, ez = fz - wz, el = hyp(ex, ez) || 1;
+      for (let L = 0; L < window.Structures.LEVELS; L++) {
+        if (!S.standable(x, z, L) || S.featAt(x, z, L) || S.insideAt(x, z, L) < 0.5) continue;
+        if (L > 0) { if (!S.floorMat(x, z, L)) continue; const reach = P.levelReach(L); if (reach && !reach[z * GRID + x]) continue; }
+        const key = (L * GRID + z) * GRID + x;
+        if (taken.has(key) || !this._strSpotSound(key)) continue;
+        const fire = S.firingValue(x, z, L);
+        if (fire <= 0) continue;
+        cands.push({ x, z, L, key, sc: fire * 1.5 + (held.has(h) ? UD119_HELD : 0) + this._windowWorth(S, x, z, L, ex / el, ez / el) + L * 0.3 - hyp(dx, dz) * 0.15 });
+      }
+    }
+    if (!cands.length) return false;
+    cands.sort((a, b) => b.sc - a.sc);
+    const wasAI = this._aiOrders; this._aiOrders = true;
+    try {
+      for (let i = 0; i < cands.length && i < 3; i++) {
+        const c = cands[i];
+        u._strSpot = null; u.hold = false;
+        u.orderMove(cellCenter(c.x), cellCenter(c.z), false, 'fast', c.L);
+        if (!u.path.length || u._pathPartial) continue;
+        u._strSpot = c.key; u._pendingCover = true; u.explicit = false; u._ud119T = this.time;
+        this._ud119Back = (this._ud119Back || 0) + 1;
+        return true;
+      }
+    } finally { this._aiOrders = wasAI; }
+    return false;
+  }
+  /** (round 119, `urbanDef119`) THE RESERVE: the rifle section furthest from the enemy (`foeC`), named once and kept
+   *  while it has two men, in a defence of at least UD119_RES_MIN rifle sections. It holds its own ground (a house
+   *  in depth) like the others; it is the one the counter-attack sends (`_udReserveFirst119`). */
+  _udPickReserve119(T, recs, foeC) {
+    const K = this._ud119Res || (this._ud119Res = {});
+    const cur = K[T];
+    if (cur && recs.some(r => r.sq === cur && r.live.length >= 2)) return cur;
+    const rifle = recs.filter(r => ARM_RIFLE.has(r.arm) && r.live.length >= 3 && !r.live.some(u => u.def.vehicle));
+    if (rifle.length < UD119_RES_MIN || !foeC) { K[T] = null; return null; }
+    let best = null, bd = -1;
+    for (const r of rifle) { const d = hyp(r.cx - foeC.x, r.cz - foeC.z); if (d > bd) { bd = d; best = r; } }
+    K[T] = best ? best.sq : null;
+    if (best) this._ud119ResN = (this._ud119ResN || 0) + 1;
+    return K[T];
+  }
+  /** (round 119) The counter-attack's sections, the reserve first, and none whose men hold windows: a garrison
+   *  that leaves its house to retake the next one has given up two. */
+  _udReserveFirst119(T, cands) {
+    const res = this._ud119Res && this._ud119Res[T];
+    const atWin = r => r.live.some(u => u._strSpot != null && this._atStrSpot(u));
+    const out = cands.filter(r => r.sq === res);
+    for (const r of cands) if (r.sq !== res && !atWin(r)) out.push(r);
+    return out;
   }
   /**
    * (round 115) ENTRY UNDER FIRE. A section sent into a house the enemy is in,
@@ -61103,7 +61495,20 @@ class Game {
     let exposers = null, breach = null;
     // (round 117) whether the house is contested is asked at the door his route
     // meets — the way in chosen may be its far side, away from the enemy
+    // (round 119) entry119: A STACK FORMS AT THE DOOR, NOT ACROSS THE TOWN. Traced (Arnhem Bridge): men put on a
+    // stack 134-168 u (540-670 m) out, for the door their route met, walked half a battle with a stack's rules. Further
+    // than ENTRY_PLAN_R from the door he walks his claim's route as he was, and `_entryTick119` plans it again once
+    // he is near — and asks again then whether anybody is known at the door.
+    if (this.entry119 === true && !inner && hyp(cellCenter(door.ox) - u.pos.x, cellCenter(door.oz) - u.pos.z) > ENTRY_PLAN_R) {
+      u._entryPend119 = { key, tx, tz, L, mode, ox: door.ox, oz: door.oz, next: this.time + 0.5 };
+      (this._entryMen119 || (this._entryMen119 = new Set())).add(u);
+      return false;
+    }
     const foe = inner ? true : this._knownFoeAt(u.team, cellCenter(door.ix), cellCenter(door.iz), STACK_R, 30);
+    // (round 119) entry119: nobody known there yet is asked again on the way. With `concealKnow119` a garrison that has
+    // not fired is not known, so the door test's section walked in at a stroll and met the fire in the street with
+    // no stack to go to
+    if (!foe && this.entry119 === true && !inner) { u._entryPend119 = { key, tx, tz, L, mode, ox: door.ox, oz: door.oz, next: this.time + 1 }; (this._entryMen119 || (this._entryMen119 = new Set())).add(u); }
     if (!foe) return false;                              // nobody near: walk in
     // the way in chosen first (assault117), and the door his route meets if
     // there is no way to the wall at it
@@ -61140,6 +61545,15 @@ class Game {
       const wx = horiz ? ocx - H + along : ocx + d[0] * (H - MAN_CLEAR * 1.3);
       const wz = horiz ? ocz + d[1] * (H - MAN_CLEAR * 1.3) : ocz - H + along;
       u.orderMove(wx, wz, false, mode === 'sneak' ? 'sneak' : 'fast', dr.L); moved = true;
+      // (round 119) entry119: REFUSED ('fire on that ground') IS NOT A STACK. The refusal sends him to the nearest
+      // cover, and that route was taken for his walk to the wall: a stack man walking away from the door. He keeps
+      // his claim and is asked again from the cover (`_entryTick119`); the rank on the wall is given back.
+      if (this.entry119 === true && u.state !== 'move') {
+        u._strSpot = key;
+        q.n--; if (made) Q.delete(qk);
+        (this._entryMen119 || (this._entryMen119 = new Set())).add(u);
+        return false;
+      }
       // (round 115) already in the cell by the door: straight to the wall beside it
       if (!u.path.length && worldToCell(u.pos.x) === worldToCell(wx) && worldToCell(u.pos.z) === worldToCell(wz)) {
         u.path = [{ x: wx, z: wz, lvl: dr.L }]; u.pathIdx = 0; u.state = 'move';
@@ -61150,7 +61564,7 @@ class Game {
         continue;
       }
       u._strSpot = key; u.explicit = wasExp; u._pendingCover = true;
-      u._stack = { q, key, tx, tz, L, mode, sx: wx, sz: wz, at: -1 };
+      u._stack = { q, key, tx, tz, L, mode, sx: wx, sz: wz, at: -1, made: this.time };
       (this._stackers || (this._stackers = new Set())).add(u);
       // (round 117) THE BASE OF FIRE FIRST. A way in the defenders' windows see is
       // not walked up to until it has been fired on: the section holds where it is
@@ -61586,7 +62000,8 @@ class Game {
         continue;
       }
       if (s.at < 0) {
-        if (u.path.length && hyp(u.pos.x - s.sx, u.pos.z - s.sz) > STACK_ARRIVE) continue;   // still on his way to the wall
+        if (this.entry119 === true) { if (this._stackWalk119(u, s, q, now)) continue; }   // (round 119) entry119: at the wall when he is AT it
+        else if (u.path.length && hyp(u.pos.x - s.sx, u.pos.z - s.sz) > STACK_ARRIVE) continue;   // still on his way to the wall
         s.at = now; u.posture = 'defend'; u.targetFace = Math.atan2(cellCenter(q.ix) - u.pos.x, cellCenter(q.iz) - u.pos.z);
         if (!q.firstAt117) q.firstAt117 = now;
       }
@@ -61647,12 +62062,145 @@ class Game {
         if (q.nadeT > 0 && (a117 ? now < (q.burstT || q.nadeT + NADE_ROOM_WAIT) + NADE_ENTER117 : now - q.nadeT < nadeWait)) continue;
       }
       q.last = now;
+      if (this.entry119 === true && !this._sendIn119(u, s, waited)) continue;   // (round 119) he will not go in yet: he stays at the wall
       u._stack = null; set.delete(u);
       u.posture = 'normal';
-      u.orderMove(s.tx, s.tz, false, 'fast', s.L);
+      if (this.entry119 !== true) u.orderMove(s.tx, s.tz, false, 'fast', s.L);
       u._strSpot = s.key; u._pendingCover = true;
       // (round 115) …and the next room the enemy holds on his way: stack again at its door
       if (this.room115 === true || this._a117p('inner')) { this._roomsCleared = (this._roomsCleared || 0) + 1; this._entryPlan(u, s.key, s.tx, s.tz, s.L, 'fast', q); }
+    }
+  }
+  /** (round 119) entry119 — AN ASSAULT CLEARS THE HOUSE IT IS ON. The section sent onto a house took the best
+   *  firing position anywhere in the block (`_aiOccupyStructure`: a footprint of up to 160 cells, windows on the far
+   *  side scoring highest), so in the door test the men who got indoors got into the NEXT house — Ortona, 7 arrived
+   *  and none of them in the house the defenders were in — and a house with no firing position (Ortona's door 0)
+   *  could not be entered at all: the section bounded in the street. Here a man is sent into a ROOM of the house on
+   *  the objective: the one nearest the objective first, the ground floor first, rooms where the enemy is known
+   *  ahead of the rest; up to four routes tried. No room within reach: the old call. */
+  _clearRoom119(u, wx, wz, radius) {
+    const S = this.structures;
+    if (!S || !S.any || u.def.vehicle || u.def.towed) return false;
+    const gx = worldToCell(wx), gz = worldToCell(wz), r = Math.ceil(radius / TILE);
+    let seed = null, bd = 1e9;
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      const x = gx + dx, z = gz + dz;
+      if (!inGrid(x, z) || !S.has(x, z) || S.insideAt(x, z, 0) < 0.5 || !this._roofed117(x, z)) continue;
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; seed = { x, z }; }
+    }
+    if (!seed) return this._aiOccupyStructure(u, wx, wz, radius);
+    const b = this._house117(seed.x, seed.z), LV = window.Structures.LEVELS;
+    const taken = new Set();
+    for (const o of this.units) if (o.alive && o._strSpot != null && o !== u) taken.add(o._strSpot);
+    const foes = this._known117(u.team, cellCenter(seed.x), cellCenter(seed.z), TILE * 10, 30, 12), cands = [];
+    for (const c of this._structureFootprint(seed.x, seed.z, 160)) {
+      if (b && this._house117(c.x, c.z) !== b) continue;            // the house, not the block
+      for (let L = 0; L < LV; L++) {
+        if (!S.standable(c.x, c.z, L) || S.featAt(c.x, c.z, L) || S.insideAt(c.x, c.z, L) < 0.5) continue;
+        if (L > 0) { if (!S.floorMat(c.x, c.z, L)) continue; const reach = this.pathfinder.levelReach(L); if (reach && !reach[c.z * GRID + c.x]) continue; }
+        const key = (L * GRID + c.z) * GRID + c.x;
+        if (taken.has(key) || (S.fires.length && !this._strSpotSound(key))) continue;
+        let sc = -hyp(c.x - gx, c.z - gz) - L * 3;
+        for (const f of foes) { const d = hyp(worldToCell(f.x) - c.x, worldToCell(f.z) - c.z); if (d < 3) sc += 3 - d; }
+        cands.push({ x: c.x, z: c.z, L, key, sc });
+      }
+    }
+    if (!cands.length) return this._aiOccupyStructure(u, wx, wz, radius);
+    cands.sort((p, q) => q.sc - p.sc);
+    for (let i = 0; i < cands.length && i < 4; i++) {
+      const c = cands[i];
+      u.target = null; u.groundAtk = null;
+      u.orderMove(cellCenter(c.x), cellCenter(c.z), false, 'normal', c.L);
+      if (u._pathPartial) continue;
+      u._strSpot = c.key; u.explicit = false; u._pendingCover = true;
+      (this._entryMen119 || (this._entryMen119 = new Set())).add(u); u._entryN119 = 0; u._entryT119 = this.time;
+      this._entryPlan(u, c.key, cellCenter(c.x), cellCenter(c.z), c.L, 'normal');
+      return true;
+    }
+    u.path = []; u.state = 'idle'; u.explicit = false;
+    return false;
+  }
+  /** (round 119) entry119: is the stacked man still on his way to his place at the wall? AN EMPTIED WALK IS NOT AN
+   *  ARRIVAL: `_stackTick` read `!u.path.length` as "at the wall", so a man whose walk the stop to fight, a cover dash
+   *  or a refusal had emptied was at the wall wherever he stood, went first, and was sent in from there (Oosterbeek:
+   *  9 of 9 sent in never reached a room, 140-171 u from their claim). He is at it within ENTRY_AT_R of his place; an
+   *  emptied walk is ordered again ENTRY_RETRY_S apart, and a man not there in STACK_MAX (or after ENTRY_TRIES
+   *  orders) leaves the stack and walks in by his claim's route (`_entryTick119`). */
+  _stackWalk119(u, s, q, now) {
+    if (hyp(u.pos.x - s.sx, u.pos.z - s.sz) <= ENTRY_AT_R) return false;
+    if (u.path.length) return true;
+    if (now - (s.walkT119 != null ? s.walkT119 : -99) < ENTRY_RETRY_S) return true;
+    s.walkT119 = now;
+    if ((s.tries119 = (s.tries119 || 0) + 1) > ENTRY_TRIES || now - (s.made != null ? s.made : now) > STACK_MAX) {
+      u._stack = null; this._stackers.delete(u);
+      (this._entryMen119 || (this._entryMen119 = new Set())).add(u);
+      return true;
+    }
+    const wasExp = u.explicit, wasAI = this._aiOrders;
+    this._aiOrders = true;
+    try { u.orderMove(s.sx, s.sz, false, s.mode === 'sneak' ? 'sneak' : 'fast', q.L); } finally { this._aiOrders = wasAI; }
+    if (u.state === 'move') {
+      if (!u.path.length && worldToCell(u.pos.x) === worldToCell(s.sx) && worldToCell(u.pos.z) === worldToCell(s.sz)) { u.path = [{ x: s.sx, z: s.sz, lvl: q.L }]; u.pathIdx = 0; }
+      u.explicit = wasExp;
+    }
+    u._strSpot = s.key; u._pendingCover = true;
+    return true;
+  }
+  /** (round 119) entry119: the man at the head of a stack goes in — unless the order is refused (or there is no way
+   *  in from the wall), when he stays against the wall beside the door, not in the cover the refusal found for him,
+   *  and is asked again after the stack's gap; after 2 STACK_MAX at the wall he leaves the stack and his claim's
+   *  walk is asked again from there (`_entryTick119`). True when he leaves the stack. */
+  _sendIn119(u, s, waited) {
+    const wasAI = this._aiOrders;
+    u.posture = 'normal';
+    this._aiOrders = true;
+    try { u.orderMove(s.tx, s.tz, false, 'fast', s.L); } finally { this._aiOrders = wasAI; }
+    const set = this._entryMen119 || (this._entryMen119 = new Set());
+    if (u.state === 'move' && u.path.length) { set.add(u); u._entryN119 = 0; u._entryT119 = this.time; u._entryIn119 = this.time; return true; }
+    u.path = []; u.pathIdx = 0; u.state = 'idle'; u.posture = 'defend'; u._strSpot = s.key;
+    if (waited < STACK_MAX * 2) return false;
+    set.add(u);
+    return true;
+  }
+  /** (round 119) entry119 — A MAN SENT INTO A HOUSE GETS THERE. Traced in the door test (Ortona, Arnhem Bridge): the
+   *  walk to a claim, to the wall of a stack and in from it were each emptied in the street — by the stop to fight
+   *  (`_updateCombat`, `think`), by a cover dash (`_survival`, `_aiReact`, `_hugCover`), by the refusal gate — and
+   *  nothing asked again: he kept the claim, so his section counted him indoors and never sent him, and he lay in
+   *  the street for the rest of the battle. Every man of the computer's holding a claim from outside a room
+   *  (`_entryMen119`) whose walk is gone is sent again, ENTRY_RETRY_S apart, ENTRY_TRIES times, then gives the claim
+   *  back; a stack put off for range (`_entryPend119`) is planned once he is within ENTRY_PLAN_R of the door. */
+  _entryTick119(dt) {
+    const set = this._entryMen119;
+    if (this.entry119 !== true || !set || !set.size) return;
+    const now = this.time;
+    for (const u of set) {
+      const key = u._strSpot;
+      if (!u.alive || u.downed || key == null || u.def.vehicle || u.garrison || u.embarkedIn || u.surrendered
+        || u.ccState === 'routed' || u.ccState === 'broken' || u._inRoom() || this._atStrSpot(u)) { set.delete(u); u._entryPend119 = null; continue; }
+      if (u._stack) continue;                                   // the stack's own business (`_stackTick`)
+      const p = u._entryPend119;
+      if (u.path.length) {
+        if (p && p.key === key && now >= p.next && hyp(cellCenter(p.ox) - u.pos.x, cellCenter(p.oz) - u.pos.z) <= ENTRY_PLAN_R) {
+          u._entryPend119 = null;
+          const ai = u._underAI(), wasAI = this._aiOrders;
+          if (ai) this._aiOrders = true;
+          try { this._entryPlan(u, key, p.tx, p.tz, p.L, p.mode); } finally { this._aiOrders = wasAI; }
+        }
+        continue;
+      }
+      if (!u._underAI() || now - (u._entryT119 != null ? u._entryT119 : -99) < ENTRY_RETRY_S) continue;
+      u._entryT119 = now;
+      if ((u._entryN119 = (u._entryN119 || 0) + 1) > ENTRY_TRIES) { u._strSpot = null; u.hold = false; u._entryPend119 = null; set.delete(u); continue; }
+      const L = Math.floor(key / (GRID * GRID)), rem = key - L * GRID * GRID;
+      const cx = cellCenter(rem % GRID), cz = cellCenter(Math.floor(rem / GRID)), wasExp = u.explicit, wasAI = this._aiOrders;
+      this._aiOrders = true;
+      try {
+        u.orderMove(cx, cz, false, p ? p.mode : 'normal', L);
+        if (u.state !== 'move') continue;                       // refused: he went for cover, and is asked again from it
+        u._strSpot = key; u.explicit = wasExp; u._pendingCover = true;
+        if (u.path.length && !u._pathPartial) this._entryPlan(u, key, cx, cz, L, p ? p.mode : 'normal');
+      } finally { this._aiOrders = wasAI; }
     }
   }
   /**
@@ -61746,7 +62294,7 @@ class Game {
       if (foes < FALLBACK_ODDS * mates) continue;
       if (!hurt && foes < FALLBACK_ODDS * 1.5 * mates) continue;
       fx /= foes; fz /= foes;
-      if (this._fallOut(u, fx, fz)) { u._fellBackT = now; this._fellBack = (this._fellBack || 0) + 1; }
+      if ((this.urbanDef119 === true && this._udFallBack119(u, fx, fz)) || this._fallOut(u, fx, fz)) { u._fellBackT = now; this._fellBack = (this._fellBack || 0) + 1; }
     }
     this._fbCur = c;
   }
@@ -61932,6 +62480,233 @@ class Game {
     const sz = units.reduce((a, u) => a + u.pos.z, 0) / units.length;
     s.smokeAmmo -= 1;
     this.projectiles.fireSmoke(s, sx + (ox - sx) * 0.55, sz + (oz - sz) * 0.55);
+  }
+  // ===========================================================================
+  // (round 119, `game.urbanAtk119`) THE ATTACK BETWEEN BUILDINGS, UP TO THE WALL.
+  //
+  // Measured with the switch off (tools/probe_urbanatk119.js, handoff "## Round 119 — the attack between buildings"):
+  // the attacking side laid NO small-arms or machine-gun fire on any house in eight town battles, and in the door
+  // test six riflemen 8 cells from a held house lost 104-107 of 120 men in the street — the assault sends them in
+  // from where they stand. Doctrine (FM 31-50 "Attack on a Fortified Position and Combat in Towns", 1944; the
+  // British "Fighting in Built-up Areas", 1943) is the order of three things: the windows that cover the street are
+  // kept down by fire, the street is crossed under smoke, and the men go to the wall of the house, not its door.
+  //
+  // KNOWLEDGE (`concealKnow119`): the house is chosen from what the side has SEEN — contacts last seen in a room
+  // (`_knownIndex`), which under concealment are windows that have shown fire. A silent house is not attacked
+  // this way; its assault is the old one.
+  // ===========================================================================
+  /** The rooms a side knows are held: contacts last seen in a room of a building within UA119_KNOWN_S. */
+  _ua119Known(T) {
+    const C = this._ua119K || (this._ua119K = {});
+    const k = C[T];
+    if (k && k.t <= this.time && this.time - k.t < 0.5) return k.list;
+    const S = this.structures, list = [];
+    if (S && S.any) {
+      const ix = this._knownIndex(T), now = this.time;
+      for (let i = 0; i < ix.n; i++) {
+        if (now - ix.t[i] > UA119_KNOWN_S) continue;
+        const x = ix.x[i], z = ix.z[i], gx = worldToCell(x), gz = worldToCell(z);
+        if (!inGrid(gx, gz) || !S.has(gx, gz) || S.insideAt(gx, gz, 0) < 0.5) continue;
+        list.push({ x, z, gx, gz, t: ix.t[i] });
+      }
+    }
+    C[T] = { t: this.time, list };
+    return list;
+  }
+  /** A house's footprint: the structure cells joined to this one (of its building id when the map has them). */
+  _ua119House(gx, gz) {
+    const S = this.structures, H = this._ua119H || (this._ua119H = new Map()), i0 = gz * GRID + gx;
+    const b = S.bid ? (S.bid[i0] || 0) : 0, key = b ? 'b' + b : 'c' + i0;
+    let h = H.get(key);
+    if (h) return h;
+    const set = new Set([i0]), cells = [], q = [i0];
+    for (let qi = 0; qi < q.length && cells.length < UA119_HOUSE_MAX; qi++) {
+      const i = q[qi], x = i % GRID, z = (i - x) / GRID;
+      cells.push(i);
+      for (let e = 0; e < 4; e++) {
+        const nx = x + (e === 0 ? 1 : e === 1 ? -1 : 0), nz = z + (e === 2 ? 1 : e === 3 ? -1 : 0);
+        if (!inGrid(nx, nz)) continue;
+        const j = nz * GRID + nx;
+        if (set.has(j) || !S.has(nx, nz) || (S.bid && (S.bid[j] || 0) !== b) || S.insideAt(nx, nz, 0) < 0.5) continue;
+        set.add(j); q.push(j);
+      }
+    }
+    let cx = 0, cz = 0;
+    for (const i of cells) { const x = i % GRID; cx += cellCenter(x); cz += cellCenter((i - x) / GRID); }
+    h = { key, cells, set, x: cx / cells.length, z: cz / cells.length };
+    H.set(key, h);
+    return h;
+  }
+  /** Where the men go: the open cell against the house's wall nearest to them (not its door — the entry chooses
+   *  the way in, `_entryPlan`). */
+  _ua119Wall(h, fx, fz) {
+    const P = this.pathfinder, S = this.structures;
+    let best = null, bd = Infinity;
+    for (const i of h.cells) {
+      const x = i % GRID, z = (i - x) / GRID;
+      for (let e = 0; e < 4; e++) {
+        const nx = x + (e === 0 ? 1 : e === 1 ? -1 : 0), nz = z + (e === 2 ? 1 : e === 3 ? -1 : 0);
+        if (!inGrid(nx, nz) || h.set.has(nz * GRID + nx) || !P.passable(nx, nz)) continue;
+        if (S.has(nx, nz) && S.insideAt(nx, nz, 0) >= 0.35) continue;      // another house's room, not the street
+        const wx = cellCenter(nx), wz = cellCenter(nz), d = (wx - fx) * (wx - fx) + (wz - fz) * (wz - fz);
+        if (d < bd) { bd = d; best = { x: wx, z: wz }; }
+      }
+    }
+    return best;
+  }
+  /** Is a window of that house firing — a hostile man in it whose shot is under `s` seconds old? What the
+   *  attackers can hear and see (the muzzle flashes), not what they could not. */
+  _ua119Firing(h, T, s) {
+    const now = this.time;
+    for (const u of this.units) {
+      if (!u.alive || u.downed || u.def.vehicle || !areHostile(T, u.team) || u._shot119 == null || now - u._shot119 > s) continue;
+      const gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z);
+      if (inGrid(gx, gz) && h.set.has(gz * GRID + gx)) return true;
+    }
+    return false;
+  }
+  /** The rest of the side on the same windows: tanks put HE into them from the halt (`_tankAreaFire`, through
+   *  `_fireAt`, which still asks what the side has seen there), machine guns lay their beaten zone on them. */
+  _ua119Support(T, A) {
+    const now = this.time, C = this._u119;
+    if (now - (A.supT || -9) < 1) return;
+    A.supT = now;
+    for (const u of this.units) {
+      if (!u.alive || u.team !== T || u.downed || u.crewBailed || u.embarkedIn || u._assault) continue;
+      const d = hyp(u.pos.x - A.aim.x, u.pos.z - A.aim.z);
+      if (u.def.vehicle) {
+        if (u.def.kind !== 'tank' || d > (u.def.rng || 0) || d < (u.def.minRng || 0) + 8) continue;
+        u._fireAt = { x: A.aim.x, z: A.aim.z, t: now };
+        if (C) C.tankAim++;
+        continue;
+      }
+      if ((u.def.kind === 'hmg' || u.def.heavyMg) && !u.target && !u.groundAtk && !u.path.length && d <= this._effectiveRange(u)) {
+        u.orderAttackGround(A.aim.x, A.aim.z, true);
+        if (C && u.groundAtk) C.mgAim++;
+      }
+    }
+  }
+  /** A screen across the open ground, laid between the section and the house: a mortar of ours that reaches it
+   *  first, as `_aiScreenLeg` does, else a man of the section with a smoke grenade. */
+  _ua119Smoke(rec, A, w) {
+    if (!this.smoke) return false;
+    const live = rec.live, T = live[0].team, C = this._u119;
+    const px = rec.cx + (w.x - rec.cx) * 0.6, pz = rec.cz + (w.z - rec.cz) * 0.6;
+    let firer = null, bd = Infinity;
+    for (const u of this.units) {
+      if (!u.alive || u.downed || u.team !== T || u.def.kind !== 'mortar' || !(u.smokeAmmo > 0)) continue;
+      const d = hyp(u.pos.x - px, u.pos.z - pz);
+      if (d > (u.def.rng || 0) || d < (u.def.minRng || 0)) continue;
+      if (d < bd) { bd = d; firer = u; }
+    }
+    if (!firer) for (const u of live) {
+      if (u.alive && !u.downed && !u.embarkedIn && u.smokeAmmo > 0) { firer = u; break; }
+    }
+    if (!firer) return false;
+    if (firer.smokeAmmo !== Infinity) firer.smokeAmmo -= 1;
+    this.projectiles.fireSmoke(firer, px, pz);
+    if (C) { C.smoke++; if (firer.def.kind === 'mortar') C.smokeTube++; }
+    return true;
+  }
+  /** THE APPROACH, a section on an assault: true while it is running it (the assault case does nothing else that
+   *  tick), false to hand the section to the entry below — at the wall, or when there is no known-held house to
+   *  cross to. Phases: `supp` (the section firm and firing at the windows, the rest of the side on them too) ->
+   *  `smoke` (the screen building) -> `cross` (the assault element to the wall, the fire element still firing) ->
+   *  `follow` (the fire element after it) -> `done`. */
+  _ua119Approach(rec, t, cmd, D) {
+    const live = rec.live, sq = rec.sq;
+    if (live.length < 2) return false;
+    const T = live[0].team, now = this.time;
+    const C = this._u119 || (this._u119 = { n: 0, supp: 0, open: 0, quiet: 0, losing: 0, maxed: 0, smoke: 0, smokeTube: 0, cross: 0, done: 0, timeout: 0, tankAim: 0, mgAim: 0 });
+    let A = t._ua119;
+    if (A && A.phase === 'done') return false;
+    const known = this._ua119Known(T);
+    if (!A) {
+      let best = null, bd = Infinity;
+      for (const k of known) {
+        if (hyp(k.x - t.x, k.z - t.z) > UA119_OBJ_R) continue;
+        const d = hyp(k.x - rec.cx, k.z - rec.cz);
+        if (d > UA119_REACH || d >= bd) continue;
+        bd = d; best = k;
+      }
+      if (!best) return false;
+      const h = this._ua119House(best.gx, best.gz);
+      const w = this._ua119Wall(h, rec.cx, rec.cz);
+      if (!w) return false;
+      A = t._ua119 = { h, w, phase: 'supp', t0: now, phaseT: now, aim: { x: best.x, z: best.z }, supT: -9, n0: live.length };
+      C.n++;
+      // already at the wall, or a man of ours in the house: nothing to cross
+      if (hyp(rec.cx - w.x, rec.cz - w.z) <= UA119_WALL || live.some(u => { const gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z); return inGrid(gx, gz) && h.set.has(gz * GRID + gx) && u._inRoom(); })) {
+        A.phase = 'done'; C.done++;
+        return false;
+      }
+      // …go firm: a man on a leg stops where he is, and the fire task below puts the exposed in cover
+      // CAUGHT IN THE OPEN, THE DRILL IS SMOKE AND GO. A section already under the windows' fire does not stand in
+      // the street to win a firefight against men behind walls (measured in the door test: firm in the street, all
+      // six down in 16 s against 2 riflemen who fired 31 rounds to their 15): it screens the street and crosses.
+      // Suppression first is for a section that can lay it from where it is not being hit.
+      // (In the open is out of cover and out of a room: men there are exposed to the windows the moment they fire.)
+      const open = live.filter(u => !u._inRoom() && u._coverValue() < AICFG.coverMin).length;
+      if (live.some(u => now - (u._attackedT || -99) < 3) || open * 2 > live.length) {
+        A.phase = 'smoke'; A.phaseT = now; C.open++;
+        A.smoked = this._ua119Smoke(rec, A, w);
+      } else {
+        for (const u of live) if (u.path.length && !u._assault && u._strSpot == null && u._gunSpot == null) { u.path = []; if (u._releaseMove) u._releaseMove(); u._bound = null; }
+        C.supp++;
+      }
+    }
+    // the freshest sighting in that house is the aim
+    for (const k of known) if (A.h.set.has(k.gz * GRID + k.gx) && k.t >= (A.aimT || -1)) { A.aim = { x: k.x, z: k.z }; A.aimT = k.t; }
+    const w = A.w;
+    if (cmd) cmd._ua119Aim = { x: A.aim.x, z: A.aim.z, t: now };
+    switch (A.phase) {
+      case 'supp': {
+        sq.task = 'Suppressing the windows';
+        this._squadFire(live, A.aim.x, A.aim.z, true, true);
+        this._ua119Support(T, A);
+        const held = now - A.phaseT;
+        const quiet = held >= UA119_SUPP_MIN && !this._ua119Firing(A.h, T, UA119_QUIET);
+        // …and a firefight the windows are winning (a man of the section down) is broken off the same way
+        const losing = live.length < A.n0;
+        if (quiet || losing || held >= UA119_SUPP_MAX) {
+          if (quiet) C.quiet++; else if (losing) C.losing++; else C.maxed++;
+          A.smoked = this._ua119Smoke(rec, A, w);
+          A.phase = 'smoke'; A.phaseT = now;
+        }
+        return true;
+      }
+      case 'smoke': {
+        sq.task = 'Smoke on the street';
+        this._squadFire(live, A.aim.x, A.aim.z, true, true);
+        this._ua119Support(T, A);
+        if (!A.smoked || now - A.phaseT >= UA119_SMOKE_WAIT) {
+          A.phase = 'cross'; A.phaseT = now; C.cross++;
+          const fire = this._squadFireTeam(live);
+          A.fire = new Set(fire.length < live.length ? fire : live.slice(0, 1));
+        }
+        return true;
+      }
+      case 'cross':
+      case 'follow': {
+        const fire = live.filter(u => A.fire.has(u)), movers = live.filter(u => !A.fire.has(u));
+        const goers = A.phase === 'cross' ? movers : live;
+        let mx = 0, mz = 0, at = 0;
+        for (const u of goers) { mx += u.pos.x; mz += u.pos.z; if (hyp(u.pos.x - w.x, u.pos.z - w.z) <= UA119_WALL * 1.5) at++; }
+        if (goers.length) { mx /= goers.length; mz /= goers.length; }
+        const held = now - A.phaseT;
+        if (A.phase === 'cross' && (at >= Math.ceil(goers.length * 0.6) || held > UA119_CROSS_MAX)) { A.phase = 'follow'; A.phaseT = now; return true; }
+        if (A.phase === 'follow' && (at >= Math.ceil(goers.length * 0.6) || held > UA119_CROSS_MAX)) {
+          if (held > UA119_CROSS_MAX) C.timeout++;
+          A.phase = 'done'; C.done++;
+          return false;                                   // at the wall: the entry's
+        }
+        sq.task = A.phase === 'cross' ? 'Crossing to the wall' : 'Following to the wall';
+        if (A.phase === 'cross') { this._squadFire(fire, A.aim.x, A.aim.z, true, true); this._ua119Support(T, A); }
+        if (rec.issue) this._squadFormMove(rec, w.x, w.z, { men: goers, form: 'loose', len: hyp(mx - w.x, mz - w.z) + 6, mode: 'fast', urgency: 1 });
+        return true;
+      }
+    }
+    return false;
   }
   /** No contact: advance on the OBJECTIVE. Push a spaced screen of infantry and
    *  armour toward the flag the commander wants (falling back to the enemy's
@@ -72447,6 +73222,10 @@ class Game {
     this._squadSeq = 0;
     this._shufCur = 0;                 // (round 110) `_windowShuffle`'s place in the army
     this._k119 = null;                 // (round 119) `concealKnow119`'s counters (`_aiContactSurvey`)
+    // (round 119, `urbanDef119`) the reserve and the counts: this battle's
+    this._ud119Res = null; this._ud119At = -1;
+    this._ud119N = 0; this._ud119Arr = 0; this._ud119Back = 0; this._ud119LostN = 0; this._ud119Ctr = 0; this._ud119ResN = 0;
+    this._u119 = null; this._ua119K = null; this._ua119H = null;   // (round 119) `urbanAtk119`: counters, known houses, footprints
     // (round 117) THE HOUSE ASSAULTS' STATE, which outlived its battle: a door's
     // stack queue is reused while `time - made < 120`, and `time` goes back to 0
     // on this path — so the next battle's section at the same door took up the
@@ -72455,6 +73234,7 @@ class Game {
     // caches.
     if (this._doorQs) this._doorQs.clear();
     if (this._stackers) this._stackers.clear();
+    if (this._entryMen119) this._entryMen119.clear();   // (round 119) entry119
     if (this._entryC117) this._entryC117.clear();
     if (this._exitC117) this._exitC117.clear();
     if (this._fireNear) this._fireNear.clear();
@@ -73538,6 +74318,7 @@ class Game {
     if (this.bunkerMaps118 === true && window.BunkerMaps118) window.BunkerMaps118.tick(this, dt);   // (round 118) …and a map bunker's crew stays in
     this._windowShuffle(dt);                     // (round 110) …and men in a house go to the side the enemy is on
     this._stackTick(dt);                         // (round 115) …and men going into a fight go in at a door, one at a time
+    this._entryTick119(dt);                      // (round 119) entry119: …and a man sent into a house gets there
     this._houseFallBack(dt);                     // (round 115) …and a house that cannot be held is left by the far side
     this._ammoTrain(dt);                         // …and bombs come forward for the tubes
     // Everything in this block is the COMMANDER deciding, not the player — see
@@ -74349,6 +75130,8 @@ Game.prototype.destroy118 = false;
 // (round 118, second effects pass) the pool evicts by visibility, a burst's flash stays local to a first-person eye,
 // tracers are instanced streaks by the belt mix
 Game.prototype.fxPool118 = true;      // ON: no worse on Ponyri x13 and Hedgerow Hell x13 (handoff, round 118 effects second pass)
+// (round 119) the prop batches' shadow pass draws only the instances whose shadow can be seen (PB_BEFORE119)
+Game.prototype.shadowSet119 = true;    // ON: no worse at any camera on Village or Ortona, Village's zoom limit -1.1 ms (handoff, round 119 Village's frame)
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 // (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —
@@ -74362,7 +75145,9 @@ Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of
 Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
 Game.prototype.fpvGround118 = false;
 Game.prototype.water119 = true;       // (round 119) the water's swell in the vertex shader, not 2 sines a vertex on the CPU (Terrain.ambient). ON: Terrain.ambient 2.0-3.3 ms -> 0 (Argenta Gap, Purple Heart Lane, A/B with a null arm), the same picture (0 mean abs, 1-10 px differ by 0.33/255 vs a null's 0-12)
+Game.prototype.urbanAtk119 = false;   // (round 119, APPROACH) the attack between buildings: suppress the windows, smoke the street, to the wall (`_ua119Approach`); OFF until measured (handoff, round 119 the attack between buildings)
 Game.prototype.concealKnow119 = true;   // (round 119) ON by main's decision (15 Nov): a side knows a man only by sight (reach x his concealment) or by his fire; holding a target is not knowledge. Rounds on unseen men -90..97%; casualties inside the floor on Village and Sedan, better on Longstop. `game.concealKnow119 = false` is the old omniscient survey
+Game.prototype.arcFight119 = true;   // (round 119) ON by main's decision (15 Nov): a casemate or tail gun in range of armour stops, turns its hull and fights from a position; it never flanks. Rounds per contact-minute up beyond the floor on 3 of 4 maps, flanking 2.2 -> 0; kills, losses and flags inside the floor. `game.arcFight119 = false` is the old behaviour
 Game.prototype.fpvFog118 = true;     // ON: Village fog, the posts in shade 109.5 -> ~106 (clear sunlit 105); against the sun 29 -> ~59
 const TRACER_EVERY = { axis: 4, allied: 5, soviet: 5, british: 4 };   // MG42/34 one in 3-5, Browning one in 5, Bren/Vickers one in 4
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
