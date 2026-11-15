@@ -10795,6 +10795,12 @@ const FLANK_COMMIT_S = 5.0;     // a tank's flanking leg is longer and costlier
 // …and a plan is STALE when the thing it was made about has actually moved,
 // rather than merely turned on the spot. Forty metres.
 const FLANK_STALE = 10;
+// (round 119) `game.arcFight119` — A GUN THAT POINTS ONE WAY FIGHTS FROM A POSITION (`Unit._arcFight119`).
+const ARC119_HOLD = 0.85;       // in sight and inside this share of its range it stops and fights (`_tankCombat` halts at the same)
+const ARC119_KEEP_S = 1.5;      // (s) …and that fight is still its fight for this long between thinks (`_arcHolding119`)
+const ARC119_STAND = 0.8;       // the firing position it closes to, as a share of its range from the enemy (`_arcSpot119`)
+const ARC119_STEP = 4;          // (u) the spacing of the ground it weighs round that point for a fold
+const ARC119_COMMIT_S = 3.0;    // (s) the approach leg, once given, is run
 
 /** How much of a building is left when your own men are inside it. Low enough
  *  to read the men through, high enough that the building is still a building
@@ -38493,7 +38499,10 @@ class Unit {
       const leash = this.explicit ? 1e9
         : sqA ? Math.min(AICFG.leash, this._sqTether())
         : (this._underAI() ? AICFG.leash : 11);
-      if (!this.explicit && dist2(this.pos, from) > leash) {
+      // (round 119) …but not a gun that points one way, fighting armour it can see inside its range
+      // (`game.arcFight119`, `_arcFightNow119`): fetched back to its troop it turned its gun away, came round
+      // onto the enemy again, and was fetched again — 43% of the paths a casemate was given in contact.
+      if (!this.explicit && dist2(this.pos, from) > leash && !this._arcFightNow119(t, d)) {
         this.target = null; this._returnToAnchor(); return;
       }
       if (kind === 'arrow' || kind === 'javelin' || kind === 'rifle' || kind === 'officer' || kind === 'engineer') {
@@ -39749,6 +39758,102 @@ class Unit {
     this._commitMove(FLANK_COMMIT_S);
     this.repathT = 1.1;
   }
+  /** (round 119) DOES ITS MAIN GUN POINT ONE WAY? A `kind: 'tank'` whose gun is in the hull (`_casemate`) and
+   *  whose arc is not the full circle: the casemate tank destroyers and assault guns, and the two guns carried
+   *  over the tail (`def.gunAft`: the Archer, the Laffly W15 TCC). Not the M3 Lee's sponson 75 (`hullGun`):
+   *  the Lee has a turret, and stays a turreted tank. */
+  _arcLimited119() {
+    const d = this.def;
+    return !!(d.vehicle && d.kind === 'tank' && !d.hullGun && this._casemate() && !this._gunArcLR().full);
+  }
+  /** (round 119) IS THIS THE FIGHT IT HOLDS? `game.arcFight119`, a limited-arc gun under the computer, armour it
+   *  can see inside ARC119_HOLD of its range (its whole range once it holds that fight: the dead band). Latches
+   *  the fight (`_arcHolding119`) when it is. */
+  _arcFightNow119(t, d) {
+    const g = this.game;
+    if (g.arcFight119 !== true || !this.def.vehicle || !t || !t.def || !t.def.vehicle || !t.alive) return false;
+    if (!this._arcLimited119() || !this._underAI()) return false;
+    const held = this._arcHoldOf === t && g.time - (this._arcHoldT == null ? -99 : this._arcHoldT) < ARC119_KEEP_S;
+    if (d > this.def.rng * (held ? 1 : ARC119_HOLD)) return false;
+    if (g._tankLost !== false && !g.hasLOS(this, t)) return false;
+    this._arcHoldOf = t; this._arcHoldT = g.time;
+    return true;
+  }
+  /** (round 119) …and is it holding one now? Read by the leash, `_squadCloseUp` and `_hullToward`. */
+  _arcHolding119() {
+    return this.game.arcFight119 === true && this._arcHoldT != null && this.game.time - this._arcHoldT < ARC119_KEEP_S;
+  }
+  /** (round 119) A GUN THAT POINTS ONE WAY FIGHTS FROM A POSITION (`game.arcFight119`, in place of `_chaseFlank`).
+   *
+   *  MEASURED (tools/probe_arc119.js, 5 battles on Prokhorovka, Kursk Steppe and Normandy Ridge): in sight of
+   *  enemy armour inside its range a casemate fired 0.95 rounds a minute against a turreted tank's 4.9; its gun
+   *  bore 7% of that time (74%); it was moving 65% and turning on the spot 34%, and held with the enemy in its arc
+   *  2% (31%). `_chaseFlank` stops a tank only when its gun BEARS — which a turret does while the hull drives
+   *  round, and a casemate cannot until the hull has stopped and turned — so on arriving it was sent round again
+   *  before the turn was done (the Archer circled a Panzer IV at 30 u, round 118). And two other systems took it
+   *  out of the fight: the leash (`_returnToAnchor`, 43% of its paths in contact) and `_squadCloseUp` (25%).
+   *
+   *  A tank destroyer of 1944 does the opposite of working a flank: it takes a position from which it can see the
+   *  enemy, front (or, the Archer, tail) toward him, hull down if the ground gives it, and fights from there.
+   *  So: in sight and in range, it STOPS, and `_layTraverse` turns the hull until the gun bears. Not yet, it closes
+   *  front first — to a firing position on the line to the enemy at ARC119_STAND of its range, the best fold
+   *  near that point (`_arcSpot119`), or straight at him when there is none or it is already in range but blind.
+   *  It relocates only as it already did: hurt and menaced (the scoot above), jockeying into a fold
+   *  (`_hullDownSeek`), and when the troop's doctrine moves it. */
+  _arcFight119(t, d) {
+    const g = this.game, def = this.def;
+    this._flankOf = null;
+    if (this._arcFightNow119(t, d)) {
+      if (this.path.length) { this.path = []; this._releaseMove(); }
+      this._arcPlan119 = null;
+      return;
+    }
+    // On the way to a firing position, and the enemy has not moved off it: let the leg run.
+    const P = this._arcPlan119;
+    if (P && P.t === t && this.path.length && hyp(t.pos.x - P.tx, t.pos.z - P.tz) < FLANK_STALE) return;
+    this._arcPlan119 = null;
+    if (d <= def.rng * ARC119_HOLD) { this._chase(t); return; }        // in range but blind: close on him, front first
+    const s = this._arcSpot119(t);
+    if (!s || hyp(s.x - this.pos.x, s.z - this.pos.z) < 3) { this._chase(t); return; }
+    this._setPathTo(s.x, s.z);
+    if (!this.path.length) { this._chase(t); return; }
+    this._arcPlan119 = { t, tx: t.pos.x, tz: t.pos.z };
+    this._commitMove(ARC119_COMMIT_S);
+    this.repathT = 1.1;
+  }
+  /** (round 119) WHERE TO FIGHT HIM FROM: on the line from him to us at ARC119_STAND of our range (inside our
+   *  troop's frontage, `_tetherClamp`), or the cell near it whose ground best hides a hull from him — the same
+   *  terrain arithmetic as `_hullDownSeek`, no raycast — with one sightline cast, on the winner: a fold he cannot
+   *  be seen from is a hiding place, and then the point on the line will do. Null if nowhere near is passable. */
+  _arcSpot119(t) {
+    const g = this.game, def = this.def;
+    const ax = this.pos.x - t.pos.x, az = this.pos.z - t.pos.z, L = hyp(ax, az) || 1;
+    const ux = ax / L, uz = az / L, R = Math.min(L, def.rng * ARC119_STAND);
+    const base = this._tetherClamp(t.pos.x + ux * R, t.pos.z + uz * R);
+    let best = null, line = null, bm = -1, bd = Infinity;
+    for (const lat of [0, -1, 1, -2, 2]) for (const rad of [0, -1, 1]) {
+      const x = clamp(base.x - uz * lat * ARC119_STEP + ux * rad * ARC119_STEP, -HALF + 4, HALF - 4);
+      const z = clamp(base.z + ux * lat * ARC119_STEP + uz * rad * ARC119_STEP, -HALF + 4, HALF - 4);
+      const cx = worldToCell(x), cz = worldToCell(z);
+      if (!inGrid(cx, cz) || !g.pathfinder.passable(cx, cz)) continue;
+      if (dist2({ x, z }, t.pos) > def.rng * 0.95) continue;
+      if (!lat && !rad) line = { x, z };
+      const gy = g.terrain.heightAt(x, z);
+      const dx = t.pos.x - x, dz = t.pos.z - z, l = hyp(dx, dz) || 1, look = Math.min(HULLDOWN_LOOK, l - 0.5);
+      let rise = 0;
+      for (let s2 = 1.5; s2 <= look; s2 += 1.5) {
+        const h = g.terrain.heightAt(x + dx / l * s2, z + dz / l * s2) - gy;
+        if (h > rise) rise = h;
+      }
+      const mask = clamp(rise / HULL_TOP, 0, 1), dd = hyp(x - base.x, z - base.z);
+      if (mask > bm + 0.05 || (mask > bm - 0.05 && dd < bd)) { bm = Math.max(bm, mask); bd = dd; best = { x, z }; }
+    }
+    if (!best) return null;
+    if (best === line) return best;
+    const ey = g.terrain.heightAt(best.x, best.z) + (def.eyeH || 1.4);
+    if (g.sightClear(best.x, ey, best.z, t.pos.x, t.pos.y + ((t.def && t.def.markH) || 1.0), t.pos.z)) return best;
+    return line || best;
+  }
   /** A thinking tank crew: keep the front to the deadliest gun, flank enemy
    *  armour, close on soft targets to a covered firing spot, and — when hurt and
    *  menaced by AT — shoot-and-scoot into hull-down cover between shots. */
@@ -39831,6 +39936,8 @@ class Unit {
     // movement and one point of engagement. The two-runs-a-side figures this
     // replaces were in the right direction and the wrong size.
     if (this._hullDownSeek(t, d)) return;
+    // (round 119) `game.arcFight119`: a gun that points one way does not work a flank — see `_arcFight119`
+    if (t.def.vehicle && this.game.arcFight119 === true && this._arcLimited119()) { this._arcFight119(t, d); return; }
     if (t.def.vehicle) { this._chaseFlank(t); return; }          // work armour's flank
     if (d > def.rng * 0.85) this._chase(t);                       // close on soft targets…
     // …then hold and hose — what it can see. Halting on a man it cannot see
@@ -45528,6 +45635,9 @@ class Unit {
    *  where its hull becomes its traverse; anything whose guns are on free
    *  mounts, always. */
   _hullToward(ang) {
+    // (round 119) A casemate fighting from its position points where its GUN is laid (`_layTraverse`), not at
+    // whichever enemy weighs most that moment: two writers on one hull was a hull that never stopped turning.
+    if (this.game.arcFight119 === true && this._arcHolding119() && this._gunAim && this.game.time - this._gunAim.t < 0.4) return;
     const d = this.def, base = this._gunBase(), rel = angDiff(ang, this.face + base);   // (round 118) a gun over the tail: see _gunBase
     const piece = !d.vehicle && (d.towed || d.kind === 'atgun' || d.kind === 'artillery');
     if (this._casemate() || piece) {
@@ -55908,6 +56018,7 @@ class Game {
       // the section's own doctrine re-tasking it. He is standing where his
       // section sent him — a claim IS his position in the formation.
       if (u._assault || u.garrison || u.embarkedIn || u.def.towed || u._strSpot != null || u._gunSpot != null) continue;
+      if (this.arcFight119 === true && u._arcHolding119()) continue;   // (round 119) a casemate fighting from its position is not a straggler
       if (u.ccState === 'routed' && this.rout111 !== false) continue;   // (round 111) nor to fetch back: see `_squadFormMove`
       const d = hyp(u.pos.x - a.x, u.pos.z - a.z);
       // (round 110) ALONE IS ADRIFT, WHEREVER THE CENTRE IS. Measured from the
@@ -74251,6 +74362,7 @@ Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of
 Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
 Game.prototype.fpvGround118 = false;
 Game.prototype.water119 = true;       // (round 119) the water's swell in the vertex shader, not 2 sines a vertex on the CPU (Terrain.ambient). ON: Terrain.ambient 2.0-3.3 ms -> 0 (Argenta Gap, Purple Heart Lane, A/B with a null arm), the same picture (0 mean abs, 1-10 px differ by 0.33/255 vs a null's 0-12)
+Game.prototype.concealKnow119 = true;   // (round 119) ON by main's decision (15 Nov): a side knows a man only by sight (reach x his concealment) or by his fire; holding a target is not knowledge. Rounds on unseen men -90..97%; casualties inside the floor on Village and Sedan, better on Longstop. `game.concealKnow119 = false` is the old omniscient survey
 Game.prototype.fpvFog118 = true;     // ON: Village fog, the posts in shade 109.5 -> ~106 (clear sunlit 105); against the sun 29 -> ~59
 const TRACER_EVERY = { axis: 4, allied: 5, soviet: 5, british: 4 };   // MG42/34 one in 3-5, Browning one in 5, Bren/Vickers one in 4
 // (round 108) the load's prewarm builds materials (four UUID draws each) while the seeded battle loads
