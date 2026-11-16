@@ -2256,8 +2256,228 @@
       see: 130,       // furthest a threat is worth calling a threat (rifle reach)
     };
 
+    // (round 119, SQUAD) `game.squadUnit119`, OFF: THE SECTION FOLLOWS THE MAN YOU RIDE, AT A WALK, IN METRES.
+    // The owner (15 Nov 2026): "I want the section to follow the lead of the fps man". Measured OFF (Village, a
+    // 12-man section, a 62 m walk, .claude/wip119/urban/squad/probe_squad1.js): the section was on 'Overwatch on
+    // point' for the whole walk and never 'Following point'. `_riderSupport` calls him moving above 0.8 u/s, which
+    // since true scale (round 105: a walk is 1.4 m/s = 0.35 u/s) is 3.2 m/s, so only a sprint was followed; 0 of 11
+    // were within 25 m of him after 31 s, and when he went prone none did. `RIDER` is in the old units too (an arc
+    // 36 m out, a wedge starting 20 m behind him, a flank 72-200 m away).
+    // With the switch: he is moving above 0.5 m/s, and stopped only after a second still. Moving: an arrowhead of up
+    // to four a rank behind him on his line of travel, at his gait. Still: a staggered line beside him, facing the
+    // way he looked when he stopped, each place onto cover (`_snapSlots118`), at his posture (prone if he is, else
+    // down on a knee). The INTERVAL IS 9 M (about the 10-yard open-country interval): the first cut's 5 m put a
+    // section inside one bomb's reach, and on Ortona one mortar salvo downed six of ten followers at once.
+    // UNDER FIRE, seen or not (the section shot at in the last 4 s, shells included — `fireT`; a man of it
+    // suppressed past 0.25; one of it down in the last 6 s), the followers go to ground: prone at their places, and
+    // whoever has to move crawls. In contact (a hostile in his sight that the section can see) the line faces it.
+    // Men are given places once a phase (nearest first), and re-pathed only when a place has moved 6 m.
+    var R119 = {
+      lead: 1.5, rank: 2.25, file: 2.25, perRank: 4,  // u: 6 m to the first rank; 9 m between ranks and files
+      lineBack: 0.5, lineGap: 2.25, turn: 1.05,       // still: the line 2 m behind his shoulders, its ranks 9 m apart; re-faced past 60 degrees
+      reissue: 1.5, arrive: 0.7, late: 6.25,         // u: re-path when the place moved 6 m; at it; 25 m off runs
+      moveV: 0.12, stillS: 1.0, retryS: 2,           // 0.5 m/s is moving; a second still is stopped; no A* storm
+      fireS: 4, hitS: 6, supp: 0.25,                 // under fire: shot at 4 s ago, a man suppressed past 0.25, a mate down 6 s ago
+      rushFrom: 3.75, rush: 3.75, downS: 3,          // under fire, a man more than 15 m from his place goes by 15 m rushes, 3 s down between
+      shellR: 6.25, shellS: 10, freshS: 1.5, wide: 15 / 9,   // a burst within 25 m: down at once (1.5 s); intervals 9 -> 15 m until 10 s quiet
+    };
+    if (P.squadUnit119 === undefined) P.squadUnit119 = false;   // both halves: first person (here) and orders (the page)
+    if (P.squadFpv119 === undefined) P.squadFpv119 = true;      // the first-person half alone; ON by main 16 Nov
+
+    P._rider119 = function (sq, live, dt) {
+      var f = this.fpv;
+      if (!f || !f.unit || !f.unit.alive) return false;
+      var rider = f.unit;
+      if (live.indexOf(rider) < 0) return false;
+      var others = [], i, now = this.time;
+      for (i = 0; i < live.length; i++) if (live[i] !== rider && !live[i].embarkedIn) others.push(live[i]);
+      for (i = 0; i < others.length; i++) others[i]._riderSupT = now;
+      sq.moveGoal = null;
+      if (!others.length) { sq.task = 'Point man (alone)'; return true; }
+      var yaw = f.yaw || 0, lx = Math.sin(yaw), lz = Math.cos(yaw), aim = null;
+      try { if (this._fpvAimPoint) aim = this._fpvAimPoint(); } catch (e) { aim = null; }
+      if (aim) {
+        var ax = aim.x - rider.pos.x, az = aim.z - rider.pos.z, al = sqHyp(ax, az);
+        if (al > 2) { lx = ax / al; lz = az / al; }
+      }
+      // His TRAVEL, from where he has been: a man walking into a wall is not moving, and his line of march is
+      // the way he went, not the way he looks.
+      var st = rider._r119;
+      if (!st || st.f !== f) st = rider._r119 = { f: f, x: rider.pos.x, z: rider.pos.z, t: now, still: now - R119.stillS, hx: lx, hz: lz, wx: lx, wz: lz, n: others.length, hitT: -99 };
+      var dts = now - st.t;
+      if (dts >= 0.2) {
+        var mx = rider.pos.x - st.x, mz = rider.pos.z - st.z, md = sqHyp(mx, mz);
+        if (md / dts > R119.moveV) { st.still = now; st.hx = mx / md; st.hz = mz / md; }
+        st.x = rider.pos.x; st.z = rider.pos.z; st.t = now;
+      }
+      var moving = now - st.still < R119.stillS;
+      // UNDER FIRE, whether or not anybody can see who is firing.
+      if (others.length < st.n) st.hitT = now;
+      st.n = others.length;
+      var supp = rider.suppression || 0;
+      for (i = 0; i < others.length; i++) if ((others[i].suppression || 0) > supp) supp = others[i].suppression;
+      var underFire = (now - (sq.fireT || -99)) < R119.fireS || supp > R119.supp || (now - st.hitT) < R119.hitS;
+      // SHELLED: a bomb or a shell burst within 25 m of any of them (`Game._boom119`, noted in `explode` behind the
+      // switch). They go to ground at once; the intervals open from 9 to 15 m until it has been quiet for 10 s; and
+      // when he moves out of the beaten zone they go with him at a run, not a crawl. (Session 2's census: the ridden
+      // section lost more men a minute than OFF's, 34 of 35 of them to mortars, its nearest mate a median 15 m off.)
+      var B = this._boom119, lastBoom = st.boomT === undefined ? -99 : st.boomT;
+      if (B && B.length) {
+        for (var bi = B.length - 1; bi >= 0; bi--) {
+          var bm = B[bi];
+          if (bm.t > now) { B.length = 0; break; }               // the last battle's: its clock ran later than this one's
+          if (now - bm.t > R119.shellS || bm.t <= lastBoom) break;
+          var nearB = sqHyp(bm.x - rider.pos.x, bm.z - rider.pos.z) <= R119.shellR;
+          for (i = 0; i < others.length && !nearB; i++) nearB = sqHyp(bm.x - others[i].pos.x, bm.z - others[i].pos.z) <= R119.shellR;
+          if (nearB) { lastBoom = bm.t; break; }
+        }
+      }
+      st.boomT = lastBoom;
+      var shell = { fresh: now - lastBoom < R119.freshS, wide: now - lastBoom < R119.shellS };
+      var threat = this._riderThreat(rider, live, lx, lz);
+      var shotAt = (now - (sq.fireT || -99)) < RIDER.contact;
+      var fired = (now - (rider._lastShotT || -99)) < RIDER.contact;
+      if (threat && (shotAt || fired || rider.suppression > 0.2)) {
+        var tx = threat.pos.x - rider.pos.x, tz = threat.pos.z - rider.pos.z, tl = sqHyp(tx, tz) || 1;
+        st.wx = tx / tl; st.wz = tz / tl;
+        this._rider119Hold(sq, rider, others, st.wx, st.wz, threat, underFire, shell);
+      } else if (moving) {
+        st.wx = lx; st.wz = lz;                         // the way he looks, for when he stops
+        this._rider119Follow(sq, rider, others, st.hx, st.hz, underFire, shell);
+      } else {
+        // Still: the line faces the way he looked as he stopped, and turns only when he looks well away from it,
+        // so a man glancing about does not walk his section round him.
+        if (st.wx * lx + st.wz * lz < Math.cos(R119.turn)) { st.wx = lx; st.wz = lz; }
+        this._rider119Hold(sq, rider, others, st.wx, st.wz, null, underFire, shell);
+      }
+      return true;
+    };
+
+    /** Each place its man, nearest first, once a phase: a section that changes formation does not cross over. */
+    function r119Assign(sq, others, slots, key) {
+      var ord = sq._r119Ord, i, j;
+      var same = ord && sq._r119Key === key && ord.length === others.length;
+      if (same) for (i = 0; i < ord.length; i++) if (others.indexOf(ord[i]) < 0) { same = false; break; }
+      if (same) return ord;
+      ord = new Array(slots.length);
+      var free = others.slice();
+      for (i = 0; i < slots.length && free.length; i++) {
+        var bj = 0, bd = Infinity;
+        for (j = 0; j < free.length; j++) {
+          var d = sqHyp(free[j].pos.x - slots[i].x, free[j].pos.z - slots[i].z);
+          if (d < bd) { bd = d; bj = j; }
+        }
+        ord[i] = free.splice(bj, 1)[0];
+      }
+      sq._r119Ord = ord; sq._r119Key = key;
+      return ord;
+    }
+
+    /** Moving: an arrowhead behind him on his line of travel, four a rank, at his gait. */
+    P._rider119Follow = function (sq, rider, others, hx, hz, underFire, shell) {
+      sq.task = shell && shell.wide ? 'Following point (shelled)' : underFire ? 'Following point (under fire)' : 'Following point';
+      var kw = shell && shell.wide ? R119.wide : 1;
+      var rx = -hz, rz = hx, f = this.fpv, post = rider.posture, slots = [], i;
+      var mode = rider.moveMode === 'fast' || (f && f.sprinting) ? 'fast'
+        : (post === 'prone' || post === 'defend' || post === 'hide') ? 'sneak' : 'normal';
+      for (i = 0; i < others.length; i++) {
+        var rank = Math.floor(i / R119.perRank), j = i % R119.perRank, side = (j & 1) ? 1 : -1, fk = (j >> 1) + 1;
+        var back = R119.lead + (rank * R119.rank + (fk - 1) * R119.rank * 0.5) * kw;
+        slots.push({ x: rider.pos.x - hx * back + rx * side * fk * R119.file * kw, z: rider.pos.z - hz * back + rz * side * fk * R119.file * kw });
+      }
+      this._rider119Go(sq, r119Assign(sq, others, slots, 'follow'), slots, mode, null, null, null, underFire, false, shell);
+    };
+
+    /** Still, or in contact: a staggered line beside him, on cover, at his posture. */
+    P._rider119Hold = function (sq, rider, others, lx, lz, threat, underFire, shell) {
+      sq.task = threat ? 'Firing round point' : shell && shell.wide ? 'Down round point (shelled)' : underFire ? 'Down round point (under fire)' : 'Overwatch on point';
+      var n = others.length, rx = -lz, rz = lx, slots = [], i, kw = shell && shell.wide ? R119.wide : 1;
+      for (i = 0; i < n; i++) {
+        // front rank (even) abreast of him at +-1, 2, 3 intervals; rear rank (odd) half an interval in, 9 m back
+        var rear = i & 1, k = i >> 1, side = (k & 1) ? 1 : -1, m = (k >> 1) + 1;
+        var lat = side * (rear ? m - 0.5 : m) * R119.file * kw, back = R119.lineBack + (rear ? R119.lineGap * kw : 0);
+        slots.push({ x: rider.pos.x + rx * lat - lx * back, z: rider.pos.z + rz * lat - lz * back });
+      }
+      if (this._snapSlots118 && this.coverOrders118 !== false) this._snapSlots118(slots);
+      this._rider119Go(sq, r119Assign(sq, others, slots, threat ? 'fire' : 'hold'), slots, 'normal', { x: lx, z: lz },
+        rider.posture === 'prone' ? 'prone' : 'defend', threat, underFire, true, shell);
+    };
+
+    /** Each man to his place; there, his posture and his facing. Under fire: prone, and crawling. In contact, a man
+     *  who can see what the point man is fighting goes down where he is, if that is within 25 m of his place. */
+    P._rider119Go = function (sq, ord, slots, mode, face, post, threat, underFire, hold, shell) {
+      var shelled = !!(shell && shell.wide), runOut = shelled && !hold;
+      var self = this, now = this.time;
+      // FACING WITHOUT DISARMING HIM. `orderFace` clears the man's target and locks his arc; given every quarter-
+      // second it would stop him ever finishing an aim. Only a man with nothing to shoot at, turned well away.
+      function faceTo(u, x, z) {
+        if (u.target || !u.orderFace) return;
+        var want = Math.atan2(x - u.pos.x, z - u.pos.z), dA = Math.abs(((want - (u.targetFace || 0)) % 6.2832 + 9.4248) % 6.2832 - 3.1416);
+        if (dA > 0.5) u.orderFace(x, z);
+      }
+      sq.internal(function () {
+        for (var i = 0; i < slots.length; i++) {
+          var u = ord[i], s = slots[i];
+          if (!u || !s) continue;
+          var d = sqHyp(u.pos.x - s.x, u.pos.z - s.z), walking = !!(u.path && u.path.length);
+          if (shell && shell.fresh && !u.def.vehicle) {
+            // the first burst: everybody down, at once, wherever he is
+            if (walking && u.orderStop) u.orderStop();
+            if (u._setPosture && u.posture !== 'prone') u._setPosture('prone');
+            continue;
+          }
+          if (threat && !u.def.vehicle && d <= R119.late && self.hasLOS(u, threat)) {
+            if (walking && u.orderStop) u.orderStop();
+            var wf = underFire ? 'prone' : post;
+            if (wf && u._setPosture && u.posture !== wf && u.posture !== 'prone') u._setPosture(wf);
+            faceTo(u, threat.pos.x, threat.pos.z);
+            continue;
+          }
+          if ((underFire || shelled) && hold && d <= R119.late) {
+            // DOWN WHERE HE IS. A section under fire round a point man who has stopped does not shuffle into a new
+            // shape: it goes to ground where it is, and only a man more than 25 m from his place crawls to it.
+            if (walking && u.orderStop) u.orderStop();
+            if (u._setPosture && u.posture !== 'prone') u._setPosture('prone');
+            continue;
+          }
+          var last = u._r119S, moved = !last || sqHyp(last.x - s.x, last.z - s.z) > R119.reissue;
+          // RUSHES. Crawling, a man is a third of a walker's pace, and a section that only crawled fell 40 m behind
+          // a point man who walked on through the fire (Ortona, seed 7). Up, a few seconds' run, down: the drill.
+          var rushing = walking && u._r119Rush;
+          if (!walking && u._r119Rush) { u._r119Rush = false; u._r119DownT = now; }
+          var upright = walking && u.moveMode !== 'sneak' && !rushing;
+          var slow = runOut && walking && u.moveMode !== 'fast';      // shelled, and he is moving out of it: a run
+          if (!rushing && d > R119.arrive && (moved || (!walking && now - (u._r119T || -99) > R119.retryS) || (underFire && upright && !runOut) || slow)) {
+            var m = runOut ? 'fast' : underFire ? 'sneak' : d > R119.late ? 'fast' : mode, gx = s.x, gz = s.z;
+            u._r119Rush = false;
+            if (!runOut && underFire && d > R119.rushFrom) {
+              if (now - (u._r119DownT || -99) < R119.downS) {
+                if (walking && u.orderStop) u.orderStop();
+                if (u._setPosture && u.posture !== 'prone') u._setPosture('prone');
+                continue;
+              }
+              var k = Math.min(1, R119.rush / d);
+              gx = u.pos.x + (s.x - u.pos.x) * k; gz = u.pos.z + (s.z - u.pos.z) * k; m = 'fast'; u._r119Rush = true;
+            }
+            if (u._setPosture && m !== 'sneak' && u.posture === 'prone') u._setPosture('normal');
+            u.moveMode = m;
+            u.orderMove(gx, gz, false, m);
+            u._r119S = { x: s.x, z: s.z }; u._r119T = now;
+          } else if (!walking) {
+            // a crawl ends in Ambush (holding fire): not for a man of a section that is fighting round its point
+            var want = underFire || shelled ? 'prone' : (post || (u.posture === 'ambush' ? 'normal' : null));
+            if (want && u._setPosture && u.posture !== want && u.posture !== 'hide') u._setPosture(want);
+            if (threat) faceTo(u, threat.pos.x, threat.pos.z);
+            else if (face) faceTo(u, u.pos.x + face.x * 40, u.pos.z + face.z * 40);
+          }
+        }
+      });
+    };
+
     /** True if this squad is the one being ridden, and it has been handled. */
     P._riderSupport = function (sq, live, dt) {
+      // (round 119) see R119 above. Its own switch `squadFpv119`, or `squadUnit119` for both halves of the owner's rule
+      if (this.squadFpv119 === true || this.squadUnit119 === true) return this._rider119(sq, live, dt);
       var f = this.fpv;
       if (!f || !f.unit || !f.unit.alive) return false;
       var rider = f.unit;

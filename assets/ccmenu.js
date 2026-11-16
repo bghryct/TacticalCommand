@@ -664,6 +664,8 @@
       // vehicle they are in, the gun that has to be limbered.
       var x = '';
       if (at && (at.strc || at.bldg)) x += '<div class="ccm-i ccm-x" data-x="enter"><b>Enter building</b><u></u></div>';
+      // (round 119, `playerClear119`) …and go through it room by room, a grenade into each room the enemy is known in
+      if (at && at.strc && this.playerClear119 === true) x += '<div class="ccm-i ccm-x" data-x="clear119" title="Go in room by room: stack at the door, a grenade into each room the enemy is known in, then hold it from its windows"><b>Clear building</b><u></u></div>';
       var D = A.COMMAND_DEFS, g = this;
       var ctx = ['cmdUnload', 'cmdExitBldg', 'cmdLimber'];
       for (i = 0; i < ctx.length; i++) {
@@ -740,6 +742,10 @@
       if (o) { this.ccGive(o); return; }
       if (x === 'board') { this.commandLoad(at.board); return; }
       if (x === 'select') { this.selectUnit(at.board, false, false); return; }
+      if (x === 'clear119') {                     // (round 119) playerClear119
+        if (!(at.strc && this.commandClear119(at.strc.gx, at.strc.gz)) && !at.strc) this.ui.toast('No house there to clear');
+        return;
+      }
       if (x === 'enter') {
         if (at.strc && this.commandOccupy(at.strc.gx, at.strc.gz)) return;
         var b = at.bldg || this.obstacles.buildingAt(A.worldToCell(at.x), A.worldToCell(at.z));
