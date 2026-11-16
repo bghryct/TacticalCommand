@@ -1071,7 +1071,7 @@ body.fpv #tacMap { display: none !important; }
       Your own dispersion is real: the crosshair blooms when you move, when you're suppressed and on sustained fire, and tightens when you go prone or aim down the sights.</li>
     <li><b>Order lines</b> (selected units): on-ground move paths in Close Combat's colours — <span style="color:#5294ff">blue move</span> / <span style="color:#ffd638">yellow sneak</span> / <span style="color:#b866ff">purple fast</span> — plus fire vectors — <span style="color:#ff3020">red direct</span> / <span style="color:#ff8c30">orange obstructed</span> / <span style="color:#ffd23a">yellow indirect</span></li>
     <li><b>Squads (dual-layer command):</b> select 2+ units and press <kbd>J</kbd> (or ⧉ Squad) to form a <b>squad</b> — each gets a coloured ground ring. Click any member to select the <b>whole squad</b>. A section fights as one: an order to any of its men, even one picked out with <kbd>Alt</kbd>-click, is carried out by the <b>whole section</b> together. In first person (<kbd>V</kbd>) the section follows the man you ride: it moves with him in open order, stops and goes prone when he does, and goes to ground when shells land. The squad leader (an officer if present) steadies the team's aim and recovers their suppression; being pinned spreads to squadmates. Squads move in their own formation (<kbd>1–9</kbd>). <kbd>Shift+J</kbd> splits units back out</li>
-    <li><b>Buildings:</b> right-click a <b>house/building</b> with infantry selected and choose <b>Enter building</b> to <b>occupy</b> it — defenders gain hard cover and elevated sightlines from upper-floor windows. Dig them out with HE or flame. To take a house the enemy holds, choose <b>Clear building</b>: the section stacks at the door, throws a grenade into each room the enemy is known in and goes through it room by room, then holds it from its windows ("House cleared"). <b>Enter building</b> on a house the enemy is known to hold clears it the same way. <kbd>U</kbd> leaves the building</li>
+    <li><b>Buildings:</b> right-click a <b>house/building</b> with infantry selected and choose <b>Enter building</b> to <b>occupy</b> it — defenders gain hard cover and elevated sightlines from upper-floor windows. Dig them out with HE or flame. To take a house the enemy holds, choose <b>Clear building</b>: the section stacks at the door, throws a grenade into each room the enemy is known in and goes through it room by room, then holds it from its windows ("House cleared"). <b>Enter building</b> on a house the enemy is known to hold clears it the same way. A town the enemy has prepared is held from its houses: machine guns at the upper windows over the approaches, houses that cover each other's doors, men falling back room to room and a reserve that counter-attacks a lost house. Put fire on the windows before you cross the street. <kbd>U</kbd> leaves the building</li>
     <li><b>Cover &amp; foliage:</b> stone/brick/concrete walls, trenches and earthworks give hard cover; woods (pine, oak, scrub) and hedges conceal you and let some bullets whip through the leaves</li>
     <li><b>Transports:</b> right-click a friendly halftrack/truck/APC with infantry selected and choose <b>Board</b> (or press <kbd>Enter</kbd>) to <b>load</b> them for fast, armoured transport (safe from small arms). ▢ <b>Unload</b> to debark. A heavy AT hit that brews the transport wipes most of the squad inside</li>
     <li><b>Reinforcements</b> (right-hand panel, under <b>Call for fire</b>) — one <b>scrollable list of everything you can put on the field</b>, at the three sizes an army is actually organised in. <b>Packages</b> at the top are delivered by a transport that drives in from the map edge. Then <b>Sections &amp; squads</b>: a whole Rifle Squad, a Gruppe, a company HQ — the complete formation with the right men in the right proportions, arriving as a <b>real squad</b> with its own leader, cohesion, morale and roster line. Then <b>Weapons teams</b> — the machine-gun, mortar, anti-tank and reconnaissance detachments. Then <b>Guns, armour &amp; transport</b>. Then <b>every individual unit in the game</b>, for when what you need is one bazooka man. Each row shows its <b>strength</b> (<span style="color:#8fb3d8">12×</span>); your own army comes first in every band — worked out from the men actually on the field, so the Soviet list is on top at Prokhorovka — and everything else is marked with a <b>·</b>. The <b>filter box</b> searches names, types and nationalities at once (try <i>mortar</i>, or <i>soviet</i>). Pick a row, click a <b>drop zone</b>, and the formation marches on from the nearest edge and forms up on it. <b>It is all free.</b> There is no cost, no reserve to run down and no cooldown to wait out — ask for a Tiger every thirty seconds if that is the battle you want. (The enemy commander still fights out of a finite reserve of his own, so there is still a battle at the end of it.)</li>
@@ -27274,6 +27274,8 @@ const UD119_WALL_R = 2.5, UD119_NADE_R = 2.5, UD119_NADE_S = 3, UD119_THIN = 2, 
 // (session 5, `udPlace119`) a section is put in its windows only at its first look within this many s of the start
 // (and before first contact): 2 s missed the crowd's sections, whose first look comes later at 2,000 men
 const UD119_PLACE_T = 15;
+// (session 7, `udPlace119`) a house whose windows see an objective within UD119_FLAG_R (u) is worth UD119_FLAG_K
+const UD119_FLAG_R = 30, UD119_FLAG_K = 1.5;
 // (round 115) how far a man's middle keeps off a wall: half his width (0.28 m)
 // and half the wall's thickness, in world units (`Game._wallClamp`)
 const MAN_CLEAR = 0.28 / METERS_PER_UNIT + 0.18 * K_BLD * 0.5;
@@ -58424,6 +58426,8 @@ class Game {
         this._squadTask(r, 'hold', r.cx, r.cz, { r: rad, label: 'its position', inPlace: true });
         for (const u of r.live) claimed.add(u);
       }
+      // (session 6, `udPlace119`) the whole prepared defence into its windows at the side's first doctrine tick
+      if (this.urbanDef119 === true && this.udPlace119 === true && this._defendingSide(T)) this._udPlaceSide119(T, recs);
       return claimed;
     }
 
@@ -61607,6 +61611,37 @@ class Game {
     }
     // the house LOST is the side's to see (`_udHouses119`): a section that died in it has no tick to see it with
   }
+  /** (session 6, `udPlace119`) THE PREPARED DEFENCE AT DEPLOYMENT, BY THE SIDE. At the defending side's first doctrine
+   *  tick within UD119_PLACE_T s of the start (whether or not anybody has fired yet: this is the deployment, the
+   *  defence has been in its houses since dawn), every man of every section on its prepared `hold` is put at the
+   *  position the doctrine's choice gives him (`_udOccupy119(.., place)`), section by section, so each section's
+   *  choice sees the houses the ones before it took (interlocking). Once a battle a side; the player's side is his to
+   *  set up. The first look in `_udGarrison119` still places a section this missed, before first contact. */
+  _udPlaceSide119(T, recs) {
+    const K = this._ud119PlaceT || (this._ud119PlaceT = {});
+    if (K[T] || T === this.playerTeam) return;
+    K[T] = true;
+    if (this.time > UD119_PLACE_T) return;
+    let fx = 0, fz = 0, n = 0;
+    for (const o of this.units) if (o.alive && !o.downed && o.team > 0 && areHostile(T, o.team)) { fx += o.pos.x; fz += o.pos.z; n++; }
+    let placed = 0;
+    for (const rec of recs) {
+      const t = rec.sq && rec.sq._task;
+      if (!t || t.kind !== 'hold' || !t.inPlace || !rec.live.length || rec.live[0].team !== T) continue;
+      let ud = t.ud119;
+      if (!ud) {
+        let ax = 0, az = 0;
+        if (n) { const dx = fx / n - rec.cx, dz = fz / n - rec.cz, L = hyp(dx, dz) || 1; ax = dx / L; az = dz / L; }
+        ud = t.ud119 = { ax, az, h: 0, had: false, lostT: 0, chk: 0 };
+      }
+      ud.placed = true;
+      for (const u of rec.live) {
+        if (u._strSpot != null || u.def.vehicle || u.def.towed || u.garrison || u._assault || u.embarkedIn || u.downed || KIND_EMPLACED.has(u.def.kind)) continue;
+        if (this._udOccupy119(u, t.x, t.z, UD119_R, ud, true)) placed++;
+      }
+    }
+    this._ud119Placed = (this._ud119Placed || 0) + placed;
+  }
   /** (round 119, `urbanDef119`) THE HOUSES OF THE DEFENCE, WATCHED BY THE SIDE. Every house a man of side T has held a
    *  room of in this battle is remembered; a house its men have all gone from with the enemy in its rooms is a
    *  position lost — once, `lostAt[T]` as a flag taken, so the immediate counter-attack answers it — and counted
@@ -61795,6 +61830,7 @@ class Game {
     if (foe) { const fx = (foe.pos ? foe.pos.x : foe.x) - wx, fz = (foe.pos ? foe.pos.z : foe.z) - wz, fl = hyp(fx, fz) || 1; fdx = fx / fl; fdz = fz / fl; }
     const role = this._udRole119(u), oth = this._udOthers119(u), cands = [];
     const cov = new Map();              // (session 4) house -> what holding it does for the defence's cover (`_udCover119`)
+    const flagV = new Map();            // (session 7) house -> whether its windows see an objective (`_udFlagView119`)
     for (const c of this._structureFootprint(seed.x, seed.z, 160)) {
       for (let L = 0; L < window.Structures.LEVELS; L++) {
         if (!S.standable(c.x, c.z, L) || S.featAt(c.x, c.z, L)) continue;
@@ -61810,6 +61846,11 @@ class Game {
         if (oth.pts.length) {
           const h = this._house117(c.x, c.z);
           if (h && !oth.h.get(h)) { let v = cov.get(h); if (v === undefined) { v = this._udCover119(u.team, h, oth, c.x, c.z); cov.set(h, v); } sc += v; }
+        }
+        // (session 7, `udPlace119`) A TOWN DEFENCE HOLDS WHAT DOMINATES ITS OBJECTIVES: a house whose windows see a flag
+        if (this.udPlace119 === true) {
+          const h = this._house117(c.x, c.z);
+          if (h) { let v = flagV.get(h); if (v === undefined) { v = this._udFlagView119(h, c.x, c.z); flagV.set(h, v); } sc += v; }
         }
         if (mates.length) {
           let dm = Infinity;
@@ -61893,6 +61934,30 @@ class Game {
       if (ok) v += UD119_COVERS_K;
     }
     C.set(h, { t: now, v });
+    return v;
+  }
+  /** (session 7, `udPlace119`) UD119_FLAG_K when one of house `h`'s best windows (by firing value, then height; at most
+   *  eight) sees an objective within UD119_FLAG_R of it, else 0: Ortona's placed defence held the houses round the
+   *  piazza and fewer of its flags. Cached for the battle (flags and houses do not move). */
+  _udFlagView119(h, sx, sz) {
+    const C = this._ud119FlagV || (this._ud119FlagV = new Map());
+    if (C.has(h)) return C.get(h);
+    const S = this.structures, px = cellCenter(sx), pz = cellCenter(sz);
+    const vps = (this.victoryPoints || []).filter(v => hyp(px - v.x, pz - v.z) <= UD119_FLAG_R + (v.r || 0));
+    let v = 0;
+    if (vps.length) {
+      const wins = [];
+      for (const c of this._structureFootprint(sx, sz, 160)) {
+        if (this._house117(c.x, c.z) !== h) continue;
+        for (let L = 0; L < window.Structures.LEVELS; L++) if (S.standable(c.x, c.z, L) && S.firingValue(c.x, c.z, L) > 0) wins.push({ x: c.x, z: c.z, L, f: S.firingValue(c.x, c.z, L) });
+      }
+      wins.sort((a, b) => b.f - a.f || b.L - a.L);
+      outer: for (const vp of vps) for (let i = 0; i < wins.length && i < 8; i++) {
+        const w = wins[i], wx = cellCenter(w.x), wz = cellCenter(w.z);
+        if (this.sightClear(wx, this.groundYAt(wx, wz, w.L) + EYE_H, wz, vp.x, this.terrain.heightAt(vp.x, vp.z) + MARK_H, vp.z)) { v = UD119_FLAG_K; break outer; }
+      }
+    }
+    C.set(h, v);
     return v;
   }
   /** (session 4) The ground in front of house `h`'s doors, arches and rubble gaps (at most 4, cached for the
@@ -74368,7 +74433,7 @@ class Game {
     this._ud119Res = null; this._ud119At = -1;
     this._ud119N = 0; this._ud119Arr = 0; this._ud119Back = 0; this._ud119LostN = 0; this._ud119Ctr = 0; this._ud119ResN = 0; this._lean119 = 0; this._jamb119 = 0;
     this._ud119H = null; this._ud119Occ = null; this._ud119LostBy = null; this._ud119Retake = null; this._ud119Stats = null; this._ud119Ref = 0;
-    this._ud119Nades = null; this._ud119Cov = null; this._ud119Doors = null; this._held119 = 0; this._ud119Placed = 0;
+    this._ud119Nades = null; this._ud119Cov = null; this._ud119Doors = null; this._held119 = 0; this._ud119Placed = 0; this._ud119PlaceT = null; this._ud119FlagV = null;
     this._u119 = null; this._ua119K = null; this._ua119H = null;   // (round 119) `urbanAtk119`: counters, known houses, footprints
     // (round 117) THE HOUSE ASSAULTS' STATE, which outlived its battle: a door's
     // stack queue is reused while `time - made < 120`, and `time` goes back to 0
@@ -76297,16 +76362,16 @@ Game.prototype.coverAuto119 = true;   // (round 119, COHESION) ON: a man of the 
 Game.prototype.cohChase119 = false;   // (round 119, COHESION) a chase closes no further than 25 m from a mate (`_coh119Clamp`); OFF: session 1 suspected it of Ortona's attacker fire 350 -> 153
 Game.prototype.cohCover119 = false;   // (round 119, COHESION) a cover pick ends within 25 m of a mate (`_bestCoverNear`); OFF, unmeasured alone
 Game.prototype.cohesion119 = false;   // (round 119, COHESION) sections stay together: a man's own moves end near his section, the close-up fetches to its main body (`_coh119*`); OFF until measured (handoff, round 119 sections stay together)
-Game.prototype.urbanDef119 = false;   // (round 119, DEFENCE) a prepared defence in a town holds its houses by doctrine (`_udGarrison119`, `_udOccupy119`, `_udFallBack119`, the reserve); OFF until measured (handoff, round 119 defenders use buildings by doctrine)
+Game.prototype.urbanDef119 = true;    // (round 119, DEFENCE) a prepared defence in a town holds its houses by doctrine (`_udGarrison119`, `_udOccupy119`, `_udFallBack119`, the reserve); OFF until measured (handoff, round 119 defenders use buildings by doctrine) — ON by main 16 Nov: the integration A/B (DEFENCE session 7: Ortona, Arnhem, Saint-Lo, Village and the crowd, 6 seeds x 1800 s).
 Game.prototype.winJamb119 = true;     // (round 119, DEFENCE) a window round at a steep angle leaves just outside the plane, not into the jamb (`Projectiles._windowFire`); ON by main 16 Nov (jamb6: 6 seeds x Ortona/Village/Arnhem, nothing worse beyond the floor, jamb rounds 1.3-10 -> 0-1.3 a battle)
-Game.prototype.udPlace119 = false;    // (round 119, DEFENCE) with urbanDef119: a prepared town defence is in its windows when the battle starts (no walk-in; `_udGarrison119` -> `_udOccupy119(.., place)`); OFF until measured
+Game.prototype.udPlace119 = true;     // (round 119, DEFENCE) with urbanDef119: a prepared town defence is in its windows when the battle starts (no walk-in; `_udGarrison119` -> `_udOccupy119(.., place)`); OFF until measured — ON by main 16 Nov: the integration A/B (DEFENCE session 7: Ortona, Arnhem, Saint-Lo, Village and the crowd, 6 seeds x 1800 s).
 Game.prototype.urbanAtk119 = false;   // (round 119, APPROACH) the attack between buildings: suppress the windows, smoke the street, to the wall (`_ua119Approach`); OFF until measured (handoff, round 119 the attack between buildings)
 Game.prototype.squadOrders119 = true;    // (round 119, SQUAD) the section is the unit: outside first person an order to one man is his whole section's (`_widen119`), and a section takes cover where it is (`_cover119`); ON by main 16 Nov (census: Village and Ortona inside the floor, episodes end). Its first-person half is `squadFpv119` (assets/squads.js, `_rider119`); `squadUnit119` turns on both (handoff, round 119 the section follows the man you ride)
 Game.prototype.entry119 = true;   // ON by main (15 Nov): the door test took houses (Ortona 0/8 -> 4/8, Arnhem 1/8 -> 7/8) at level losses; battles inside the floor.   // (round 119, ENTRY) men sent into a house get there: hold fire on the walk in, walked again when the street empties it, a stack only near the door and at the wall when AT it, an assault into the rooms of its house with its fire team covering the door (`_entryTick119`, `_clearRoom119`). Door test houses taken Ortona 0/8 -> 4/8, Arnhem 1/8 -> 7/8; battles within the floor (handoff, round 119 men get into houses). OFF until main decides
 Game.prototype.playerClear119 = true;    // (round 119, ENTRY) the player's "Clear building" (right-click) and "Enter building" on a house the enemy is KNOWN in: in room by room (`commandClear119`, `_clearHouse119`, `_playerClearTick119`), "House cleared" when it is. Player test (real menu path, Auto ON, squadOrders119): Ortona 0/12 -> 5/12 taken, Arnhem 0/9 -> 6/9; both-AI fingerprints identical 6/6: ready for ON, main decides — ON by main 16 Nov.
 Game.prototype.playerAssault119 = false;   // (round 119, ENTRY) the player's Assault onto a house gives way to the clear AT ITS WALL (`_atHouse119`); OFF: neutral since the wall fix (Arnhem 1/9 -> 2/9, Ortona 0/12 both)
-Game.prototype.mousehole119 = false;   // (round 119, ENTRY) from a held house into the next through the party wall (`_mouseHole119`, `_mholeTick119`); acts only under rooms119 or a player's clear. Party-wall test, 24 a map: 19 -> 24 of 48 taken, a quarter less street time, the same losses
-Game.prototype.rooms119 = false;   // (round 119, ENTRY) room by room once inside (`_roomByRoom119`/`_roomStep119`, the house by `_houseId119`, two of a side to a room, an enemy's claim no bar) and a cleared house held from its windows. Door test better everywhere (Ortona 8 cells 1/8 -> 4/8; 8 v 4 1/8 -> 5/8), battles within the floor (Ortona identical 6/6): main decides
+Game.prototype.mousehole119 = true;    // (round 119, ENTRY) from a held house into the next through the party wall (`_mouseHole119`, `_mholeTick119`); acts only under rooms119 or a player's clear. Party-wall test, 24 a map: 19 -> 24 of 48 taken, a quarter less street time, the same losses — ON by main 16 Nov: the integration A/B (DEFENCE session 7: Ortona, Arnhem, Saint-Lo, Village and the crowd, 6 seeds x 1800 s).
+Game.prototype.rooms119 = true;    // (round 119, ENTRY) room by room once inside (`_roomByRoom119`/`_roomStep119`, the house by `_houseId119`, two of a side to a room, an enemy's claim no bar) and a cleared house held from its windows. Door test better everywhere (Ortona 8 cells 1/8 -> 4/8; 8 v 4 1/8 -> 5/8), battles within the floor (Ortona identical 6/6): main decides — ON by main 16 Nov: the integration A/B (DEFENCE session 7: Ortona, Arnhem, Saint-Lo, Village and the crowd, 6 seeds x 1800 s).
 Game.prototype.concealKnow119 = true;   // (round 119) ON by main's decision (15 Nov): a side knows a man only by sight (reach x his concealment) or by his fire; holding a target is not knowledge. Rounds on unseen men -90..97%; casualties inside the floor on Village and Sedan, better on Longstop. `game.concealKnow119 = false` is the old omniscient survey
 Game.prototype.arcFight119 = true;   // (round 119) ON by main's decision (15 Nov): a casemate or tail gun in range of armour stops, turns its hull and fights from a position; it never flanks. Rounds per contact-minute up beyond the floor on 3 of 4 maps, flanking 2.2 -> 0; kills, losses and flags inside the floor. `game.arcFight119 = false` is the old behaviour
 Game.prototype.fpvFog118 = true;     // ON: Village fog, the posts in shade 109.5 -> ~106 (clear sunlit 105); against the sun 29 -> ~59
