@@ -77262,8 +77262,10 @@ Game.prototype.fxSmoke118 = false;    // smoke screens: fuller puffs that erode 
 // (round 118) DESTRUCTIBILITY: trees fall and lie as logs (`Obstacles.fellTree`); `destroy118` reserved for the rest
 Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 118 destructibility)
 // (round 120) rounds meet trees, bushes and hard props by their DRAWN shapes (`Obstacles.segHit120`, TREE_HIT120):
-// OFF until measured against the noise floor (.claude/wip120/obstacles/NOTES.md). OFF is the whole-cell test.
-Game.prototype.obsHit120 = false;
+// ON (main, 24 Nov 00:00 UTC; the owner asked for it): seeded A/Bs, 30 seeds on Village, Hedgerow Hell, Ardennes (12) and
+// El Alamein, every outcome inside the floor; rounds into trees 629 -> 162 (Village), 667 -> 160 (Ardennes), against the
+// drawing's own 5-7% (.claude/wip120/obstacles/NOTES.md); ~2 shaped tests a frame. false is the whole-cell test.
+Game.prototype.obsHit120 = true;
 // (round 120) a burning tree flames for minutes, smoulders, then collapses into a charred stump and ash, not a log
 // (`TREE_BURN120`, `_burnTree120`, `Obstacles._ash120`): OFF until measured. OFF is the 3-7 s burn.
 Game.prototype.treeBurn120 = false;
