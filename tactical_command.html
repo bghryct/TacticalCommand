@@ -1518,6 +1518,11 @@ body.fpv #tacMap { display: none !important; }
      canopy shader's own attribute layout (tools/blender/trees.py). Optional:
      without it `Obstacles._treeVariant` builds its procedural trees. -->
 <script src="assets/trees.pack.js"></script>
+<!-- (round 120, `game.trees120`) TREES BY SPECIES: skeletons and leaf-cluster cards grown in Blender
+     (tools/blender/trees120.py), built into meshes, LOD'd and drawn far off as impostors by assets/trees120.js.
+     Optional: without them (or with the switch off) the trees are round 113's. -->
+<script src="assets/trees120.pack.js"></script>
+<script src="assets/trees120.js"></script>
 <script src="assets/soldier.pack.js"></script>
 <script src="assets/gaits.js"></script>
 <script src="assets/hedges.pack.js"></script>
@@ -1542,6 +1547,9 @@ body.fpv #tacMap { display: none !important; }
 <!-- (round 119) weather you can see: rain, drizzle and snow as GPU streaks and flakes, wet ground and buildings,
      puddles, snow on roofs. `game.weather119`, default OFF. Drawing only: nothing the simulation reads. -->
 <script src="assets/weather119.js"></script>
+<!-- (round 120) better water: the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks
+     reflected, foam and wet banks. `game.water120`, default OFF. Drawing only: nothing the simulation reads. -->
+<script src="assets/water120.js"></script>
 <script src="assets/boxart.js"></script>
 <!-- The baked flipbooks the particle engine draws with (Cycles volumes: the shell
      burst, the fireball, smoke, flame and side-on muzzle plumes) - tools/blender/vfx_bake.py,
@@ -1567,6 +1575,9 @@ body.fpv #tacMap { display: none !important; }
      circle, sight line and facing arcs that go with them. Exposes
      window.CCMenu. Builds on assets/squads.js; optional like it. -->
 <script src="assets/ccmenu.js"></script>
+<!-- (round 120) thin order lines: a constant screen width, the order type in the line's shape, small marks.
+     `game.orderLines120`, default ON since 23 Nov (false is the old drawing exactly). Drawing only. -->
+<script src="assets/orderlines120.js"></script>
 <!-- CAMPAIGN: the Normandy operation — ten linked battles, briefing screens,
      and a historically conditioned force pool that carries losses between
      them. Exposes window.Campaign. Optional, like assets/squads.js. -->
@@ -1590,6 +1601,9 @@ body.fpv #tacMap { display: none !important; }
 <script src="assets/trenchkit118.js"></script>
 <script src="assets/bunker118.js"></script>
 <script src="assets/bunkermaps118.js"></script>
+<!-- (round 120) BRIDGES: a deck over the water with a weight class and parapets, the Blender kit laid along it
+     (assets/bridges120.pack.js, loaded on first use), the named maps' bridges and the editor's tool: `game.bridges120`. -->
+<script src="assets/bridges120.js"></script>
 <script src="assets/covertab118.js"></script>
 <script src="assets/editorkit118.js"></script>
 <script>
@@ -3628,6 +3642,11 @@ const UA119_RUSH = 16;         // (u) the last rush to the wall is made from thi
 const UA119_ASSAULT_R = 8;     // (u) a bound or a move handed over at the wall becomes an assault on the house, this radius
 const UA119_LEAP = [8, 12];    // (u) a bound toward the house is this long (32-48 m, 10-14 s at a run), fanned either side of the line
 const UA119_LEAP_MAX = 20;     // (s) a bound not finished in this long is over: the other element goes
+const UA119_FS_MIN = 30;       // (s) fire superiority: the windows are worked at least this long before anybody crosses
+const UA119_FS_MAX = 60;       // (s) …and the crossing goes at this whatever the windows are doing
+const UA119_FS_QUIET = 10;     // (s) …or earlier, once no round has come out of the house for this long
+const UA119_FS_SUPP = 0.5;     // …or once its men's mean suppression is this
+const UA119_DWELL_MAX = 120;   // (s) a section mid-approach is not re-tasked onto another objective for at most this long
 const UA119_AXIS_R = 12;       // (u) a held house this near the line to the section's point is on its way: it is taken first
 const TANK_AREA_FOE_R = 16;     // (u) someone hostile this near it, or it is empty ground
 const TANK_AREA_SLOW = 3;       // an area HE round every this many reloads
@@ -10640,9 +10659,10 @@ function waterSurfaceMaterial(mat) {
     sh.fragmentShader = WATER_GLSL_F + sh.fragmentShader.replace(
       '#include <tonemapping_fragment>',
       '{ float wa = gl_FragColor.a; gl_FragColor.rgb = waterSurface(gl_FragColor.rgb, wa); gl_FragColor.a = wa; }\n#include <tonemapping_fragment>');
+    if (window.Water120) window.Water120.patchWater(sh, renderer);   // (round 120, `game.water120`) its uniforms always, its code only ON
   };
   const key = mat.customProgramCacheKey;
-  mat.customProgramCacheKey = function () { return (key ? key.call(this) : '') + '|water2|w119'; };
+  mat.customProgramCacheKey = function () { return (key ? key.call(this) : '') + '|water2|w119' + (window.Water120 ? window.Water120.key() : ''); };
   mat.needsUpdate = true;
   return mat;
 }
@@ -19654,7 +19674,7 @@ class Terrain {
     const B = this._waterBox || { x0: 0, z0: 0, x1: GRID - 1, z1: GRID - 1 };
     for (let z = B.z0; z <= B.z1; z++) for (let x = B.x0; x <= B.x1; x++) {
       const i = z * GRID + x;
-      const depth = this.waterY - this.h[i] * HSCALE;
+      const dh120 = this._drawH120, depth = this.waterY - (dh120 && dh120[i] === dh120[i] ? dh120[i] : this.h[i]) * HSCALE;   // (round 120)
       if (depth < 0.18) c.copy(shallow);
       else if (depth < 0.7) c.copy(shallow).lerp(mid, (depth - 0.18) / 0.52);
       else c.copy(mid).lerp(deep, Math.min(1, (depth - 0.7) / 0.5));
@@ -19663,6 +19683,7 @@ class Terrain {
     col.updateRange.offset = B.z0 * GRID * 3;
     col.updateRange.count = Math.max(0, (B.z1 - B.z0 + 1) * GRID * 3);
     col.needsUpdate = true;
+    if (window.Water120) window.Water120.dirty = true;   // (round 120) the bed or the level moved: the water's data again
   }
 
   /** Ambient animation (waves + shimmer) — runs even while paused.
@@ -19800,6 +19821,11 @@ class Terrain {
    *  one drawn. Each triangle's own plane: against rays cast at the mesh, to
    *  a micrometre (the bilinear surface: 2.7 cm mean, 48 cm worst). */
   heightAt(wx, wz) {
+    // (round 120, `game.bridges120`) ON A BRIDGE'S DECK the ground is the deck along the bridge and level across it — the
+    // triangles beside it run down to the river bed, and a man at the parapet stood half-way down that slope
+    const D120 = this._deck120;
+    if (D120) { const gx = Math.floor((wx + HALF) / TILE), gz = Math.floor((wz + HALF) / TILE);
+      if (gx >= 0 && gz >= 0 && gx < GRID && gz < GRID && D120[gz * GRID + gx]) return window.Bridges120.deckHeight(this, wx, wz, D120[gz * GRID + gx]); }
     const u = clamp((wx + HALF - TILE / 2) / TILE, 0, GRID - 1.001);
     const v = clamp((wz + HALF - TILE / 2) / TILE, 0, GRID - 1.001);
     const ix = Math.floor(u), iz = Math.floor(v), fx = u - ix, fz = v - iz;
@@ -20042,7 +20068,7 @@ class Terrain {
       const doH = boxes[k + 4] & 2, doC = boxes[k + 4] & 1;
       for (let z = Z0; z <= Z1; z++) for (let x = X0; x <= X1; x++) {
         const i = this.idx(x, z);
-        if (doH) pos.setY(i, this.h[i] * HSCALE);
+        if (doH) { const dh = this._drawH120; pos.setY(i, (dh && dh[i] === dh[i] ? dh[i] : this.h[i]) * HSCALE); }   // (round 120) the bed under a bridge
         if (doC) {
           c.copy(typeCol(this.type[i]));
           // Soft transitions between terrain types (blend with 4-neighbours)
@@ -20268,11 +20294,13 @@ class Terrain {
   scourRivers(maxM) {
     if (!this._hasWater || !(maxM > 0)) return 0;
     const G = GRID, N = G * G, W = TYPE.water, dist = new Int16Array(N).fill(-1), q = [];
+    // (round 120, `game.bridges120`) a bridge's deck is not a bank: the river runs under it at its own depth
+    const D120 = this._deck120, dry = j => this.type[j] !== W && !(D120 && D120[j]);
     for (let z = 0; z < G; z++) for (let x = 0; x < G; x++) {
       const i = z * G + x;
       if (this.type[i] !== W) continue;
-      if ((x > 0 && this.type[i - 1] !== W) || (x < G - 1 && this.type[i + 1] !== W)
-          || (z > 0 && this.type[i - G] !== W) || (z < G - 1 && this.type[i + G] !== W)) { dist[i] = 1; q.push(i); }
+      if ((x > 0 && dry(i - 1)) || (x < G - 1 && dry(i + 1))
+          || (z > 0 && dry(i - G)) || (z < G - 1 && dry(i + G))) { dist[i] = 1; q.push(i); }
     }
     for (let h = 0; h < q.length; h++) {
       const i = q[h], x = i % G, z = (i / G) | 0;
@@ -20366,7 +20394,7 @@ class Terrain {
     const B = this._waterBase;
     B.fill(WATER_DRY_Y);
     for (let z = 0; z < GRID; z++) for (let x = 0; x < GRID; x++) {
-      if (this.type[z * GRID + x] !== TYPE.water) continue;
+      if (this.type[z * GRID + x] !== TYPE.water && !(this._wet120 && this._wet120[z * GRID + x])) continue;   // (round 120) under a bridge
       // The four vertices of this cell's quad.
       for (let dz = 0; dz <= 1; dz++) for (let dx = 0; dx <= 1; dx++) {
         const vx = x + dx, vz = z + dz;
@@ -22089,6 +22117,10 @@ class PropBatcher {
       this.scene.add(im);
       index.set(key, im);
       this.batches.push(im);
+      // (round 120, `game.trees120`) a tree of the new species: its reduced LOD beside it (assets/trees120.js)
+      const t120u = b.geo.userData && b.geo.userData.t120;
+      if (t120u && t120u.owner === b.geo && t120u.lod === 0 && window.Trees120 && window.game && window.game.trees120 === true)
+        this.batches.push(window.Trees120.lodBatch(im, b, this.scene));
     }
     // A REBAKE REUSES what it merged before (round 106): the bake runs again
     // in play every time enough props have changed (`maybeRebake`), and
@@ -22130,8 +22162,31 @@ class PropBatcher {
       if (!any) { o._batch = null; this._unpark(o); }
       else o._batch = o._batch.filter(pt => pt.mesh);
     }
+    this._t120Bake();   // (round 120)
     this.active = true;
     return { batches: this.batches.length, props: list.filter(o => o._batch).length };
+  }
+
+  /** (round 120, `game.trees120`) THE IMPOSTORS: each tree batch's variant baked into frames once a map (and
+   *  again only for a variant it has not seen, or under another snow), and ONE instanced quad set for every
+   *  impostor on the map, packed each frame by `cull` with the LOD bands. Off: nothing. */
+  _t120Bake() {
+    const T = window.Trees120, g = window.game;
+    if (this._t120Imp && this._t120Imp.geometry) this._t120Imp.geometry.dispose();
+    this._t120Imp = null;
+    if (!T || !g || g.trees120 !== true || !g.renderer) return;
+    const groups = this.batches.filter(m => m.userData.cull && m.userData.cull.t120);
+    if (!groups.length) return;
+    const sk = '|' + Math.round(((window.Canopy && window.Canopy.snow && window.Canopy.snow.value) || 0) * 4);
+    const list = [], seen = new Set();
+    for (const m of groups) { const L = m.userData.cull.t120; if (!seen.has(L.key)) { seen.add(L.key); list.push({ key: L.key + sk, geo: L.geo0, mat: L.mat }); } }
+    T.Imp.bake(g.renderer, list);
+    let cap = 0;
+    for (const m of groups) { const L = m.userData.cull.t120, s = T.Imp.slots[L.key + sk]; L.slot = s != null ? s : -1; cap += m.userData.cull.n; }
+    const im = T.Imp.mesh(cap, PROP_WIND, CLOUD_U);
+    im.userData.cull = { t120child: true, nv: 0, ns: 0, split: false };
+    this.scene.add(im); this.batches.push(im); this._t120Imp = im;
+    this._cullSig = null;
   }
 
   /** Give one prop its own meshes back — it is about to change. */
@@ -22211,13 +22266,22 @@ class PropBatcher {
     const down = F2 ? -Ld.y : 1, yLow = MINH * HSCALE;
     const S2 = this._cS2 || (this._cS2 = new THREE.Sphere());
     let drawn = 0;
+    // (round 120, `game.trees120`) the trees' LOD bands and the one impostor set (assets/trees120.js `packGroup`)
+    const T120 = this._t120Imp ? window.Trees120 : null, t120Out = T120 ? (this._t120Out || (this._t120Out = [[], []])) : null;
+    let t120Focal = 0;
+    if (T120) {
+      T120.frame(camera, sun); t120Out[0].length = 0; t120Out[1].length = 0;
+      const ch = (window.game && window.game.renderer && window.game.renderer.domElement.clientHeight) || 768;
+      t120Focal = ch / (2 * Math.tan((camera.fov || 50) * Math.PI / 360));
+    }
     for (const im of this.batches) {
       const C = im.userData && im.userData.cull;
-      if (!C) continue;
+      if (!C || C.t120child) continue;
       if (C.casts === undefined) C.casts = im.castShadow;   // (round 119) the batch's own flag: castShadow is set below
       const cast = !!(F2 && C.casts && down > 0.02);
       // a batch neither camera can see is culled whole by three, as before
       if (im.boundingSphere && !F1.intersectsSphere(im.boundingSphere) && !(cast && F2.intersectsSphere(im.boundingSphere))) continue;
+      if (C.t120 && T120) { drawn += T120.packGroup(im, C, F1, F2, cast, down, Ld, T120.U.uT120Eye.value, t120Focal, split && cast, t120Out); continue; }
       const sp = C.sph, vis = C.vis, sp2 = split && cast;
       let k = 0, ks = 0, changed = false;
       if (sp2) {
@@ -22267,6 +22331,7 @@ class PropBatcher {
       im.instanceMatrix.updateRange.offset = 0; im.instanceMatrix.updateRange.count = k * 16;
       im.instanceMatrix.needsUpdate = true;
     }
+    if (T120) T120.impEnd(this._t120Imp, t120Out, split);
     return drawn;
   }
 
@@ -25853,6 +25918,54 @@ class Obstacles {
     }
   }
 
+  /** (round 120, `game.trees120`) TREES BY SPECIES, DRAWN ONLY. A living tree keeps everything the battle
+   *  knows of it — the variant and size its cell's seed drew, `_simV`'s height, its cell — and is DRAWN as one of
+   *  its theatre's species (assets/trees120.js `pick`: the map's flora, the kind of tree that was placed, stands
+   *  that drift over a few cells, pollard willows by the water), grown in Blender with real branches and leaf
+   *  cards, its TOP where the old variant's top was (the simulation measured its height off that), at a uniform
+   *  scale whatever the group's (a conifer's group is squashed 0.78 x 1.12: the new spruce is a spruce already).
+   *  Built here, inside `add`, so in the cosmetic stream. The batcher draws it in three LODs (`PropBatcher._t120Bake`). */
+  _t120On() { const g = window.game; return !!(g && g.trees120 === true && window.Trees120 && window.Trees120.pack()); }
+  _t120Mat(ever) {
+    const k = ever ? 't120e' : 't120d';
+    if (!this.mat[k]) this.mat[k] = window.Trees120.material({ ever, wind: PROP_WIND, cloud: CLOUD_U });
+    return this.mat[k];
+  }
+  _t120Water(gx, gz) {
+    const t = this.terrain;
+    if (!t || !t.typeAt) return false;
+    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+      const x = gx + dx, z = gz + dz;
+      if (inGrid(x, z) && t.typeAt(x, z) === TYPE.water) return true;
+    }
+    return false;
+  }
+  _t120Swap(group, kind, gx, gz) {
+    const T = window.Trees120, old = group.children.find(c => c.isMesh);
+    if (!T || !old) return false;
+    const md = window.game && window.game.mapDef;
+    if (this._t120Md !== md) {
+      this._t120Md = md; this._t120Th = T.theatreOf(md);
+      // a WINTER map (as `Terrain.countSnow` will say, which runs after the props: counted here from the same
+      // painted surface): its pines and conifers stand as snow-laden conifers, its broadleaves bare
+      const ty = this.terrain && this.terrain.type; let sn = 0, n = 0;
+      if (ty) for (let q = 0; q < ty.length; q += 7) { n++; if (ty[q] === TYPE.snow || ty[q] === TYPE.ice) sn++; }
+      this._t120Winter = n > 0 && sn / n >= THEATRE_SNOW;
+    }
+    const pk = T.pick(this._t120Th, kind, gx, gz, this._t120Water(gx, gz), this._t120Winter);
+    const geo = pk && T.geometry(pk.sp, pk.vi, 0);
+    if (!geo) return false;
+    const og = old.geometry;
+    if (!og.boundingBox) og.computeBoundingBox();
+    const u = geo.userData.t120, oldTop = og.boundingBox.max.y * old.scale.y, gs = group.scale, k = oldTop / u.top;
+    const m = new THREE.Mesh(geo, this._t120Mat(u.ever));
+    m.castShadow = old.castShadow; m.receiveShadow = old.receiveShadow;
+    m.position.copy(old.position);
+    m.scale.set(k * gs.y / gs.x, k, k * gs.y / gs.z);
+    group.remove(old); group.add(m);
+    group.userData.t120 = pk.sp;
+    return true;
+  }
   /** What the simulation sees of a prop drawn as variant `v` (`PROP_VARIANT_H`),
    *  times any height scale of its own `k` (`sub`: the variant set, where the
    *  shapes differ by more than the index — a rock's stone): the factor on
@@ -25930,6 +26043,9 @@ class Obstacles {
       // over the small ones and let rounds through the crowns of the big ones —
       // by its size, its kind and its shape
       this._simV(group, type, tv, h, conifer ? 'conifer' : 'broad');
+      // (round 120, `game.trees120`) drawn as a species of the theatre: the old variant decided above stays the
+      // simulation's (its height, its size); only the mesh is swapped (`_t120Swap`)
+      if (this._t120On()) this._t120Swap(group, conifer ? 'conifer' : tv >= 10 ? 'apple' : tv >= 8 ? 'poplar' : 'broad', gx, gz);
     } else if (type === 'bush') {
       // Round 98: one mesh of clumps lit as one (`_shrubVariant`); it was three balls.
       const bv = Math.floor(rng() * 6);
@@ -26243,6 +26359,7 @@ class Obstacles {
       group.rotation.y = rng() * Math.PI * 2;
       const ps = 0.85 + rng() * 0.4;
       group.scale.setScalar(ps); this._simV(group, type, pv, ps);
+      if (this._t120On()) this._t120Swap(group, 'pine', gx, gz);   // (round 120)
     } else if (type === 'oak') {
       // Round 98: the broadleaf tree's build, broader, lower-limbed and in the
       // oak's greens (`_treeVariant(i, true)`). It was the tree's lollipop at
@@ -26254,6 +26371,7 @@ class Obstacles {
       group.rotation.y = rng() * Math.PI * 2;
       const os = 0.9 + rng() * 0.35;
       group.scale.setScalar(os); this._simV(group, type, ov, os);
+      if (this._t120On()) this._t120Swap(group, 'oak', gx, gz);    // (round 120)
     } else if (type === 'scrub') {
       // Round 98: the scrub's greens in one low mesh (`_shrubVariant(i, true)`).
       const sv = Math.floor(rng() * 6);
@@ -28581,6 +28699,9 @@ class Pathfinder {
   passable(x, z) {
     if (!inGrid(x, z)) return false;
     if (this.obstacles.blocked(x, z) && !this._crushable(x, z) && !(this.foot && this.obstacles.footThrough && this.obstacles.footThrough(x, z))) return false;
+    // (round 120, `game.bridges120`) A DECK CARRIES WHAT ITS CLASS CARRIES: `wcls120` is the searching vehicle's weight
+    // class (set for one search, `find`), `deck120` the class each deck cell takes (assets/bridges120.js `cap`)
+    if (this.wcls120 > 1 && this.deck120) { const dc = this.deck120[z * GRID + x]; if (dc && dc < this.wcls120) return false; }
     if (this.floating) return this.terrain.typeAt(x, z) !== TYPE.stone; // ghosts drift over water
     // A TANK CAN GO INTO THE RIVER. It is allowed and it is ruinous — see
     // `WATER_DETOUR` — so a route only ever uses it where there is genuinely
@@ -28962,6 +29083,7 @@ class Pathfinder {
     this.floating = !!floats;
     this.climbMax = climb || CLIMB;
     this.crushing = crush || 0;
+    this.wcls120 = this._wclsNext120 | 0; this._wclsNext120 = 0;   // (round 120) the vehicle's weight class, this search only
     // WATER IS NOT A WALL TO ANYTHING WITH TRACKS. A vehicle may be driven into
     // a river — it will bog there, which is the point — so the search has to be
     // able to reach a destination in the water rather than silently snapping
@@ -28982,6 +29104,7 @@ class Pathfinder {
     this.wading = false;
     this.amphibious = false;
     this.wadeFree = false;
+    this.wcls120 = 0;
     return out;
   }
 
@@ -29333,6 +29456,8 @@ class Pathfinder {
     if (!W || !W.ready || (gm && gm._wasmPath === false)) return null;
     if (this.floating || this.crushing || this.wading || this.amphibious) return null;
     if (this.expo) return null;           // (round 118) `coverRoute118`: the module has no price layer — a priced search is JS
+    // (round 120) a weighed search reads the deck classes in the module's own memory (slot DECK, `set_wcls`), or is the JavaScript's
+    if (this.wcls120 > 1 && this.deck120 && !(W.exports && W.exports.set_wcls && W.owns(this.deck120, 'DECK'))) return null;
     // (round 119) `firePath119`: the fire's price layer IS in the module (`set_fire`), over the burn grid allocated in its
     // memory (`Game._burnGrid118`, `wasmSlot('BURN')`); a grid it cannot read, or an old module, is the JavaScript's
     const FB = this.fire || null;
@@ -29372,6 +29497,7 @@ class Pathfinder {
     if (W.setHedgeCost) W.setHedgeCost(HEDGE_FOOT_COST);   // (round 113) a hedgerow scrambled through
     if (W.setFire) W.setFire(!!FB, FP119.enter, FP119.cell);   // (round 119) every search: on for this one, or off
     if (W.setCrossCost) for (let k = 4; k < 8; k++) W.setCrossCost(k, FOOT_CROSS_COST[k]);   // (round 116) a low line climbed
+    if (W.exports && W.exports.set_wcls) W.exports.set_wcls(this.wcls120 > 1 && this.deck120 ? this.wcls120 : 0);   // (round 120) every search
     let n = W.find(GRID, LV, any, walls, sx, sz, sL, ex, ez, eL, this.climbMax, CAP, deadline, PATH_CLOCK_EVERY);
     const ms = performance.now() - t0;
     this._frameMs += ms * rate;
@@ -36508,6 +36634,7 @@ class Unit {
       }
       gF.pathfinder.fire = gF._burnGrid118();
     }
+    if (this.def.vehicle && this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any) this.game.pathfinder._wclsNext120 = window.Bridges120.clsOf(this.def, this.type);   // (round 120)
     const path = this.game.pathfinder.find(
       worldToCell(this.pos.x), worldToCell(this.pos.z),
       worldToCell(fdx), worldToCell(fdz), this.def.floats, climbOf(this.def),
@@ -36584,6 +36711,7 @@ class Unit {
     // same rules the route was made by: what this hull can crush, wade, climb.
     pf.crushing = this._crushPower(); pf.wading = pf.crushing > 0;
     pf.floating = !!this.def.floats; pf.climbMax = climbOf(this.def);
+    pf.wcls120 = this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any ? window.Bridges120.clsOf(this.def, this.type) : 0;   // (round 120)
     const live = !!(pf.structures && pf.structures.any);
     const steps = Math.ceil(hyp(dx, dz) / (TILE * 0.4));
     let px = cx, pz = cz, ok = true;
@@ -36596,7 +36724,7 @@ class Unit {
       else if (Math.abs(pf.terrain.height(gx, gz) - pf.terrain.height(px, pz)) > pf.climbMax) ok = false;
       px = gx; pz = gz;
     }
-    pf.crushing = 0; pf.wading = false; pf.floating = false; pf.climbMax = CLIMB; pf.walkCost = false;
+    pf.crushing = 0; pf.wading = false; pf.floating = false; pf.climbMax = CLIMB; pf.walkCost = false; pf.wcls120 = 0;
     if (!ok) path.unshift({ x: cellCenter(cx), z: cellCenter(cz), lvl: 0, tight: true });
   }
 
@@ -47064,6 +47192,11 @@ class Unit {
       const sc = S.coverAt(gx, gz, this.lvl, f ? f.x : undefined, f ? f.z : undefined);
       if (sc > 0) cov = 1 - (1 - cov) * (1 - sc);
     }
+    // (round 120, `game.bridges120`) A BRIDGE'S PARAPET: cover for a man on the deck's edge from fire across that edge
+    if (this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any) {
+      const f120 = this._coverFrom, pc120 = window.Bridges120.coverAt(gx, gz, f120 ? f120.x : undefined, f120 ? f120.z : undefined);
+      if (pc120 > 0) cov = 1 - (1 - cov) * (1 - pc120);
+    }
     // Standing crop and brush are soft cover — worth less than a wall, but the
     // reason a man crawls into a wheat field instead of across it.
     if (this.game.foliage) {
@@ -47875,6 +48008,7 @@ class Editor {
   }
   /** Which drag behaviour applies to the current tool. */
   _mode() {
+    if (this.tool && this.tool.indexOf('bridge120:') === 0) return 'line';   // (round 120) a bridge: drag across the water
     const stool = Editor.strTool(this.tool);
     if (stool) return stool === 'building' ? 'rect' : this.strMode;
     if (Editor.foliageDef(this.tool)) return 'brush';   // sowing is always a drag
@@ -47900,6 +48034,12 @@ class Editor {
     const stool = Editor.strTool(this.tool);
     if (stool && (mode === 'line' || mode === 'rect') && gx !== undefined) {
       this._commitStructureDrag(st.gx0, st.gz0, gx, gz, stool);
+      this.stroke = null; return;
+    }
+    if (this.tool && this.tool.indexOf('bridge120:') === 0 && gx !== undefined) {   // (round 120) a bridge of this kind across the drag
+      const B120 = window.Bridges120, r = B120 ? B120.place(this.game, st.gx0, st.gz0, gx, gz, this.tool.slice(10)) : { err: 'no bridges' };
+      if (r && r.err) { this.undoStack.pop(); this.game.ui.toast(r.err, 'bad'); }
+      else { this.game.sfx.place(); this.game.ui.toast(B120.KINDS[r.kind].name + ': ' + (r.s1 - r.s0 + 1) * 6 + ' m, carries ' + B120.CLASS_NAME[B120.KINDS[r.kind].cls]); }
       this.stroke = null; return;
     }
     if ((mode === 'line' || mode === 'rect') && gx !== undefined) {
@@ -48796,6 +48936,13 @@ class UI {
     // (round 118, `game.bunker118`) Casemate · Tobruk · Dugout: the embrasure faces the prop Angle (0 N, 90 E, 180 S, 270 W)
     if (window.Bunker118 && (window.game && window.game.bunker118 != null ? window.game.bunker118 === true : window.Bunker118.ON === true)) for (const k of Object.keys(window.Bunker118.KINDS))
       obsRow.appendChild(mkBtn('bunker118:' + k, window.Bunker118.KINDS[k].name, k === 'dugout' ? 0x5a4530 : 0x8e8b83));
+    // (round 120, `game.bridges120`) the bridges: drag across water from bank to bank. Shown only with the switch on
+    // (`Bridges120.syncUi` on every map load: the panel is built once, before the game exists)
+    if (window.Bridges120) for (const k of Object.keys(window.Bridges120.KINDS)) {
+      const bb = mkBtn('bridge120:' + k, window.Bridges120.KINDS[k].name, window.Bridges120.KINDS[k].color);
+      if (((window.game ? window.game.bridges120 : Game.prototype.bridges120) === true) !== true) bb.style.display = 'none';
+      obsRow.appendChild(bb);
+    }
     obsRow.appendChild(mkBtn('removeObs', '✕', 0x4a2a2a));
     obsRow.appendChild(mkBtn('turnObs', '⟳ Turn', 0x3a4a5a));     // (round 113) turn a placed prop to the Angle
     // Surface swatches live on their own tab now, generated from TYPE_DEF
@@ -49951,7 +50098,9 @@ class Input {
   }
   groundPoint(e) {
     this._setNdc(e);
-    const hits = this.raycaster.intersectObject(this.game.terrain.mesh);
+    // (round 120) a bridge's deck (its never-drawn ribbon) before the river bed drawn under it
+    const B120 = window.Bridges120, hits = B120 && B120.pick.length ? this.raycaster.intersectObjects([this.game.terrain.mesh].concat(B120.pick))
+      : this.raycaster.intersectObject(this.game.terrain.mesh);
     return hits.length ? hits[0].point : null;
   }
   /** Everything the cursor is allowed to land on this frame.
@@ -51235,6 +51384,8 @@ class Game {
     this.weather119 = true;   // (round 119) ON: main judged the captures (.claude/wip119/weather/captures_final); dry weather costs nothing
     this.wx119 = null;
     try { if (window.Weather119 && window.Weather119.create) this.wx119 = cosmeticScope(() => window.Weather119.create(this)); } catch (e) { console.warn('weather119', e); }
+    this.wt120 = null;   // (round 120) the water, drawn (assets/water120.js, `game.water120`)
+    try { if (window.Water120 && window.Water120.create) this.wt120 = cosmeticScope(() => window.Water120.create(this)); } catch (e) { console.warn('water120', e); }
     this.fogBanks = new FogBanks(this.scene, this);
     // Base light/fog values weather scales against
     // `sun` carries a quarter more than it used to, to pay for the fill that
@@ -55391,6 +55542,8 @@ class Game {
   /** Give the section a task, and reset the timers that belong to it. */
   _squadTask(rec, kind, x, z, extra) {
     const sq = rec.sq, t = sq._task;
+    // (round 119, `urbanAtk119`) A SECTION MID-APPROACH IS NOT TAKEN OFF IT for another objective (`_ua119Dwell`)
+    if (this.urbanAtk119 === true && t && t._ua119 && this.ua119Dwell !== false) { const kept = this._ua119Dwell(rec, t, kind, x, z); if (kept) return kept; }
     // A SECTION IS NOT RE-TASKED EVERY SECOND AND A HALF.
     //
     // The point of attack drifts as men move, so a straight comparison
@@ -62394,6 +62547,7 @@ class Game {
     let best = null, bs = Infinity, routeWalk = Infinity;
     for (let k = 0; k < cand.length && k < A117_CANDS; k++) {
       const c = cand[k];
+      if (u.def.vehicle && this.bridges120 === true && window.Bridges120 && window.Bridges120.any) this.pathfinder._wclsNext120 = window.Bridges120.clsOf(u.def, u.type);   // (round 120)
       const path = this.pathfinder.find(gx, gz, c.ox, c.oz, u.def.floats, climbOf(u.def), u.lvl | 0, 0, u._crushPower(), u.def.amphib);
       if (!path.length || this.pathfinder.lastPartial) continue;
       const pts = [];
@@ -63565,6 +63719,17 @@ class Game {
     }
     return false;
   }
+  /** The mean suppression of the hostile men in that house (1 when nobody is left in it): the heads that are down. */
+  _ua119Supp(h, T) {
+    let s = 0, n = 0;
+    for (const u of this.units) {
+      if (!u.alive || u.downed || u.def.vehicle || !areHostile(T, u.team)) continue;
+      const gx = worldToCell(u.pos.x), gz = worldToCell(u.pos.z);
+      if (!inGrid(gx, gz) || !h.set.has(gz * GRID + gx)) continue;
+      s += u.suppression || 0; n++;
+    }
+    return n ? s / n : 1;
+  }
   /** The rest of the side on the same windows: tanks put HE into them from the halt (`_tankAreaFire`, through
    *  `_fireAt`, which still asks what the side has seen there), machine guns lay their beaten zone on them. */
   _ua119Support(T, A) {
@@ -63612,6 +63777,42 @@ class Game {
     this.projectiles.fireSmoke(firer, sx, sz);
     if (C) { C.smoke++; if (firer.def.kind === 'mortar') C.smokeTube++; }
     return true;
+  }
+  /** (round 119, session 6) THE APPROACH IS NOT TAKEN OFF THE SECTION. Measured in session 5 on the shipped
+   *  defaults: most approaches were left unfinished when the commander's next task replaced the section's (Arnhem
+   *  191 of 259; crossings 33 started, 14 reached the wall), so fire superiority seldom ended in a crossing. While the
+   *  approach is suppressing, bounding or crossing, a new task onto ANOTHER objective (its point more than
+   *  UA119_OBJ_R + 8 from the house) is refused — the task kept, its aim unmoved — until the approach ends: at the
+   *  wall, the section pinned or broken, or UA119_DWELL_MAX after it began (counted: a dwell that held a section on a
+   *  dead approach would be round 45's absorbing hold). Never refused: a withdrawal (retreat), a counter-attack
+   *  (ground just lost), a hold on a flag of ours the enemy is taking (the only hold that cannot wait two minutes), a
+   *  task onto the same house, and anything for the player's side (its orders are the player's). Returns the kept
+   *  task, or null to let the new one through. */
+  _ua119Dwell(rec, t, kind, x, z) {
+    const sq = rec.sq, A = t._ua119, now = this.time;
+    if (!A || !(A.phase === 'supp' || A.phase === 'leap' || A.phase === 'smoke' || A.phase === 'cross' || A.phase === 'follow')) return null;
+    const T = rec.live.length ? rec.live[0].team : 0;
+    if (!T || T === this.playerTeam) return null;
+    if (hyp(x - A.h.x, z - A.h.z) <= UA119_OBJ_R + 8) return null;                 // the same house: not another objective
+    if (kind === 'withdraw' || kind === 'counter') return null;                      // retreat; ground just lost
+    if (sq.state === 'pinned' || sq.state === 'broken' || rec.pinned) return null;   // the approach is over for now
+    const C = this._ua119C();
+    if (now - A.t0 > UA119_DWELL_MAX) { if (!A.dwellOut) { A.dwellOut = true; C.dwellTimeout = (C.dwellTimeout || 0) + 1; } return null; }
+    if (kind === 'hold') {
+      // urgent only for a flag of ours the enemy is taking
+      for (const v of this.victoryPoints || []) {
+        if (hyp(v.x - x, v.z - z) > Math.max(4, (v.r || 0) * 0.5)) continue;
+        if (v.owner === T && v.capTeam && areHostile(T, v.capTeam) && v.cap > 0.05) return null;
+      }
+    }
+    const age = now - A.t0, b = C.dwellBlock || (C.dwellBlock = {});
+    if (!A.dwellSeen || A.dwellSeen[kind] == null) {                                  // counted once per approach and kind
+      (A.dwellSeen || (A.dwellSeen = {}))[kind] = age;
+      b[kind] = (b[kind] || 0) + 1;
+      const band = age < 30 ? 'a<30' : age < 60 ? 'a30-60' : 'a60-120';
+      C[band] = (C[band] || 0) + 1;
+    }
+    return t;
   }
   /** The approach's counters (`game._u119`), this battle's. */
   _ua119C() {
@@ -63736,6 +63937,8 @@ class Game {
     // the task (a new task object) and the next began again from `supp`.
     const SA = sq._ua119A;
     if (!A && SA && SA.phase !== 'done' && now - SA.lastT < 5 && (hyp(SA.h.x - t.x, SA.h.z - t.z) <= UA119_OBJ_R + 8 || SA.axis)) { A = t._ua119 = SA; C.resumed++; }
+    // an approach of this section left unfinished (re-tasked away, not resumed): by the phase it was in
+    if (!A && SA && SA.phase !== 'done' && !SA.counted) { SA.counted = true; const k = 'left_' + SA.phase; C[k] = (C[k] || 0) + 1; }
     if (!A) {
       // WHICH HOUSE NEXT: one the side knows is held, at the place it is going — or ON THE WAY there (within
       // UA119_AXIS_R of the line from the section to its point, nearer than the point): a section does not walk past
@@ -63802,11 +64005,19 @@ class Game {
         if (A.recon) this._ua119Recon(live, A);
         this._ua119Support(T, A);
         const held = now - A.phaseT;
-        const quiet = held >= UA119_SUPP_MIN && !this._ua119Firing(A.h, T, UA119_QUIET);
-        // …and a firefight the windows are winning (a man of the section down) is broken off the same way
-        const losing = live.length < A.n0;
-        if (quiet || losing || held >= UA119_SUPP_MAX) {
-          if (quiet) C.quiet++; else if (losing) C.losing++; else C.maxed++;
+        // FIRE SUPERIORITY BEFORE THE MOVE (session 5). The street test (`UAtk.street`): a base of fire on the windows
+        // for 60 s before the crossing cut the section's losses 71% -> 11% on Ortona; the battles' approach had
+        // suppressed 6-20 s. So the windows are worked for UA119_FS_MIN (30 s) at least, and the crossing goes at the
+        // first of: no round out of the house for UA119_FS_QUIET (10 s), its men's suppression at UA119_FS_SUPP (0.5),
+        // or UA119_FS_MAX (60 s). Round 111's trap — a section that never crosses — is closed by the maximum.
+        let go = null;
+        if (held >= UA119_FS_MAX) go = 'maxed';
+        else if (held >= UA119_FS_MIN) {
+          if (!this._ua119Firing(A.h, T, UA119_FS_QUIET)) go = 'quiet';
+          else if (this._ua119Supp(A.h, T) >= UA119_FS_SUPP) go = 'suppressed';
+        }
+        if (go) {
+          C[go] = (C[go] || 0) + 1; C.suppT = (C.suppT || 0) + held;
           if (hyp(rec.cx - w.x, rec.cz - w.z) > UA119_RUSH) { A.phase = 'leap'; A.phaseT = now; }
           else { A.smoked = this._ua119Smoke(rec, A, w); A.phase = 'smoke'; A.phaseT = now; }
         }
@@ -63870,7 +64081,7 @@ class Game {
         const held = now - A.phaseT;
         if (A.phase === 'cross' && (at >= Math.ceil(goers.length * 0.6) || held > UA119_CROSS_MAX)) { A.phase = 'follow'; A.phaseT = now; return true; }
         if (A.phase === 'follow' && (at >= Math.ceil(goers.length * 0.6) || held > UA119_CROSS_MAX)) {
-          if (held > UA119_CROSS_MAX) C.timeout++;
+          if (held > UA119_CROSS_MAX) C.timeout++; else C.crossEnd = (C.crossEnd || 0) + 1;
           A.phase = 'done'; C.done++; sq._ua119A = null;
           if (t.kind === 'assault') return false;          // at the wall: the entry's
           // a bound or a move: the house it ended at is now an assault, and the assault case is the entry's — at once
@@ -67409,6 +67620,8 @@ class Game {
    *  and fire-vector lines (red direct LoF / orange obstructed·suppressed /
    *  yellow indirect) to targets or area-fire points. One draw call. */
   _updateOrderVis() {
+    // (round 120) `game.orderLines120`: assets/orderlines120.js draws the lines (thin, by type) and says so
+    if (this._ol120Frame && this._ol120Frame()) return;
     // (round 111) FIRST PERSON IS A SHOOTER, NOT A MAP. The man you ride is
     // selected (`enterFpv`), so his own path — and the blob in Move's or Move
     // Fast's colour at the end of it — was painted on the ground in front of
@@ -68565,7 +68778,10 @@ class Game {
     // Ground cover is flattened by the blast — a shelled cornfield stops being
     // cover, which matters because it stops being concealment at the same time.
     if (this.foliage) this.foliage.flatten(wx, wz, radius * 1.15, opts.flame ? 1 : 0.85);
-    if (this.terrain.heightAt(wx, wz) < this.terrain.waterY) this.sfx.splash();
+    if (this.terrain.heightAt(wx, wz) < this.terrain.waterY) {
+      this.sfx.splash();
+      if (this.wt120 && this.water120 === true) cosmeticScope(() => this.wt120.splash(wx, wz, radius));   // (round 120) a white column
+    }
     // Flame weapons & incendiary bursts set the ground, props and buildings alight
     if ((opts.flame || opts.fire) && groundY >= this.terrain.waterY) {
       const cellT = this.terrain.typeAt(cx, cz);
@@ -71885,6 +72101,8 @@ class Game {
       structures: this.structures ? this.structures.serialize() : null,
       // (round 118) the bunkers' kinds and fronts (their walls are in `structures`); no key when there are none
       ...(window.Bunker118 && window.Bunker118.list.length ? { bunkers118: window.Bunker118.serialize() } : {}),
+      // (round 120) the bridges (their decks are in the terrain); no key when there are none
+      ...(window.Bridges120 && window.Bridges120.list.length ? { bridges120: window.Bridges120.serialize() } : {}),
       foliageIds: this.foliage && window.Foliage ? window.Foliage.DEFS.map(f => f.id) : undefined,
       units: this.units.filter(u => u.alive).map(u => ({
         x: worldToCell(u.pos.x), z: worldToCell(u.pos.z),
@@ -71970,6 +72188,7 @@ class Game {
     if (data.obstacles) this.obstacles.load(data.obstacles, off);
     if (this.structures) this.structures.load(data.structures || null, off);
     if (window.Bunker118) window.Bunker118.load(data.bunkers118 || null, off);   // (round 118)
+    if (window.Bridges120) window.Bridges120.load(this, data.bridges120 || null, off);   // (round 120)
     // Ground cover. Kinds are stored as 1-based indices, so — exactly as with
     // surfaces above — a map written when the kind list had a different shape
     // is remapped BY NAME before the cells are read; anything this build no
@@ -72052,6 +72271,7 @@ class Game {
     if (data.obstacles) this.obstacles.load(data.obstacles, off);
     if (this.structures) this.structures.load(data.structures || null, off);
     if (window.Bunker118) window.Bunker118.load(data.bunkers118 || null, off);   // (round 118)
+    if (window.Bridges120) window.Bridges120.load(this, data.bridges120 || null, off);   // (round 120)
   }
   /** …and its crops, by kind NAME as `load` reads them. */
   _applyMapFoliage(data) {
@@ -73571,6 +73791,7 @@ class Game {
     // the eighteen maps that declare no side with them. A setting that is only
     // ever written one way is a latch.
     if (window.Bunker118) window.Bunker118.clear();   // (round 118) a map built by code has no bunkers of the last one
+    if (window.Bridges120) window.Bridges120.clear(this);   // (round 120) …nor bridges
     if (!this.campaignDeploy) this.playerTeam = 1;
     // No map, or one that does not exist: the default map (DEFAULT_MAP_NAME).
     if (idx <= 0 || !MAPS[idx - 1]) idx = defaultMapIdx();
@@ -73849,6 +74070,8 @@ class Game {
       if (over) console.warn('map "' + map.name + '": ' + over + ' cells outside the engine\'s height range ('
         + MINH + '..' + MAXH + '), peak ' + peak.toFixed(1) + ' / ' + trough.toFixed(1) + ' — clamped');
     }
+    // (round 120) THE NAMED BRIDGES (`game.bridges120`): the strip a map painted across its river cut back to a deck
+    if (window.Bridges120) window.Bridges120.atLoad(this, map, dataMap);
     // ---- GRADE THE ROAD ---------------------------------------------------
     //
     // A ROAD THAT CLIMBS FASTER THAN A TANK CAN DRIVE IS AN AUTHORING ERROR,
@@ -73936,6 +74159,7 @@ class Game {
     // ground is rebuilt from its heights
     // (true scale only: the diorama keeps its old rivers to the byte)
     if (RIVER_DEPTH_M[map.name] && this._riverScour !== false && K_BLD !== 1) T.scourRivers(RIVER_DEPTH_M[map.name]);
+    if (window.Bridges120) window.Bridges120.afterWater(this);   // (round 120) drawing only: the bed under each span
     T.heightsDirty = T.colorsDirty = T.minimapDirty = true;
     T.countSnow();                              // before the deploy, not a frame after it (see countSnow)
     // Every stock map predates the foliage layer, so plant it from the surfaces
@@ -76239,6 +76463,7 @@ class Game {
     this._updateWeatherFront(dt);                // …and deciding to send another
     this._updateWeather(dt);                     // rain/snow drift (always)
     if (this.wx119) this.wx119.frame(this, dt);  // (round 119) rain, snow and the wet, drawn (game.weather119)
+    if (this.wt120) this.wt120.frame(this, dt);  // (round 120) the water, drawn (game.water120)
     this._updateDebris(dt);                      // launched turrets tumble & land
     if (this.obstacles && this.obstacles._updateFalls) this.obstacles._updateFalls(dt);   // (round 118) felled trees come down
     this._updateBlood(dt);                       // pools spread, wounds soak (round 106)
@@ -76345,6 +76570,9 @@ Game.prototype.destroy118 = false;
 Game.prototype.fxPool118 = true;      // ON: no worse on Ponyri x13 and Hedgerow Hell x13 (handoff, round 118 effects second pass)
 // (round 119) the prop batches' shadow pass draws only the instances whose shadow can be seen (PB_BEFORE119)
 Game.prototype.shadowSet119 = true;    // ON: no worse at any camera on Village or Ortona, Village's zoom limit -1.1 ms (handoff, round 119 Village's frame)
+// (round 120) TREES BY SPECIES: branches and leaf cards, three LODs, impostors (assets/trees120.js). OFF: the
+// trees of round 113 exactly. Read at map load (`Obstacles.add`) and at the batcher's bake.
+Game.prototype.trees120 = false;
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 // (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —
@@ -76357,6 +76585,8 @@ Game.prototype.fpvNear118 = true;     // ON: against the sun a fence 16->41/255,
 Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of px under 30/255, the pine's crown 66% -> 53% (r118vis s4)
 Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
 Game.prototype.fpvGround118 = false;
+Game.prototype.bridges120 = false;    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
+Game.prototype.water120 = false;      // (round 120) the water, drawn (assets/water120.js): the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks reflected, foam, wet banks, rain rings. OFF is today's program exactly; ON until main has seen the sheets (.claude/wip120/water)
 Game.prototype.water119 = true;       // (round 119) the water's swell in the vertex shader, not 2 sines a vertex on the CPU (Terrain.ambient). ON: Terrain.ambient 2.0-3.3 ms -> 0 (Argenta Gap, Purple Heart Lane, A/B with a null arm), the same picture (0 mean abs, 1-10 px differ by 0.33/255 vs a null's 0-12)
 Game.prototype.coverAuto119 = true;   // (round 119, COHESION) ON: a man of the player's side on Auto halted by the close-up's "ahead" rule takes cover near him on an AI leg (`_coh119Cover`), not `orderTakeCover` (whose `orderMove` sets `explicit`: off the autopilot until he arrives). Player on Auto, 6 seeds x 1800 s a map, off/null/on: his men off the autopilot Ortona 1.7-11.4% -> 0-0.7%, Village 0.5-2.6% -> 0-0.5%; Ortona adrift 14.0 -> 6.4%, fire 216 -> 620 rounds; nothing worse beyond the floor (handoff, round 119 coverAuto119). `= false` is the old line
 Game.prototype.cohChase119 = false;   // (round 119, COHESION) a chase closes no further than 25 m from a mate (`_coh119Clamp`); OFF: session 1 suspected it of Ortona's attacker fire 350 -> 153
@@ -76625,6 +76855,7 @@ function boot() {
   forgeInstall();
   squadsInstall();
   ccMenuInstall();
+  if (typeof orderLines120Install === 'function') orderLines120Install({ THREE, Game, game, cosmeticScope, HALF: () => HALF, MARK_H });   // (120) game.orderLines120 (assets/orderlines120.js)
   campaignInstall();
   battleSetupInstall();    // (round 111) after the squad layer, whose spawnSquad it deploys with
   playerOrdersInstall();   // (round 110) after every module that puts a command on the prototype

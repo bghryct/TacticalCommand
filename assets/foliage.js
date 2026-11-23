@@ -475,6 +475,77 @@
   var ATLAS_COLS = 8, ATLAS_ROWS = 6, ATLAS_CELL = 256, ATLAS_PAD = 10, ATLAS_PAINTED = 8;
   var FOL_NEAR_GAIN = 0.55;      // (round 115) of the tint's gain, where a texel is a pixel or more
 
+  // ===========================================================================
+  // (round 120, `game.foliage120`) THE FIELD THE REFERENCES DRAW
+  // ---------------------------------------------------------------------------
+  // "better foliage modeling ... overall I want the graphics to improve
+  // significantly" — the owner. The eight kinds the whole map is mostly made of
+  // (meadow and tall grass, wheat, maize, bracken, reeds, heather, brush) were
+  // canvas scribbles: a few dozen fat strokes, one drawing each, so a meadow was
+  // the same tuft a hundred thousand times. ON, they are drawn from Blender
+  // models (tools/blender/plants120.py, assets/foliage_sprites120.js — loaded
+  // only when the switch is on), several drawings to a kind, picked per plant;
+  // the light comes through a blade with the sun behind it; the wind rolls
+  // across the field in gusts you can watch travel; and from the strategic
+  // camera the field is a CARPET (`_carpet120`): an opaque-cost layer on the
+  // ground in the crop's own far colour, so fewer, smaller cards are needed
+  // over it and the field runs to the horizon without a ring where the cards
+  // stop. DRAWING ONLY: which cell carries what plant, how dense and how tall
+  // (`coverAt`, `concealAt`, `heightAt`, `occlusionAt`) are not touched.
+  // OFF (the default) is the round-119 field exactly: its own atlas, material,
+  // depth material and build.
+  //
+  //  V120     kind -> the ids (in FOLIAGE_SPRITES120) of the drawings it picks
+  //           from; a kind not listed keeps its round-113 cell
+  //  BAND120  per zoom band: the share of the band's density drawn as blades,
+  //           and the cap on how much a far card is blown up (round 108's
+  //           `sizeBoost`, 1.75): the carpet carries the coverage instead
+  var A120_COLS = 8, A120_ROWS = 9, A120_FIRST = 48;
+  var V120 = {
+    grass:     ['grass_a', 'grass_b', 'grass_c', 'grass_d'],
+    tallgrass: ['tall_a', 'tall_b'],
+    wheat:     ['wheat_a', 'wheat_b'],
+    corn:      ['corn_a'],
+    fern:      ['fern_a'],
+    reeds:     ['reeds_a'],
+    heather:   ['heather_a'],
+    brush:     ['brush_a', 'brush_b', 'brush_c'],
+    sunflower: ['sun_f'],
+    stubble:   ['dry_a'],
+  };
+  // the theatre's season: summer-dry grass on the steppe, in Italy and the desert, dead grass under snow
+  var V120T = {
+    east:   { grass: ['grass_a', 'grass_d', 'dry_a', 'grass_c'], tallgrass: ['tall_a', 'dry_b', 'tall_b'], brush: ['brush_a', 'brush_c'] },
+    italy:  { grass: ['grass_d', 'dry_a', 'grass_c', 'grass_b'], tallgrass: ['tall_a', 'dry_b'], brush: ['brush_b', 'brush_a'] },
+    desert: { grass: ['dry_a', 'dry_b', 'grass_d'], tallgrass: ['dry_b', 'dry_a'], brush: ['brush_b'] },
+    pacific: { brush: ['tropic_a', 'brush_b'] },
+    winter: { grass: ['dry_a', 'grass_d'], tallgrass: ['dry_b', 'dry_a'], heather: ['dry_a'] },
+  };
+  // FACING: "sunflowers with heads that face one way" — the owner. A facing kind is turned to one bearing
+  // (`yaw`, +- a little; the turn the field's stream drew is still drawn, then mapped onto that), and the
+  // side of each quad that looks away from it shows the plant from BEHIND (`back`, drawn mirrored, so its
+  // silhouette and its shadow are the front's): a field of faces from one side, of green backs from the other
+  var FACE120 = { sunflower: { back: 'sun_b', yaw: Math.PI / 4, spread: 0.45 } };
+  // their colour is in the drawing: a neutral tint a shade under the forty's (they were lit a little brighter)
+  var TINT120 = [0x646464, 0x686660, 0x60645e];
+  // near the eye (bands 0 and 1) a meadow is a sward, not tufts on a lawn: more of the grasses
+  var NEAR120 = { grass: 1.3, tallgrass: 1.2 };
+  var BAND120 = [
+    { dens: 1.00, boost: 1.75, fade: 1.00 },
+    { dens: 1.00, boost: 1.60, fade: 1.00 },
+    { dens: 0.85, boost: 1.45, fade: 0.90 },
+    { dens: 0.60, boost: 1.30, fade: 0.70 },
+    { dens: 0.55, boost: 1.25, fade: 0.62 },
+  ];
+  // the carpet: cover near the eye (its share of the cell's density), and the
+  // distances (x the band's fade) over which it comes up to full
+  var CARPET120 = { near: 0.0, from: 0.30, to: 0.95, reg: 6, mottle: 0.14, cap: 0.7 };
+  // the light: transmission through a blade toward a low sun, the bright sheen
+  // a gust lays on a bending crop, and the colour patches across a field
+  var LOOK120 = { trans: 0.55, sheen: 0.16, gustScale: 0.11, gustSpeed: 1.1, gust: 1.0, varScale: 0.045, varAmt: 0.20, dry: 0.30 };
+  /** Is the round-120 field asked for? Read once a frame by `update`. */
+  function on120() { var g = window.game; return !!(g && g.foliage120 === true); }
+
   function rngFrom(seed) {
     return function () {
       seed |= 0; seed = seed + 0x6D2B79F5 | 0;
@@ -837,6 +908,214 @@
     rgb.onerror = cov.onerror = function () { spritesState = 'failed'; };
     rgb.src = 'data:image/jpeg;base64,' + S.jpg;
     cov.src = 'data:image/png;base64,' + S.alpha;
+  }
+
+  // =========================================================================
+  // (round 120) THE ON ATLAS — `game.foliage120`
+  // =========================================================================
+  // The round-113 atlas's 48 cells in the same places, and under them (rows 6
+  // and 7) the drawings of assets/foliage_sprites120.js. A texture, a mip chain
+  // and a material of its own, so the OFF field is the round-119 one to the
+  // byte; built, and the sprites fetched, the first time the switch is on.
+  var _atlas120 = null, sprites120 = 'none', sprites120Ms = null, cellFar120 = null, CELLQ120 = {};
+  function atlasTexture120() {
+    if (_atlas120) return _atlas120;
+    var cv = document.createElement('canvas');
+    cv.width = A120_COLS * ATLAS_CELL;
+    cv.height = A120_ROWS * ATLAS_CELL;
+    var ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    for (var k = 0; k < ATLAS_PAINTED; k++) {
+      var cx = (k % A120_COLS) * ATLAS_CELL, cy = Math.floor(k / A120_COLS) * ATLAS_CELL;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.beginPath(); ctx.rect(0, 0, ATLAS_CELL, ATLAS_CELL); ctx.clip();
+      drawSprite(ctx, k, ATLAS_CELL, rngFrom(1337 + k * 7919));
+      ctx.restore();
+    }
+    _atlas120 = new THREE.CanvasTexture(cv);
+    _atlas120.wrapS = _atlas120.wrapT = THREE.ClampToEdgeWrapping;
+    _atlas120.magFilter = THREE.LinearFilter;
+    _atlas120.minFilter = THREE.LinearMipmapLinearFilter;
+    _atlas120.generateMipmaps = true;
+    _atlas120.anisotropy = 4;
+    load120(cv, _atlas120);
+    return _atlas120;
+  }
+  /** A sprite sheet's JPEG colour and PNG coverage, put back together (as `pasteSprites`). */
+  function decodeSheet120(S, cb) {
+    var rgb = new Image(), cov = new Image(), n = 0, bad = false;
+    function done() {
+      if (++n < 2 || bad) return;
+      try {
+        var w = rgb.width, h = rgb.height;
+        var c1 = document.createElement('canvas'); c1.width = w; c1.height = h;
+        var x1 = c1.getContext('2d', { willReadFrequently: true });
+        x1.drawImage(rgb, 0, 0);
+        var px = x1.getImageData(0, 0, w, h), d = px.data;
+        x1.clearRect(0, 0, w, h);
+        x1.drawImage(cov, 0, 0);
+        var al = x1.getImageData(0, 0, w, h).data;
+        for (var i = 3; i < d.length; i += 4) d[i] = al[i - 3];
+        cb(px);
+      } catch (e) { cb(null); }
+    }
+    rgb.onload = cov.onload = done;
+    rgb.onerror = cov.onerror = function () { if (!bad) { bad = true; cb(null); } };
+    rgb.src = 'data:image/jpeg;base64,' + S.jpg;
+    cov.src = 'data:image/png;base64,' + S.alpha;
+  }
+  function load120(cv, tex) {
+    if (typeof Image === 'undefined' || typeof document === 'undefined') { sprites120 = 'absent'; return; }
+    sprites120 = 'loading';
+    function go() {
+      var S0 = window.FOLIAGE_SPRITES, S1 = window.FOLIAGE_SPRITES120, ctx = cv.getContext('2d'), left = 0, t0 = performance.now();
+      function fin() {
+        if (--left > 0) return;
+        try {
+          var t1 = performance.now();
+          buildMips120(cv, tex);
+          cellFar120 = farColours120(tex);
+          tex.needsUpdate = true;
+          sprites120 = S1 && Object.keys(CELLQ120).length ? 'ready' : 'absent';
+          sprites120Ms = [t1 - t0, performance.now() - t1];
+        } catch (e) { sprites120 = 'failed'; if (window.console) console.warn('foliage120 atlas:', e.message); }
+      }
+      if (S0 && S0.jpg && S0.alpha) {
+        left++;
+        decodeSheet120(S0, function (px) {
+          if (px) {
+            var C = S0.cell || ATLAS_CELL, cols = S0.cols || 8;
+            for (var k = 0; k < DEFS.length; k++) {
+              var def = DEFS[k], j = S0.ids.indexOf(def.id);
+              if (j < 0 || def.atlas < ATLAS_PAINTED) continue;
+              var sx = (j % cols) * C, sy = Math.floor(j / cols) * C;
+              var ax = (def.atlas % A120_COLS) * ATLAS_CELL, ay = Math.floor(def.atlas / A120_COLS) * ATLAS_CELL;
+              ctx.putImageData(px, ax - sx, ay - sy, sx, sy, C, C);
+            }
+          }
+          fin();
+        });
+      }
+      if (S1 && S1.jpg && S1.alpha) {
+        left++;
+        decodeSheet120(S1, function (px) {
+          if (px) {
+            var C = S1.cell || ATLAS_CELL, cols = S1.cols || 8;
+            for (var j = 0; j < S1.ids.length; j++) {
+              var cell = A120_FIRST + j;
+              if (cell >= A120_COLS * A120_ROWS) break;
+              var sx = (j % cols) * C, sy = Math.floor(j / cols) * C;
+              var ax = (cell % A120_COLS) * ATLAS_CELL, ay = Math.floor(cell / A120_COLS) * ATLAS_CELL;
+              ctx.putImageData(px, ax - sx, ay - sy, sx, sy, C, C);
+              CELLQ120[S1.ids[j]] = { cell: cell, q: (S1.quad && S1.quad[S1.ids[j]]) || null };
+            }
+          }
+          fin();
+        });
+      }
+      if (!left) { left = 1; fin(); }
+    }
+    if (window.FOLIAGE_SPRITES120) go();
+    else {
+      // loaded on demand: OFF pages never fetch it
+      var s = document.createElement('script');
+      s.src = 'assets/foliage_sprites120.js';
+      s.onload = go;
+      s.onerror = go;        // without it the ON field draws the round-113 cells
+      document.head.appendChild(s);
+    }
+  }
+  /** `buildMips` for the ON atlas: the painted row on GL's 2 x 2 box, every
+   *  other cell — the forty and the new — coverage-preserving, by the same
+   *  rule and the same numbers. */
+  function buildMips120(cv, tex) {
+    var W = cv.width, H = cv.height, C = ATLAS_CELL, COLS = A120_COLS;
+    var base = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H);
+    var mips = [cv], levels = [base.data], dims = [[W, H]];
+    var w = W, h = H, src = base.data, lvl = 0, paintedH = Math.ceil(ATLAS_PAINTED / COLS) * C;
+    function box(src, w, h, dst, dw, dh, yEnd) {
+      for (var y = 0; y < yEnd; y++) {
+        var y0 = Math.min(h - 1, y * 2), y1 = Math.min(h - 1, y * 2 + 1);
+        for (var x = 0; x < dw; x++) {
+          var x0 = Math.min(w - 1, x * 2), x1 = Math.min(w - 1, x * 2 + 1);
+          var a = (y0 * w + x0) * 4, b = (y0 * w + x1) * 4, c = (y1 * w + x0) * 4, d = (y1 * w + x1) * 4, o = (y * dw + x) * 4;
+          dst[o] = (src[a] + src[b] + src[c] + src[d] + 2) >> 2;
+          dst[o + 1] = (src[a + 1] + src[b + 1] + src[c + 1] + src[d + 1] + 2) >> 2;
+          dst[o + 2] = (src[a + 2] + src[b + 2] + src[c + 2] + src[d + 2] + 2) >> 2;
+          dst[o + 3] = (src[a + 3] + src[b + 3] + src[c + 3] + src[d + 3] + 2) >> 2;
+        }
+      }
+    }
+    while (w > 1 || h > 1) {
+      var dw = Math.max(1, w >> 1), dh = Math.max(1, h >> 1);
+      var dst = new Uint8ClampedArray(dw * dh * 4);
+      lvl++;
+      box(src, w, h, dst, dw, dh, (C >> lvl) >= 1 ? Math.min(dh, paintedH >> lvl) : dh);
+      levels.push(dst); dims.push([dw, dh]);
+      src = dst; w = dw; h = dh;
+    }
+    var n0 = C * C, A = new Float32Array(n0), R = new Float32Array(n0), G2 = new Float32Array(n0), B = new Float32Array(n0);
+    for (var k = ATLAS_PAINTED; k < A120_COLS * A120_ROWS; k++) {
+      var cx = (k % COLS) * C, cy = Math.floor(k / COLS) * C;
+      var cov0 = 0, i, j;
+      for (j = 0; j < C; j++) for (i = 0; i < C; i++) {
+        var q = ((cy + j) * W + cx + i) * 4, t = j * C + i, al = base.data[q + 3] / 255;
+        A[t] = al; R[t] = base.data[q] * al; G2[t] = base.data[q + 1] * al; B[t] = base.data[q + 2] * al;
+        if (al >= MIP_CUT) cov0++;
+      }
+      cov0 /= n0;
+      var cs = C;
+      for (var L = 1; L < levels.length && cs > 1; L++) {
+        var ns = cs >> 1, lw = dims[L][0], out = levels[L];
+        for (j = 0; j < ns; j++) for (i = 0; i < ns; i++) {
+          var p0 = (j * 2) * cs + i * 2, p1 = p0 + 1, p2 = p0 + cs, p3 = p2 + 1, t2 = j * ns + i;
+          var sa = A[p0] + A[p1] + A[p2] + A[p3], sr = R[p0] + R[p1] + R[p2] + R[p3];
+          var sg = G2[p0] + G2[p1] + G2[p2] + G2[p3], sb = B[p0] + B[p1] + B[p2] + B[p3];
+          A[t2] = sa; R[t2] = sr; G2[t2] = sg; B[t2] = sb;
+        }
+        cs = ns;
+        var area = Math.pow(4, L), cnt = cs * cs;
+        var vals = new Float32Array(cnt);
+        HIST.fill(0);
+        for (i = 0; i < cnt; i++) { var v1 = vals[i] = A[i] / area; HIST[Math.min(HB - 1, (v1 * HB) | 0)]++; }
+        var want = Math.floor(cov0 * cnt), seen = 0, at = 0;
+        for (var hb = HB - 1; hb >= 0; hb--) { seen += HIST[hb]; if (seen > want) { at = Math.max(hb, 0.5) / HB; break; } }
+        var gain = at > 1e-4 ? Math.max(1, Math.min(MIP_MAX_GAIN, MIP_CUT * 1.12 / at)) : 1;
+        var ox = cx >> L, oy = cy >> L;
+        for (j = 0; j < cs; j++) for (i = 0; i < cs; i++) {
+          var t3 = j * cs + i, o2 = ((oy + j) * lw + ox + i) * 4, sa2 = A[t3];
+          if (sa2 > 1e-6) {
+            var dk = Math.sqrt(Math.min(1, vals[t3]));
+            out[o2] = R[t3] / sa2 * dk; out[o2 + 1] = G2[t3] / sa2 * dk; out[o2 + 2] = B[t3] / sa2 * dk;
+          } else { out[o2] = out[o2 + 1] = out[o2 + 2] = 0; }
+          out[o2 + 3] = Math.min(255, Math.round(vals[t3] * gain * 255));
+        }
+      }
+    }
+    for (var m3 = 1; m3 < levels.length; m3++) if ((C >> m3) < 1)
+      box(levels[m3 - 1], dims[m3 - 1][0], dims[m3 - 1][1], levels[m3], dims[m3][0], dims[m3][1], dims[m3][1]);
+    for (var m = 1; m < levels.length; m++) mips.push(new ImageData(levels[m], dims[m][0], dims[m][1]));
+    tex.mipmaps = mips;
+    tex.generateMipmaps = false;
+  }
+  /** Each cell's colour as a card shows it from the strategic camera: the mean
+   *  of its level-5 texels (8 x 8 a cell) that pass the cut — what `_carpet120`
+   *  lays under the cards, so the field and the carpet are one colour. */
+  function farColours120(tex) {
+    var L = 5, M = tex.mipmaps && tex.mipmaps[L], out = [];
+    if (!M || !M.data) return null;
+    var cs = ATLAS_CELL >> L, w = M.width, d = M.data, cut = MIP_CUT * 255;
+    for (var k = 0; k < A120_COLS * A120_ROWS; k++) {
+      var ox = (k % A120_COLS) * cs, oy = Math.floor(k / A120_COLS) * cs, r = 0, g = 0, b = 0, n = 0;
+      for (var j = 0; j < cs; j++) for (var i = 0; i < cs; i++) {
+        var q = ((oy + j) * w + ox + i) * 4;
+        if (d[q + 3] < cut) continue;
+        r += d[q]; g += d[q + 1]; b += d[q + 2]; n++;
+      }
+      out.push(n ? [r / n / 255, g / n / 255, b / n / 255] : null);
+    }
+    return out;
   }
 
   // =========================================================================
@@ -1249,6 +1528,266 @@
     };
     dm.customProgramCacheKey = function () { return 'foliageDepth2'; };
     return dm;
+  }
+
+  // =========================================================================
+  // (round 120) THE ON MATERIALS — composed over the round-119 ones
+  // =========================================================================
+  // The blades' program is `makeMaterial`'s with four things added; the depth
+  // twin is `makeDepthMaterial`'s with the same wind, so the shadow moves with
+  // the blade (normandy-shadow-pass-is-blind). Own cache keys.
+  //
+  //  GUSTS THAT ROLL. The round-119 wind swung every blade about the upright
+  //  on a phase fixed to the ground — a field that shimmers in place. Wind
+  //  leans a crop DOWNWIND and the gusts are patches of stronger lean carried
+  //  downwind at the wind's speed, longer across the wind than along it, so
+  //  you watch the fronts cross a wheatfield. A gust also lays a SHEEN: a
+  //  bending crop shows the paler side of its stalks.
+  //  LIGHT THROUGH A BLADE. Toward a low sun a leaf glows; the sun's colour,
+  //  through the plant's own, by how nearly the eye looks into the sun past it,
+  //  where the sun reaches it (its shadow mask).
+  //  PATCHES. A field is not one green: a low world-space noise moves a plant
+  //  lighter or darker and, at its high end, drier — the same field across
+  //  the blades and the carpet under them.
+  var NOISE120 = [
+    'float folHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }',
+    'float folNoise(vec2 p) {',
+    '  vec2 i = floor(p), f = fract(p);',
+    '  f = f * f * (3.0 - 2.0 * f);',
+    '  float a = folHash(i), b = folHash(i + vec2(1.0, 0.0));',
+    '  float c = folHash(i + vec2(0.0, 1.0)), d = folHash(i + vec2(1.0, 1.0));',
+    '  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);',
+    '}',
+  ].join('\n');
+  // `p` the plant's (or the carpet vertex's) world xz; leaves `gust120` 0..1
+  function gustGLSL120(p) {
+    return [
+      '  vec2 wd120 = uWind.xy;',
+      '  vec2 wq120 = vec2(dot(' + p + ', wd120), dot(' + p + ', vec2(-wd120.y, wd120.x)) * 0.45);',
+      '  vec2 gp120 = (wq120 - vec2(uTime * uWave120.y, 0.0)) * uWave120.x;',
+      '  float gust120 = smoothstep(0.28, 0.82, folNoise(gp120) * 0.65 + folNoise(gp120 * 2.3 + 5.1) * 0.35);',
+    ].join('\n');
+  }
+  var G_LINE = '  float g    = sin(uTime * uWind.w + ph) + 0.45 * sin(uTime * uWind.w * 2.7 + ph * 1.9);';
+  var G_LINE120 = gustGLSL120('iPos.xz') + '\n' +
+    '  float g    = 0.45 + uWave120.z * 1.5 * gust120 + 0.32 * sin(uTime * uWind.w * 2.6 + ph * 1.7);';
+  // per instance (or carpet vertex): the colour patch on `t` at world `p`
+  function patchGLSL120(t, p) {
+    return '  { float cv0 = folNoise(' + p + ' * uVar120.x + 17.3) - 0.5, cv1 = folNoise(' + p + ' * uVar120.x * 3.1 + 3.7) - 0.5;\n' +
+           '    ' + t + ' *= 1.0 + (cv0 * 0.8 + cv1 * 0.4) * uVar120.y;\n' +
+           '    ' + t + ' = mix(' + t + ', ' + t + ' * vec3(1.10, 1.0, 0.72), clamp(cv0 * 2.0, 0.0, 1.0) * uVar120.z); }';
+  }
+  function makeMaterial120(shared) {
+    var mat = makeMaterial(shared);
+    mat.map = atlasTexture120();
+    var base = mat.onBeforeCompile, baseKey = mat.customProgramCacheKey;
+    mat.onBeforeCompile = function (sh) {
+      base.call(this, sh);
+      sh.uniforms.uAtlas = shared.uAtlas120;
+      sh.uniforms.uSun120 = shared.uSun120;
+      sh.uniforms.uSunCol120 = shared.uSunCol120;
+      sh.uniforms.uWave120 = shared.uWave120;
+      sh.uniforms.uVar120 = shared.uVar120;
+      var ok = true;
+      function rep(src, from, to) {
+        if (src.indexOf(from) < 0) { ok = false; return src; }
+        return src.replace(from, to);
+      }
+      sh.vertexShader = rep(sh.vertexShader, 'varying float vFolD;',
+        'varying float vFolD;\nuniform vec4  uSun120;\nuniform vec4  uWave120;\nuniform vec4  uVar120;\nvarying float vFolTr120;\nvarying float vFolGust120;');
+      sh.vertexShader = rep(sh.vertexShader, 'attribute vec2  aAtlas;', 'attribute vec4  aAtlas;\nvarying vec2  vFolBk120;\nvarying float vFolQ120;');
+      sh.vertexShader = rep(sh.vertexShader, 'vUv = uv * uAtlas + aAtlas;', 'vUv = uv * uAtlas + aAtlas.xy; vFolBk120 = uv * uAtlas + aAtlas.zw; vFolQ120 = aQuad;');
+      sh.vertexShader = rep(sh.vertexShader, G_LINE, G_LINE120);
+      sh.vertexShader = rep(sh.vertexShader, '  vFolD     = dCam;', [
+        '  vFolD     = dCam;',
+        '  vFolGust120 = gust120;',
+        '  vFolTr120 = pow(max(dot(normalize(iPos - uCam), uSun120.xyz), 0.0), 3.0) * uSun120.w;',
+        patchGLSL120('vFolTint', 'iPos.xz'),
+      ].join('\n'));
+      sh.vertexShader = rep(sh.vertexShader, '  vFolAlpha = 1.0; vFolTint = aTint; vFolSun = 1.0; vFolD = 0.0;',
+        '  vFolAlpha = 1.0; vFolTint = aTint; vFolSun = 1.0; vFolD = 0.0; vFolGust120 = 0.0; vFolTr120 = 0.0;');
+      sh.fragmentShader = rep(sh.fragmentShader, 'varying float vFolSun;',
+        'varying float vFolSun;\nuniform vec3  uSunCol120;\nuniform vec4  uWave120;\nvarying float vFolTr120;\nvarying float vFolGust120;\nvarying vec2  vFolBk120;\nvarying float vFolQ120;');
+      // the side of a quad that looks away from the plant's bearing shows its back (the third quad is wound
+      // the other way round from the first two, so its sides are swapped)
+      sh.fragmentShader = rep(sh.fragmentShader, '#include <map_fragment>', [
+        '#ifdef USE_MAP',
+        '  bool fr120 = gl_FrontFacing; if (vFolQ120 > 1.5) fr120 = !fr120;',
+        '  vec4 texelColor = texture2D( map, fr120 ? vUv : vFolBk120 );',
+        '  texelColor = mapTexelToLinear( texelColor );',
+        '  diffuseColor *= texelColor;',
+        '#endif',
+      ].join('\n'));
+      var shf = sh.fragmentShader.indexOf('* folShadowMask();') >= 0 ? 'folShadowMask()' : 'getShadowMask()';
+      sh.fragmentShader = rep(sh.fragmentShader, '#include <aomap_fragment>', [
+        '{ float folSh120 = ' + shf + ';',
+        '  reflectedLight.directDiffuse *= 1.0 + uWave120.w * vFolGust120;',
+        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol120 * (vFolTr120 * folSh120); }',
+        '#include <aomap_fragment>',
+      ].join('\n'));
+      if (!ok) _patchOk = false;
+    };
+    mat.customProgramCacheKey = function () { return baseKey() + '|120'; };
+    return mat;
+  }
+  function makeDepthMaterial120(shared) {
+    var dm = makeDepthMaterial(shared);
+    dm.map = atlasTexture120();
+    var base = dm.onBeforeCompile;
+    dm.onBeforeCompile = function (sh) {
+      base.call(this, sh);
+      sh.uniforms.uAtlas = shared.uAtlas120;
+      sh.uniforms.uWave120 = shared.uWave120;
+      var ok = true;
+      function rep(src, from, to) {
+        if (src.indexOf(from) < 0) { ok = false; return src; }
+        return src.replace(from, to);
+      }
+      sh.vertexShader = rep(sh.vertexShader, 'attribute float aQuad;', 'attribute float aQuad;\nuniform vec4  uWave120;\n' + NOISE120);
+      sh.vertexShader = rep(sh.vertexShader, 'attribute vec2  aAtlas;', 'attribute vec4  aAtlas;');
+      sh.vertexShader = rep(sh.vertexShader, 'vUv = uv * uAtlas + aAtlas;', 'vUv = uv * uAtlas + aAtlas.xy;');
+      sh.vertexShader = rep(sh.vertexShader, G_LINE, G_LINE120);
+      if (!ok) _patchOk = false;
+    };
+    dm.customProgramCacheKey = function () { return 'foliageDepth2|120'; };
+    return dm;
+  }
+  /** (round 120) THE CARPET'S MATERIAL. Lambert, lit as the blades are (an
+   *  upright normal), in the opaque pass AFTER the ground (renderOrder 1) and
+   *  blended over it, so it costs a flat layer of fill and no cutout; on the
+   *  ground's own triangles, pulled forward by a polygon offset, writing no
+   *  depth. Its colour is mixed in the vertex shader from the plant's far
+   *  colour and the plant tinted by the ground (`_carpetBuild120`), by the
+   *  band's ground blend — so a zoom does not rebuild it. Cover comes up with
+   *  distance (`uCarpet120`); a fine mottle and the same gusts, cloud and
+   *  patches as the blades. */
+  function makeCarpetMaterial120(shared) {
+    var mat = new THREE.MeshLambertMaterial({
+      vertexColors: true, transparent: false, depthWrite: false, fog: true, side: THREE.FrontSide,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2,
+    });
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uTime = shared.uTime;
+      sh.uniforms.uWind = shared.uWind;
+      sh.uniforms.uCam = shared.uCam;
+      sh.uniforms.uCloud = shared.uCloud;
+      sh.uniforms.uCloudBand = shared.uCloudBand;
+      sh.uniforms.uWave120 = shared.uWave120;
+      sh.uniforms.uVar120 = shared.uVar120;
+      sh.uniforms.uCarpet120 = shared.uCarpet120;
+      sh.uniforms.uCarpetB120 = shared.uCarpetB120;
+      var ok = true;
+      function rep(src, from, to) {
+        if (src.indexOf(from) < 0) { ok = false; return src; }
+        return src.replace(from, to);
+      }
+      sh.vertexShader = rep(sh.vertexShader, '#include <common>', [
+        '#include <common>',
+        'attribute vec3  aGround120;',
+        'attribute vec2  aCover120;',      // x = cover (the cell's density), y = its kind's ground blend share
+        'uniform float uTime;',
+        'uniform vec4  uWind;',
+        'uniform vec3  uCam;',
+        'uniform vec4  uCloud;',
+        'uniform vec2  uCloudBand;',
+        'uniform vec4  uWave120;',
+        'uniform vec4  uVar120;',
+        'uniform vec4  uCarpet120;',       // x near cover, y..z distance it comes up over, w mottle
+        'uniform vec4  uCarpetB120;',      // x the band's ground blend, y the card tint
+        'varying float vCpA;',
+        'varying float vCpSun;',
+        'varying float vCpGust;',
+        'varying vec2  vCpW;',
+        NOISE120,
+      ].join('\n'));
+      sh.vertexShader = rep(sh.vertexShader, '#include <color_vertex>', [
+        '#include <color_vertex>',
+        '#ifdef USE_COLOR',
+        '  vColor.rgb = mix(color.rgb, aGround120, uCarpetB120.x * aCover120.y) * uCarpetB120.y;',
+        patchGLSL120('vColor.rgb', 'position.xz'),
+        '#endif',
+      ].join('\n'));
+      sh.vertexShader = rep(sh.vertexShader, '#include <begin_vertex>', [
+        '#include <begin_vertex>',
+        '{ float dC = distance(uCam, position);',
+        '  vCpA = aCover120.x * mix(uCarpet120.x, 1.0, smoothstep(uCarpet120.y, uCarpet120.z, dC)) * ' + CARPET120.cap.toFixed(3) + ';',
+        gustGLSL120('position.xz'),
+        '  vCpGust = gust120;',
+        '  vCpW = position.xz;',
+        '  if (uCloud.w <= 0.001) { vCpSun = 1.0; } else {',
+        '    vec2 cp = position.xz * uCloud.z + uCloud.xy;',
+        '    float cn = folNoise(cp) * 0.62 + folNoise(cp * 2.17 + 11.3) * 0.38;',
+        '    vCpSun = 1.0 - uCloud.w * smoothstep(uCloudBand.x, uCloudBand.y, cn);',
+        '  } }',
+      ].join('\n'));
+      sh.fragmentShader = rep(sh.fragmentShader, '#include <common>', [
+        '#include <common>',
+        'uniform vec4  uWave120;',
+        'uniform vec4  uCarpet120;',
+        'varying float vCpA;',
+        'varying float vCpSun;',
+        'varying float vCpGust;',
+        'varying vec2  vCpW;',
+        'float cpHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }',
+        'float cpNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+        '  return mix(mix(cpHash(i), cpHash(i + vec2(1.0, 0.0)), f.x), mix(cpHash(i + vec2(0.0, 1.0)), cpHash(i + vec2(1.0, 1.0)), f.x), f.y); }',
+      ].join('\n'));
+      sh.fragmentShader = rep(sh.fragmentShader, '#include <clipping_planes_fragment>', [
+        'if (vCpA < 0.012) discard;',          // no cover here: nothing to blend, no light to pay for
+        '#include <clipping_planes_fragment>',
+      ].join('\n'));
+      sh.fragmentShader = rep(sh.fragmentShader, '#include <color_fragment>', [
+        '#include <color_fragment>',
+        // the blades' own roll-off of a bright albedo (makeMaterial)
+        '{ float folY = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));',
+        '  if (folY > 0.45) diffuseColor.rgb *= (0.45 + (folY - 0.45) * 0.15) / folY; }',
+        // a clumped mottle a few tens of centimetres across, so it is a crop and not paint
+        '{ float m = cpNoise(vCpW * 0.9) * 0.55 + cpNoise(vCpW * 3.1 + 7.7) * 0.45;',
+        '  diffuseColor.rgb *= 1.0 + (m - 0.5) * 2.0 * uCarpet120.w;',
+        '  diffuseColor.a = vCpA * (0.82 + 0.36 * m); }',
+      ].join('\n'));
+      sh.fragmentShader = rep(sh.fragmentShader, '#include <aomap_fragment>', [
+        'reflectedLight.directDiffuse *= 1.0 + uWave120.w * vCpGust;',
+        '#include <aomap_fragment>',
+      ].join('\n'));
+      sh.fragmentShader = rep(sh.fragmentShader, '#include <fog_fragment>', [
+        'gl_FragColor.rgb *= vCpSun;',
+        'gl_FragColor.a = clamp(diffuseColor.a, 0.0, 1.0);',
+        '#include <fog_fragment>',
+      ].join('\n'));
+      if (!ok) _patchOk = false;
+    };
+    var base1 = mat.onBeforeCompile;
+    mat.onBeforeCompile = function (sh) {
+      base1.call(this, sh);
+      if (sh.fragmentShader.indexOf('* getShadowMask();') >= 0 && sh.fragmentShader.indexOf('#include <shadowmask_pars_fragment>') >= 0) {
+        sh.fragmentShader = sh.fragmentShader.replace('#include <shadowmask_pars_fragment>', [
+          '#include <shadowmask_pars_fragment>',
+          'float cpShadowMask() {',
+          '  float shadow = 1.0;',
+          '  #ifdef USE_SHADOWMAP',
+          '  #if NUM_DIR_LIGHT_SHADOWS > 0',
+          '  DirectionalLightShadow cpDL;',
+          '  #pragma unroll_loop_start',
+          '  for ( int i = 0; i < NUM_DIR_LIGHT_SHADOWS; i ++ ) {',
+          '    cpDL = directionalLightShadows[ i ];',
+          '    vec4 sc = vDirectionalShadowCoord[ i ];',
+          '    sc.xyz /= sc.w; sc.z += cpDL.shadowBias;',
+          '    bool inF = sc.x >= 0.0 && sc.x <= 1.0 && sc.y >= 0.0 && sc.y <= 1.0 && sc.z <= 1.0;',
+          '    shadow *= ( receiveShadow && inF ) ? texture2DCompare( directionalShadowMap[ i ], sc.xy, sc.z ) : 1.0;',
+          '  }',
+          '  #pragma unroll_loop_end',
+          '  #endif',
+          '  #endif',
+          '  return shadow;',
+          '}',
+        ].join('\n')).replace('* getShadowMask();', '* cpShadowMask();');
+      }
+    };
+    mat.customProgramCacheKey = function () { return 'folCarpet120b'; };
+    return mat;
   }
 
   // =========================================================================
@@ -1781,6 +2320,16 @@
       this.buildR = Q.buildR * B.radius;
       this.dropR = this.buildR * 1.3 + CHUNK * G.TILE;
       this.shared.uFade.value.set(Q.fadeNear * B.radius, Q.fadeFar * B.radius);
+      // (round 120) ON: fewer, smaller far cards over the carpet, which comes up as they thin
+      if (this._on120) {
+        var B120 = BAND120[this.band || 0];
+        this.density *= B120.dens;
+        this.sizeBoost = Math.min(B120.boost, this.sizeBoost);
+        this.shared.uFade.value.y *= B120.fade;
+        var fy120 = this.shared.uFade.value.y;
+        if (this.shared.uCarpet120) this.shared.uCarpet120.value.set(CARPET120.near, fy120 * CARPET120.from, fy120 * CARPET120.to, CARPET120.mottle);
+        if (this.shared.uCarpetB120) this.shared.uCarpetB120.value.set(this.groundBlend, this.cardLod !== false && (this.band || 0) >= CARD_BAND ? (this.cardTint || CARD_TINT) : 1, 0, 0);
+      }
       if (force) {
         for (var i = 0; i < this.chunks.length; i++) this._dispose(this.chunks[i]);
         this._dropQueues();
@@ -1913,6 +2462,10 @@
       var gy = this.terrain.heightAt(cam.x, cam.z);
       this._groundY += (gy - this._groundY) * Math.min(1, dt * 2.5);
       this._updateBand(cam.y, dt);
+      // (round 120) `game.foliage120`, read once a frame: a change draws the field again
+      var on120now = on120();
+      if (on120now !== !!this._on120) { this._on120 = on120now; if (on120now) this._ensure120(); this._applyBand(true); if (!on120now) this._carpetDrop120(); }
+      if (this._on120) this._update120(dt, cam);
 
       var buildR2 = this.buildR * this.buildR;
       var dropR2 = this.dropR * this.dropR;
@@ -2024,6 +2577,7 @@
     },
 
     _build: function (c) {
+      if (this._on120) return this._build120(c);   // (round 120) `game.foliage120`
       this._dispose(c);
       var GRIDl = G.GRID, TILEl = G.TILE, T = this.terrain;
       var x0 = c.cx * CHUNK, z0 = c.cz * CHUNK;
@@ -2202,6 +2756,366 @@
       this.stats.built++;
     },
 
+    // ---- (round 120) `game.foliage120` ------------------------------------
+
+    /** The ON materials and their uniforms, made the first time the switch is on. */
+    _ensure120: function () {
+      if (this.material120) return;
+      var s = this.shared;
+      s.uAtlas120 = { value: new THREE.Vector2(1 / A120_COLS, 1 / A120_ROWS) };
+      s.uSun120 = { value: new THREE.Vector4(0.55, 0.71, 0.43, LOOK120.trans) };
+      s.uSunCol120 = { value: new THREE.Vector3(1.7, 1.53, 1.29) };
+      s.uWave120 = { value: new THREE.Vector4(LOOK120.gustScale, LOOK120.gustSpeed, LOOK120.gust, LOOK120.sheen) };
+      s.uVar120 = { value: new THREE.Vector4(LOOK120.varScale, LOOK120.varAmt, LOOK120.dry, 0) };
+      s.uCarpet120 = { value: new THREE.Vector4(CARPET120.near, 10, 60, CARPET120.mottle) };
+      s.uCarpetB120 = { value: new THREE.Vector4(0.34, 1, 0, 0) };
+      this.material120 = makeMaterial120(s);
+      this.depthMaterial120 = makeDepthMaterial120(s);
+      this.carpetMaterial120 = makeCarpetMaterial120(s);
+    },
+
+    /** Once a frame while ON: the sun the blades glow against, the drawings
+     *  arriving, and the carpet kept in step with the field. */
+    _update120: function (dt, cam) {
+      var g = window.game, S = g && g.sun, s = this.shared;
+      if (S && S.position && S.target) {
+        var v = s.uSun120.value, dx = S.position.x - S.target.position.x, dy = S.position.y - S.target.position.y, dz = S.position.z - S.target.position.z;
+        var l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        v.set(dx / l, dy / l, dz / l, this.trans120 !== undefined ? this.trans120 : LOOK120.trans);
+        s.uSunCol120.value.set(S.color.r * S.intensity, S.color.g * S.intensity, S.color.b * S.intensity);
+      }
+      // the drawings landed (or never will): the field is drawn again with them
+      var st = sprites120;
+      if (st !== this._st120 && st !== 'loading' && st !== 'none') {
+        this._st120 = st;
+        for (var i = 0; i < this.chunks.length; i++) { var c = this.chunks[i]; if (c.mesh && !c.dirty) { c.dirty = true; this.dirtyList.push(c); } }
+        if (this._cp) this._cp.sig.fill(0);
+      }
+      if (this.carpet120 !== false) this._carpetTick120(cam);
+      else if (this._cp) this._carpetDrop120();
+    },
+
+    /** The far colour of kind `k` (1-based), as `_build120` would tint it:
+     *  [plant colour x its tint, plant colour, ground blend share]. */
+    _kindFar120: function (k) {
+      var C = this._far120 || (this._far120 = {}), hit = C[k];
+      if (hit) return hit;
+      var def = DEFS[k - 1], cells = this._cells120(def), r = 0, g = 0, b = 0, n = 0;
+      for (var j = 0; j < cells.length; j++) {
+        var f = cellFar120 && cellFar120[cells[j].cell];
+        if (f) { r += f[0]; g += f[1]; b += f[2]; n++; }
+      }
+      if (!n) {   // the atlas not in yet: the editor's swatch
+        var sw = parseInt((def.swatch || '#556b2f').slice(1), 16);
+        r = (sw >> 16 & 255) / 255 * 0.45; g = (sw >> 8 & 255) / 255 * 0.45; b = (sw & 255) / 255 * 0.45; n = 1;
+      }
+      r /= n; g /= n; b /= n;
+      var T = cells.tint || def.tint, tr = 0, tg = 0, tb = 0;
+      for (var t = 0; t < T.length; t++) { tr += (T[t] >> 16 & 255) / 255; tg += (T[t] >> 8 & 255) / 255; tb += (T[t] & 255) / 255; }
+      tr /= T.length; tg /= T.length; tb /= T.length;
+      var gain = 2.35 * 1.03;
+      hit = { a: [r * tr * gain, g * tg * gain, b * tb * gain], p: [r * gain, g * gain, b * gain],
+              bl: cells.blend !== undefined ? cells.blend : (def.blend !== undefined ? def.blend : 1) };
+      if (cellFar120) C[k] = hit;
+      return hit;
+    },
+
+    /** Which drawings the season calls for: the map's theatre (`floraFor`), or
+     *  'winter' under snow (`Canopy.snow`). A new map clears the caches. */
+    _theatre120: function () {
+      var g = window.game, md = g && g.mapDef, CN = window.Canopy;
+      var snow = !!(CN && CN.snow && CN.snow.value > 0.3);
+      if (this._th120md === md && this._th120snow === snow && this._th120) return this._th120;
+      this._th120md = md; this._th120snow = snow;
+      this._th120 = snow ? 'winter' : floraFor(md && md.era, md && md.name);
+      this._cellsC120 = {}; this._far120 = {};
+      return this._th120;
+    },
+    /** The drawings kind `def` picks from: [{cell, w, h}], with `tint`/`blend`
+     *  for the round-120 ones (their colour is in the sprite). */
+    _cells120: function (def) {
+      var th = this._theatre120(), C = this._cellsC120 || (this._cellsC120 = {}), hit = C[def.id];
+      if (hit) return hit;
+      var ids = (V120T[th] && V120T[th][def.id]) || V120[def.id], out = [];
+      if (ids && sprites120 === 'ready') {
+        for (var j = 0; j < ids.length; j++) {
+          var q = CELLQ120[ids[j]];
+          if (!q) continue;
+          out.push({ cell: q.cell, w: q.q ? q.q[0] * scaledK : def.w, h: q.q ? q.q[1] * scaledK : def.h });
+        }
+      }
+      if (out.length) { out.tint = TINT120; out.blend = 0.55; }
+      if (out.length && FACE120[def.id] && CELLQ120[FACE120[def.id].back]) out.back = CELLQ120[FACE120[def.id].back].cell;
+      else out.push({ cell: def.atlas, w: def.w, h: def.h });
+      if (sprites120 === 'ready' || sprites120 === 'absent' || sprites120 === 'failed') C[def.id] = out;
+      return out;
+    },
+
+    /** `_build`, ON: the same plants in the same places at the same heights
+     *  (every draw of the field's random stream is the one `_build` makes), each
+     *  drawn from one of its kind's drawings, picked by a hash of the cell and
+     *  the plant so it costs the stream nothing; the drawing's own quad. */
+    _build120: function (c) {
+      this._dispose(c);
+      var GRIDl = G.GRID, TILEl = G.TILE, T = this.terrain;
+      var x0 = c.cx * CHUNK, z0 = c.cz * CHUNK;
+      var x1 = Math.min(GRIDl, x0 + CHUNK), z1 = Math.min(GRIDl, z0 + CHUNK);
+      var self = this, RS = this._rngS || (this._rngS = new Int32Array(1));
+      function R() { return rngNext(RS); }
+      var cardLod = this.cardLod !== false && (this.band || 0) >= CARD_BAND, cardW = this.cardW || CARD_W, cardT = this.cardTint || CARD_TINT;
+      var near = (this.band || 0) <= 1;
+      function perCell(x, z, i, def) {
+        var raw = def.per * (self.dens[i] / 255) * self.density * (near && NEAR120[def.id] ? NEAR120[def.id] : 1);
+        var whole = Math.floor(raw);
+        return whole + (G.hash2(x * 2.13 + 0.7, z * 1.87 + 1.3) < raw - whole ? 1 : 0);
+      }
+      var total = 0, x, z, i, k, dens, def, n;
+      for (z = z0; z < z1; z++) for (x = x0; x < x1; x++) {
+        i = z * GRIDl + x;
+        k = this.kind[i];
+        if (!k || !this.dens[i]) continue;
+        total += perCell(x, z, i, DEFS[k - 1]);
+      }
+      if (total <= 0) { c.empty = true; return; }
+      if (total > MAX_PER_CHUNK * 1.3) total = Math.floor(MAX_PER_CHUNK * 1.3);
+      var mats = new Float32Array(total * 16);
+      var atl = new Float32Array(total * 4);
+      var tint = new Float32Array(total * 3);
+      var flags = new Float32Array(total * 3);
+      var m = this._m4, q = this._q, pv = this._v, sv = this._s;
+      var minY = 1e9, maxY = -1e9, tallest = 0, w = 0;
+      var col = new THREE.Color(), grd = new THREE.Color();
+      var tcol = (T.mesh && T.mesh.geometry.attributes.color) || null;
+      var half118 = (window.game && window.game.grass118 === false) ? 0 : 0.5;
+      for (z = z0; z < z1 && w < total; z++) for (x = x0; x < x1 && w < total; x++) {
+        i = z * GRIDl + x;
+        k = this.kind[i];
+        if (!k || !this.dens[i]) continue;
+        def = DEFS[k - 1];
+        dens = this.dens[i] / 255;
+        n = perCell(x, z, i, def);
+        if (n <= 0) continue;
+        if (def.height > tallest) tallest = def.height;
+        RS[0] = (x * 73856093) ^ (z * 19349663) ^ (k * 83492791);
+        var cellX = (x - GRIDl / 2) * TILEl, cellZ = (z - GRIDl / 2) * TILEl;
+        var cells = this._cells120(def), tintL = cells.tint || def.tint, blendK = cells.blend !== undefined ? cells.blend : (def.blend !== undefined ? def.blend : 1);
+        var face = FACE120[def.id] && cells.back !== undefined ? FACE120[def.id] : null;
+        var kindCard = def.mode === 'card' ? 1 : 0;
+        var card = kindCard || cardLod ? 1 : 0;
+        var cw = cardLod && !kindCard ? cardW : 1, ct = cardLod && !kindCard ? cardT : 1;
+        if (tcol) grd.fromBufferAttribute(tcol, i);
+        for (var j = 0; j < n && w < total; j++, w++) {
+          var px = cellX + (R() - 0.5 + half118) * TILEl;
+          var pz = cellZ + (R() - 0.5 + half118) * TILEl;
+          var py = T.heightAt(px, pz);
+          if (py < minY) minY = py;
+          var vc = cells.length > 1 ? cells[Math.min(cells.length - 1, (G.hash2(x * 3.17 + j * 0.731, z * 2.71 + j * 1.37) * cells.length) | 0)] : cells[0];
+          var grow = (0.55 + 0.45 * dens) * this.growAt(x, z);
+          var gw = Math.sqrt(grow);
+          var sw = vc.w * gw * (1 + (R() - 0.5) * 2 * def.vary) * this.sizeBoost * cw;
+          var sh = vc.h * grow * (1 + (R() - 0.5) * 2 * def.vary) * Math.min(1.3, this.sizeBoost);
+          if (py + sh > maxY) maxY = py + sh;
+          var rootK = vc.cell >= ATLAS_PAINTED ? ROOT : def.root;
+          pv.set(px, py - (rootK !== undefined ? rootK * sh + ROOT_SINK : 0.04), pz);
+          sv.set(sw, sh, sw);
+          var yaw = kindCard ? 0 : R() * Math.PI * 2;
+          if (face) yaw = face.yaw + (yaw / (Math.PI * 2) - 0.5) * face.spread;
+          q.setFromAxisAngle(this._up, card ? 0 : yaw);
+          m.compose(pv, q, sv);
+          m.toArray(mats, w * 16);
+          atl[w * 4] = (vc.cell % A120_COLS) / A120_COLS;
+          atl[w * 4 + 1] = 1 - (Math.floor(vc.cell / A120_COLS) + 1) / A120_ROWS;
+          var bk = face ? cells.back : vc.cell;
+          atl[w * 4 + 2] = (bk % A120_COLS) / A120_COLS;
+          atl[w * 4 + 3] = 1 - (Math.floor(bk / A120_COLS) + 1) / A120_ROWS;
+          col.setHex(tintL[(R() * tintL.length) | 0]);
+          if (tcol) col.lerp(grd, this.groundBlend * blendK);
+          var vv = (0.86 + R() * 0.34) * ct;
+          tint[w * 3] = (col.r * 2.35) * vv;
+          tint[w * 3 + 1] = (col.g * 2.35) * vv;
+          tint[w * 3 + 2] = (col.b * 2.35) * vv;
+          flags[w * 3] = card;
+          flags[w * 3 + 1] = def.sway;
+          flags[w * 3 + 2] = def.topFade;
+        }
+      }
+      if (w <= 0) { c.empty = true; return; }
+      c.tall = tallest >= SHADOW_MIN;
+      this._shuffle120(w, mats, atl, tint, flags);
+      var geo = (cardLod ? this.cardGeometry : this.geometry).clone();
+      geo.setAttribute('aAtlas', new THREE.InstancedBufferAttribute(atl, 4));
+      geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(tint, 3));
+      geo.setAttribute('aFlags', new THREE.InstancedBufferAttribute(flags, 3));
+      var mesh = new THREE.InstancedMesh(geo, this.material120, w);
+      mesh.customDepthMaterial = this.depthMaterial120;
+      mesh.instanceMatrix.array.set(mats.subarray(0, w * 16));
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = true;
+      mesh.matrixAutoUpdate = false;
+      mesh.renderOrder = -1;
+      c.wy = (minY + maxY) * 0.5;
+      var halfW = CHUNK * TILEl * 0.5 + 1.5 * scaledK;
+      var halfH = Math.max(1, (maxY - minY) * 0.5 + 1);
+      geo.boundingSphere = new THREE.Sphere(
+        new THREE.Vector3(c.wx, c.wy, c.wz), Math.sqrt(halfW * halfW * 2 + halfH * halfH));
+      geo.boundingBox = new THREE.Box3(
+        new THREE.Vector3(c.wx - halfW, minY - 0.5, c.wz - halfW),
+        new THREE.Vector3(c.wx + halfW, maxY + 0.5, c.wz + halfW));
+      c.radius = geo.boundingSphere.radius;
+      mesh.castShadow = this._casts(c);
+      this.group.add(mesh);
+      c.mesh = mesh; c.n = w; c.empty = false;
+      this.instances += w;
+      this.stats.built++;
+    },
+
+    // ---- (round 120) THE CARPET ------------------------------------------
+    // The whole field, region by region (CARPET120.reg chunks a side), on the
+    // ground's own vertices (the cell centres, the ground's triangles). Built
+    // nearest first, then kept in step by a signature of each region's plants
+    // and ground, checked a few regions a frame: an edit, a crater or a new
+    // map shows within a second, and nothing has to tell it.
+    _carpetTick120: function (cam) {
+      var GR = G.GRID, cp = this._cp;
+      if (!cp || cp.grid !== GR || cp.terrain !== this.terrain) {
+        this._carpetDrop120();
+        var rc = CHUNK * CARPET120.reg, rw = Math.ceil((GR - 1) / rc);
+        cp = this._cp = { grid: GR, terrain: this.terrain, rc: rc, rw: rw, regs: new Array(rw * rw), sig: new Int32Array(rw * rw), rr: 0, wx: [], wz: [] };
+        for (var r = 0; r < rw * rw; r++) {
+          cp.regs[r] = null;
+          var rx = r % rw, rz = (r / rw) | 0;
+          cp.wx.push(((rx + 0.5) * rc - GR / 2) * G.TILE); cp.wz.push(((rz + 0.5) * rc - GR / 2) * G.TILE);
+        }
+      }
+      var t0 = performance.now(), n = cp.regs.length, built = 0;
+      // the unbuilt ones, nearest the eye first
+      for (var pass = 0; pass < 4; pass++) {
+        var best = -1, bd = Infinity;
+        for (var i = 0; i < n; i++) {
+          if (cp.regs[i] !== null) continue;
+          var dx = cp.wx[i] - cam.x, dz = cp.wz[i] - cam.z, d2 = dx * dx + dz * dz;
+          if (d2 < bd) { bd = d2; best = i; }
+        }
+        if (best < 0) break;
+        cp.sig[best] = this._carpetSig120(best);
+        this._carpetBuild120(best); built++;
+        if (performance.now() - t0 > BUILD_MS) break;
+      }
+      // …then a few signatures a frame, round the field
+      for (var k = 0; k < 4 && !built; k++) {
+        var ri = cp.rr = (cp.rr + 1) % n;
+        if (cp.regs[ri] === null) continue;
+        var sg = this._carpetSig120(ri);
+        if (sg !== cp.sig[ri]) { cp.sig[ri] = sg; this._carpetBuild120(ri); built++; }
+      }
+    },
+    _carpetSig120: function (ri) {
+      var cp = this._cp, GR = G.GRID, rc = cp.rc, rx = ri % cp.rw, rz = (ri / cp.rw) | 0;
+      var x0 = rx * rc, z0 = rz * rc, x1 = Math.min(GR - 1, x0 + rc), z1 = Math.min(GR - 1, z0 + rc);
+      var h = 0x811c9dc5 | 0, K = this.kind, D = this.dens, H = this.terrain.h;
+      for (var z = z0; z <= z1; z++) for (var x = x0; x <= x1; x++) {
+        var i = z * GR + x;
+        h = Math.imul(h ^ (K[i] << 8 | D[i]), 16777619);
+        h = Math.imul(h ^ ((H[i] * 64) | 0), 16777619);
+      }
+      return (h ^ (sprites120 === 'ready' ? 0x5bd1e995 : 0) ^ (cellFar120 ? 0x27d4eb2f : 0)) | 1;
+    },
+    _carpetBuild120: function (ri) {
+      var cp = this._cp, GR = G.GRID, rc = cp.rc, rx = ri % cp.rw, rz = (ri / cp.rw) | 0;
+      var x0 = rx * rc, z0 = rz * rc, x1 = Math.min(GR - 1, x0 + rc), z1 = Math.min(GR - 1, z0 + rc);
+      var old = cp.regs[ri];
+      if (old && old !== 0) { this.group.remove(old); old.geometry.dispose(); }
+      cp.regs[ri] = 0;      // built, nothing to draw (yet)
+      var T = this.terrain, tg = T.mesh && T.mesh.geometry, tp = tg && tg.attributes.position, tc = tg && tg.attributes.color;
+      if (!tp) return;
+      var nx = x1 - x0 + 1, nz = z1 - z0 + 1, NV = nx * nz;
+      var cov = new Float32Array(NV), any = false, x, z, i, v;
+      for (z = z0; z <= z1; z++) for (x = x0; x <= x1; x++) {
+        i = z * GR + x; v = (z - z0) * nx + (x - x0);
+        if (this.kind[i] && this.dens[i]) { cov[v] = this.dens[i] / 255; any = true; }
+      }
+      if (!any) return;
+      var idx = [];
+      for (z = 0; z < nz - 1; z++) for (x = 0; x < nx - 1; x++) {
+        var a = z * nx + x, b = (z + 1) * nx + x, c = (z + 1) * nx + x + 1, d = z * nx + x + 1;
+        if (cov[a] > 0 || cov[b] > 0 || cov[d] > 0) idx.push(a, b, d);     // the ground's own split of the square
+        if (cov[b] > 0 || cov[c] > 0 || cov[d] > 0) idx.push(b, c, d);
+      }
+      if (!idx.length) return;
+      var pos = new Float32Array(NV * 3), nrm = new Float32Array(NV * 3), colA = new Float32Array(NV * 3), colB = new Float32Array(NV * 3), cv = new Float32Array(NV * 2);
+      var have = new Uint8Array(NV);
+      for (z = z0; z <= z1; z++) for (x = x0; x <= x1; x++) {
+        i = z * GR + x; v = (z - z0) * nx + (x - x0);
+        pos[v * 3] = tp.getX(i); pos[v * 3 + 1] = tp.getY(i); pos[v * 3 + 2] = tp.getZ(i);
+        nrm[v * 3 + 1] = 1;
+        if (!cov[v]) continue;
+        var F = this._kindFar120(this.kind[i]);
+        var gr = tc ? tc.getX(i) : F.a[0], gg = tc ? tc.getY(i) : F.a[1], gb = tc ? tc.getZ(i) : F.a[2];
+        colA[v * 3] = F.a[0]; colA[v * 3 + 1] = F.a[1]; colA[v * 3 + 2] = F.a[2];
+        colB[v * 3] = F.p[0] * gr; colB[v * 3 + 1] = F.p[1] * gg; colB[v * 3 + 2] = F.p[2] * gb;
+        cv[v * 2] = cov[v]; cv[v * 2 + 1] = F.bl;
+        have[v] = 1;
+      }
+      // a corner with no plant takes the colour of one beside it, so an edge
+      // fades out in the plant's colour and not toward black
+      for (z = 0; z < nz; z++) for (x = 0; x < nx; x++) {
+        v = z * nx + x;
+        if (have[v]) continue;
+        for (var dz = -1; dz <= 1; dz++) for (var dx = -1; dx <= 1; dx++) {
+          var xx = x + dx, zz = z + dz;
+          if (xx < 0 || zz < 0 || xx >= nx || zz >= nz) continue;
+          var u = zz * nx + xx;
+          if (have[u] !== 1) continue;
+          for (var e = 0; e < 3; e++) { colA[v * 3 + e] = colA[u * 3 + e]; colB[v * 3 + e] = colB[u * 3 + e]; }
+          cv[v * 2 + 1] = cv[u * 2 + 1]; have[v] = 2; dz = 2; break;
+        }
+      }
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(colA, 3));
+      geo.setAttribute('aGround120', new THREE.BufferAttribute(colB, 3));
+      geo.setAttribute('aCover120', new THREE.BufferAttribute(cv, 2));
+      geo.setIndex(NV > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
+      geo.computeBoundingSphere();
+      var mesh = new THREE.Mesh(geo, this.carpetMaterial120);
+      mesh.name = 'foliageCarpet120';
+      mesh.renderOrder = 1;          // after the ground, still in the opaque pass
+      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      mesh.matrixAutoUpdate = false;
+      this.group.add(mesh);
+      cp.regs[ri] = mesh;
+    },
+    _carpetDrop120: function () {
+      var cp = this._cp;
+      if (!cp) return;
+      for (var i = 0; i < cp.regs.length; i++) {
+        var m = cp.regs[i];
+        if (m) { this.group.remove(m); m.geometry.dispose(); }
+      }
+      this._cp = null;
+    },
+
+    /** `_shuffle` for the ON build (four atlas numbers a plant): the same seed, draws and swaps. */
+    _shuffle120: function (n, mats, atl, tint, flags) {
+      var RS = this._rngS || (this._rngS = new Int32Array(1));
+      RS[0] = n * 2654435761;
+      for (var i = n - 1; i > 0; i--) {
+        var j = (rngNext(RS) * (i + 1)) | 0;
+        if (j === i) continue;
+        swap(mats, i, j, 16);
+        swap(atl, i, j, 4); swap(tint, i, j, 3); swap(flags, i, j, 3);
+      }
+      function swap(a, i2, j2, s) {
+        for (var k = 0; k < s; k++) {
+          var t = a[i2 * s + k]; a[i2 * s + k] = a[j2 * s + k]; a[j2 * s + k] = t;
+        }
+      }
+    },
+
     /** Fisher-Yates over four parallel arrays, so `mesh.count = n` is a fair
      *  random sample of the chunk and distance LOD thins evenly. */
     _shuffle: function (n, mats, atl, tint, flags) {
@@ -2269,6 +3183,7 @@
     },
 
     dispose: function () {
+      if (this._carpetDrop120) this._carpetDrop120();   // (round 120)
       this.clear();
       this.scene.remove(this.group);
       this.material.dispose();
@@ -2385,6 +3300,14 @@
     _buildMips: function (cv, tex) { return buildMips(cv, tex); },
     /** (round 113) set before the atlas is built; false leaves the mip chain to GL */
     set mipKeep(v) { MIP_KEEP = !!v; },
+    /** (round 120, `game.foliage120`) the ON atlas, its drawings' state ('none', 'loading', 'ready',
+     *  'absent', 'failed'), [ms to decode, ms for the mip chain], and the tables, for tooling */
+    atlas120: function () { return atlasTexture120(); },
+    sprites120: function () { return sprites120; },
+    sprites120Ms: function () { return sprites120Ms; },
+    cells120: function () { return CELLQ120; },
+    far120: function () { return cellFar120; },
+    V120: V120, V120T: V120T, FACE120: FACE120, NEAR120: NEAR120, TINT120: TINT120, BAND120: BAND120, CARPET120: CARPET120, LOOK120: LOOK120,
     get mipKeep() { return MIP_KEEP; },
   };
 })();

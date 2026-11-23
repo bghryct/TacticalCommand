@@ -83,6 +83,8 @@
     indBlind: [0.52, 0.32, 0.12],               // …out of sight: brown
   };
   /** The range number: green effective, yellow reduced, black cannot fire (p. 16). */
+  // (round 120, game.orderLines120) smoke is grey; a throw that falls short a muted red
+  var SMOKE120 = [0.80, 0.82, 0.84], SMOKE120_SHORT = [0.93, 0.45, 0.40];
   var BAND_CSS = { eff: '#62e05a', reduced: '#ffd23a', none: '#000' };
   var ODDS_NAME = ['good', 'fair', 'poor', 'hopeless'];
 
@@ -994,6 +996,7 @@
     }
     /** A flat ribbon on the ground from A to B. */
     P._ccFlat = function (ax, az, bx, bz, hw, c, lift) {
+      if (this._ccm.ol) { this._ccm.ol.ccFlat(ax, az, bx, bz, hw, c, lift); return; }
       var m = this._ccm, T = this.terrain, L = Math.hypot(bx - ax, bz - az) || 1;
       var px = -(bz - az) / L * hw, pz = (bx - ax) / L * hw, l = lift || 0.3;
       var ya = T.heightAt(ax, az) + l, yb = T.heightAt(bx, bz) + l;
@@ -1011,6 +1014,7 @@
     };
     /** A camera-facing ribbon in the air (a sight line). */
     P._ccLine = function (ax, ay, az, bx, by, bz, hw, c) {
+      if (this._ccm.ol) { this._ccm.ol.ccLine(ax, ay, az, bx, by, bz, hw, c, arguments[8]); return; }   // [8]: the line's kind
       var m = this._ccm, cam = this.camera.position;
       var dx = bx - ax, dy = by - ay, dz = bz - az, L = Math.hypot(dx, dy, dz) || 1;
       dx /= L; dy /= L; dz /= L;
@@ -1022,6 +1026,7 @@
     };
     /** A filled dot (a flat octagon). */
     P._ccDot = function (x, z, r, c) {
+      if (this._ccm.ol) { this._ccm.ol.ccDot(x, z, r, c); return; }
       var m = this._ccm, y = this.terrain.heightAt(x, z) + 0.34;
       for (var s = 0; s < 8; s++) {
         if (m.n + 3 > CAP) return;
@@ -1065,6 +1070,10 @@
       if (!m) return;
       if (m.mesh.parent !== this.scene) this.scene.add(m.mesh);
       m.n = 0;
+      // (round 120) `game.orderLines120`: the cursor draws thin, into assets/orderlines120.js's batch
+      m.ol = this.orderLines120 === true && this._ol120cc && !this.fpv && this.mode === 'play' ? this._ol120cc : null;
+      if (m.ol) m.ol.begin(this.camera, this.renderer, this.terrain, this.scene);
+      else if (this._ol120cc) this._ol120cc.hide();
       var aimLbl = null, obLbls = [];
       var live = this.mode === 'play' && !this.fpv;
       if (live) {
@@ -1091,6 +1100,7 @@
         el.style.left = Math.round(L.x + 6) + 'px'; el.style.top = Math.round(L.y - 18) + 'px';
         if (el.textContent !== L.text) el.textContent = L.text;
       }
+      if (m.ol) { m.ol.end(); m.n = 0; }
       var geo = m.mesh.geometry;
       geo.setDrawRange(0, m.n);
       if (m.n) { geo.attributes.position.needsUpdate = true; geo.attributes.color.needsUpdate = true; }
@@ -1150,7 +1160,8 @@
         var lc = ind ? (r.s.state === 'blocked' ? COL.indBlind : COL.indSee)
           : r.s.state === 'clear' ? COL.clear : r.s.state === 'obscured' ? COL.obsc : COL.block;
         var gp = u._gunPos ? u._gunPos() : { x: u.pos.x, y: u.pos.y + 1, z: u.pos.z };
-        this._ccLine(gp.x, gp.y, gp.z, tx, ty + 0.9, tz, Math.max(0.05, 1.1 * this._ccPx(gp.x, gp.y, gp.z)), lc);
+        this._ccLine(gp.x, gp.y, gp.z, tx, ty + 0.9, tz, Math.max(0.05, 1.1 * this._ccPx(gp.x, gp.y, gp.z)), lc,
+          ind ? 3 : r.s.state === 'clear' ? 0 : r.s.state === 'obscured' ? 2 : 1);   // (round 120) the sight state in the shape too
         if (rank[r.band] > rank[bestBand]) bestBand = r.band;
         var dm = Math.hypot(u.pos.x - mx, u.pos.z - mz);
         if (dm < ld) { ld = dm; lead = r; }
@@ -1209,12 +1220,13 @@
       }
       if (!near) return null;
       var who = inReach.length ? inReach : [near], c = inReach.length ? COL.clear : COL.block;
+      if (this._ccm.ol) c = inReach.length ? SMOKE120 : SMOKE120_SHORT;
       for (i = 0; i < who.length && i < 16; i++) {
         u = who[i];
         var gp = u._gunPos ? u._gunPos() : { x: u.pos.x, y: u.pos.y + 1, z: u.pos.z };
-        this._ccLine(gp.x, gp.y, gp.z, p.x, ty + 0.9, p.z, Math.max(0.05, 1.1 * this._ccPx(gp.x, gp.y, gp.z)), c);
+        this._ccLine(gp.x, gp.y, gp.z, p.x, ty + 0.9, p.z, Math.max(0.05, 1.1 * this._ccPx(gp.x, gp.y, gp.z)), c, inReach.length ? 0 : 1);
       }
-      this._ccArc(p.x, p.z, Math.max(2.2, 15 * px), 0, Math.PI * 2, Math.max(0.08, 1.6 * px), inReach.length ? COL.white : COL.block, 0.36);
+      this._ccArc(p.x, p.z, Math.max(2.2, 15 * px), 0, Math.PI * 2, Math.max(0.08, 1.6 * px), this._ccm.ol ? c : inReach.length ? COL.white : COL.block, 0.36);
       var sc = this._ccToScreen(p.x, ty + 0.8, p.z);
       if (!sc) return null;
       return { lbl: { x: sc.x, y: sc.y, text: Math.round(nd * A.WORLD_M) + ' m', band: inReach.length ? 'eff' : 'none' } };
