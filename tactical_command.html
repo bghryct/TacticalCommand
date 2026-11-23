@@ -19932,7 +19932,7 @@ class Terrain {
     const k = Math.min(D / wmax, V / (A * sum));         // per unit of weight: the volume, never past the floor
     if (k * wmax * HSCALE * METERS_PER_UNIT < 0.02) return false;
     for (let j = 0; j < ix.length; j++) {
-      const i = ix[j], resist = this.type[i] === TYPE.stone ? 0.2 : 1;
+      const i = ix[j], resist = this.type[i] === TYPE.stone ? 0.2 : (this._deck120 && this._deck120[i]) ? 0 : 1;   // (round 120) a bridge deck does not crater
       this.h[i] = clamp(this.h[i] - k * ws[j] * resist, MINH, MAXH);
       this._normalizeCell(i);
       if (this.type[i] === TYPE.water) { this._hasWater = true; this.water.visible = true; }
@@ -19956,7 +19956,7 @@ class Terrain {
       if (d > radius) continue;
       const fall = Math.pow(1 - d / radius, 1.4);
       const i = this.idx(x, z);
-      const resist = this.type[i] === TYPE.stone ? 0.2 : 1;
+      const resist = this.type[i] === TYPE.stone ? 0.2 : (this._deck120 && this._deck120[i]) ? 0 : 1;   // (round 120) a bridge deck does not crater
       this.h[i] = clamp(this.h[i] - depth * fall * resist, MINH, MAXH);
       this._normalizeCell(i);
       // Craters are where nearly all the scorch on a battlefield comes from,
@@ -21520,6 +21520,12 @@ const HEDGE_FOOT_SLOW = 0.35;
  *  LINE_BAND of the line, `thick` half its depth. Vehicles: unchanged (still a wall). */
 // (round 118) how long a felled tree lies, by type (m): the median drawn tree (`PROP_VARIANT_H`)
 const TREE_FALL_M = { tree: 9.5, oak: 14.5, pine: 19, deadtree: 8.3 };
+// (round 120, `game.treeTough120`) THE CHARGE THAT FELLS A TREE, by type (kg of bursting charge, as for masonry): a
+// burst at the foot does the tree's whole hp times kg / this (capped at 1.6x), falling off to nothing at 1.4x the
+// masonry blast radius. So a 75 mm round (0.6-0.76 kg) needs two near-direct hits on a tree and three on an oak, a
+// 10.5 cm (2.2 kg) or 15 cm (6.9 kg) fells what is close, a grenade needs about five. The owner: "trees can take more
+// damage before falling. they're kind of weak" (they fell to ~25 rifle rounds or two grenades).
+const TREE_FELL_KG120 = { tree: 0.7, pine: 0.9, oak: 1.6, deadtree: 0.35 };
 const LINE_CROSS = {
   fence:    { code: 4, cost: 1.2, slow: 0.6,  thick: 0.1 / METERS_PER_UNIT },
   sandbags: { code: 5, cost: 2.5, slow: 0.45, thick: 0.3 / METERS_PER_UNIT },
@@ -29090,6 +29096,14 @@ class Pathfinder {
     // the order to the bank. `amphibious` crosses it for real.
     this.wading = this.crushing > 0;
     this.amphibious = !!amphib;
+    // (round 120, `game.bridges120`, BRIDGES-2) A VEHICLE A DECK REFUSES DOES NOT WADE ROUND IT. Where a deck on this map
+    // is too light for the searching vehicle (`wcls120` above the lightest deck's class), `WATER_DETOUR` — a preference of
+    // 120 cells — sent it into the river beside the deck it may not cross, and it bogged there. For such a search the
+    // river is a wall: the route goes round by a crossing that carries it, or walks out to the nearest bank (the partial
+    // rule) and the vehicle holds. An order INTO the water is still honoured, and an amphibian still swims. With the
+    // switch off `wcls120` is 0 and this line is inert; the named maps carry only class-3 decks, which refuse nobody.
+    if (this.wading && this.wcls120 > 1 && this.deck120 && !this.amphibious && window.Bridges120 && window.Bridges120.minCls < this.wcls120
+      && this.terrain.typeAt(ex, ez) !== TYPE.water) this.wading = false;
     // (round 113) a search on foot crosses trees, scrub and small props —
     // exactly the searches `_wasmSearch` runs, whose grid blocks on 1 alone
     this.foot = !this.floating && !this.crushing && !this.amphibious;
@@ -32188,7 +32202,9 @@ class Projectiles {
           if (!isBullet) { p.mesh.position.copy(pos); game.effects.addDecal(p.mesh, 6); this.list.splice(i, 1); continue; }
         } else if (impact === 'obstacle') {
           const gx = worldToCell(pos.x), gz = worldToCell(pos.z);
-          game.obstacles.damage(gx, gz, isBullet ? 2 : 4);
+          // (round 120, `game.treeTough120`) a bullet chips a tree (a tenth), a shot through it half: no MG fells a tree
+          const tt120 = game.treeTough120 === true && (() => { const ob = game.obstacles.at(gx, gz); return !!(ob && TREE_FALL_M[ob.type]); })();
+          game.obstacles.damage(gx, gz, tt120 ? (isBullet ? 0.2 : 2) : (isBullet ? 2 : 4));
           game.sfx.thock();
           if (!isBullet) {
             p.mesh.position.copy(pos);
@@ -68756,6 +68772,13 @@ class Game {
           if (opts.ap && !opts.heat) take = (dmg * 0.35 + (opts.pen || 0) * 0.6) * (1 - d / bR);
           else if (opts.heat) take *= 0.16;
         }
+        // (round 120, `game.treeTough120`) a TREE is felled by the bursting CHARGE, not by the anti-personnel number (a
+        // grenade's 45-50 was nearly half a 15 cm howitzer's 110); no charge known: a third of the old figure.
+        if (this.treeTough120 === true && od && TREE_FALL_M[o.type]) {
+          const kg = opts.filler;
+          if (kg != null) { const fR = blastMasonryR(kg) * 1.4; take = d > fR ? 0 : od.hp * Math.min(1.6, kg / (TREE_FELL_KG120[o.type] || 0.8)) * (1 - d / fR); }
+          else take *= 0.3;
+        }
         this.obstacles.damage(x, z, take, { x: wx, z: wz });   // (round 118) a tree falls away from the burst
       }
     }
@@ -76595,6 +76618,7 @@ Game.prototype.fxImpact118 = false;   // bullets into the ground: a puff in the 
 Game.prototype.fxSmoke118 = false;    // smoke screens: fuller puffs that erode later
 // (round 118) DESTRUCTIBILITY: trees fall and lie as logs (`Obstacles.fellTree`); `destroy118` reserved for the rest
 Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 118 destructibility)
+Game.prototype.treeTough120 = true;   // (round 120) trees take bullets as chips and blast by its charge (TREE_FELL_KG120): the owner asked, 23 Nov. false = round 118's trees
 // (round 118) CARRIED STATE: what a battle builds once per PAGE must not move the next battle's sim stream. ON: the
 // felled tree's log kit and still crown are built on the cosmetic stream; `Obstacles.clear` drops the last map's falls.
 Game.prototype.reset118 = true;       // ON: Village seed 7 repeats over six battles in a page (handoff, round 118 carried state)

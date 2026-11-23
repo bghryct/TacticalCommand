@@ -93,7 +93,7 @@
     KINDS: KINDS, TONS: TONS, SITES: SITES, CLASS_NAME: CLASS_NAME,
     /** THE DEFAULT: `game.bridges120` set either way wins (the prototype carries it). */
     ON: false,
-    list: [], any: false,
+    list: [], any: false, minCls: 9,
     cap: null, bid: null, par: null, axl: null, drawH: null, wet: null,
     pick: [], _meshes: [], _drawn: false, _err: null,
     stats: { applied: 0, narrowed: 0, drawn: 0, tris: 0, draws: 0, ms: 0 },
@@ -130,7 +130,7 @@
     clear: function (g) {
       this.syncUi(g);
       this._undraw(g);
-      this.list.length = 0; this.any = false;
+      this.list.length = 0; this.any = false; this.minCls = 9;
       if (this.cap) { this.cap.fill(0); this.bid.fill(0); this.par.fill(0); this.axl.fill(0); this.drawH.fill(NaN); this.wet.fill(0); }
       var T = g && g.terrain;
       if (T) { T._deck120 = null; T._drawH120 = null; T._wet120 = null; }
@@ -348,7 +348,7 @@
         this.par[i] = (c === rec.c0 ? outA : 0) | (c === rec.c1 ? outB : 0);
       }
       if (!rec.bed) this._bedOf(g, rec);
-      this.any = true;
+      this.any = true; this.minCls = Math.min(this.minCls || 9, K.cls);   // (BRIDGES-2) the lightest deck on the map: `Pathfinder.find` reads it
       var T = g.terrain;
       if (T) T._deck120 = this.axl;
       if (g.pathfinder) g.pathfinder.deck120 = this.cap;

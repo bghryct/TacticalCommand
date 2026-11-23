@@ -63,7 +63,7 @@
   'use strict';
   const THREE = root.THREE;
   if (!THREE) return;
-  const W = { ver: 1, on: false, dirty: true, fails: 0, groundOn: false };
+  const W = { ver: 1, on: false, dirty: true, fails: 0, groundOn: false, groundV2: true, groundLod: false, marchLod: false };
 
   // ---------------------------------------------------------------- knobs
   W.K = {
@@ -136,6 +136,8 @@
     uW120Ring: { value: [v4(), v4(), v4(), v4(), v4(), v4(), v4(), v4()] },   // x, z (world), start (water time), strength
     uW120RingN: { value: 0 },
     uW120T: { value: 0 },                                  // the water's own clock (s)
+    uW120March: { value: v4(10, 1.8, 320, 0.045) },          // (WATER-2) the bank march: steps, growth, no march past this eye distance (u; the mix is 0 there), the Fresnel gate
+    uW120Look: { value: v4(0.35, 0.6, 0, 0) },              // (WATER-2) x a ford's absorption x this (a clear stream), y the banks' sun from above in their reflection
     uW120Dbg: { value: v4(1, 1, 1, 1) },                   // (cost probes) x the bank march, y the dome's sky, z the glint, w the flow
     // the ground
     uW120Bank: { value: v4(0, -13.5, 0.085, 0.20) },      // on, the water level, the wet band (u), the band on a beach
@@ -157,6 +159,7 @@ attribute float aW120S;
 attribute float aW120F;
 varying vec4 vW120;
 varying float vW120S;
+varying float vW120Fd;
 uniform vec4 uW120Wind;
 `;
   // after the swell: still water rocks less than the sea, and more in a wind
@@ -167,11 +170,14 @@ uniform vec4 uW120Wind;
   }`;
   const V_MAIN = `
   vW120 = vec4(vWaterW.y - aW120.x, aW120.y, aW120.z, aW120.w);
-  vW120S = aW120S;`;
+  vW120S = aW120S;
+  vW120Fd = aW120F != 0.0 ? 1.0 : 0.0;`;
 
   const F_PARS = `
 varying vec4 vW120;
 varying float vW120S;
+varying float vW120Fd;
+uniform vec4 uW120Look;
 uniform sampler2D uW120Ripple;
 uniform sampler2D uW120Map;
 uniform sampler2D uW120Lut;
@@ -199,6 +205,7 @@ uniform vec4 uW120Ring[8];
 uniform float uW120RingN;
 uniform float uW120T;
 uniform vec4 uW120Dbg;
+uniform vec4 uW120March;
 vec3 w120Alb;
 vec3 w120Lin;
 float w120Hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -255,15 +262,15 @@ vec4 w120Bank(vec3 wp, vec3 r, float jit) {
   float t = 0.3 * jit, tp = 0.0, hitT = -1.0;
   vec4 m = vec4(0.0);
   for (int i = 0; i < 15; i++) {
-    if (t > tMax) break;
-    m = texture2D(uW120Map, (wp.xz + dir * t + uW120Grid.x) * uW120Grid.y) * hs;
+    if (t > tMax || float(i) >= uW120March.x) break;
+    m = W120_MAP((wp.xz + dir * t + uW120Grid.x) * uW120Grid.y) * hs;
     if (w120In(base + sl * t, m) > 0.5) { hitT = t; break; }
-    tp = t; t = t * 1.42 + 0.25;
+    tp = t; t = t * uW120March.y + 0.25;
   }
   if (hitT < 0.0) return vec4(0.0);
   for (int k = 0; k < 2; k++) {
     float tm = 0.5 * (tp + hitT);
-    vec4 mm = texture2D(uW120Map, (wp.xz + dir * tm + uW120Grid.x) * uW120Grid.y) * hs;
+    vec4 mm = W120_MAP((wp.xz + dir * tm + uW120Grid.x) * uW120Grid.y) * hs;
     if (w120In(base + sl * tm, mm) > 0.5) { hitT = tm; m = mm; } else tp = tm;
   }
   float yh = base + sl * hitT;
@@ -274,7 +281,10 @@ vec4 w120Bank(vec3 wp, vec3 r, float jit) {
   vec2 sxz = uWaterSun.xz;
   float facing = max(0.0, -dot(dir, sxz));
   float up = leaf > 0.5 ? clamp((yh - m.b) / max(m.g - m.b, 0.05), 0.0, 1.0) : clamp(yh / max(m.r, 0.05), 0.0, 1.0);
-  vec3 c = w120Disp(alb * (uW120Amb * (0.55 + 0.45 * up) + uW120SunC * facing * 0.85 * uW120Rain.z));
+  // (WATER-2) a bank's top and its grass take the sun from above too: lit only as a face turned to the water, a bank with the
+  // sun behind it was mirrored near black (the first-person stream's dark blotches)
+  float sunUp = max(normalize(uWaterSun).y, 0.0) * uW120Look.y;
+  vec3 c = w120Disp(alb * (uW120Amb * (0.55 + 0.45 * up) + uW120SunC * max(facing * 0.85, sunUp) * uW120Rain.z));
 #ifdef USE_FOG
 #ifdef FOG_EXP2
   float fd = fogDensity * hitT;
@@ -359,7 +369,7 @@ void w120Composite() {
   r.y = max(r.y, 0.006);
   r = normalize(r);
   vec3 refl = w120Sky(r, clamp(log2(max(px * 5.0, 1.0)), 0.0, 4.0) + rough * 1.5);
-  vec4 bank = fres > 0.045 ? w120Bank(wp, r, 1.0) : vec4(0.0);
+  vec4 bank = fres > uW120March.w && dEye < uW120March.z ? w120Bank(wp, r, 1.0) : vec4(0.0);
   refl = mix(refl, bank.rgb, bank.a * (1.0 - smoothstep(160.0, 320.0, dEye)));
   // the sun on the ripples
   vec3 sunL = normalize(uWaterSun);
@@ -374,7 +384,8 @@ void w120Composite() {
   float shelf = length(vW120.yz) > 0.012 ? 1e3 : mix(mix(0.25, 0.12, smoothstep(0.30, 0.44, ex)), 0.05, sea);
   float dM = min(max(vW120.x, 0.0) * 4.0, vW120S * shelf);
   float muR = sqrt(1.0 - (1.0 - nv * nv) * 0.565);
-  float tr = exp(-mix(uW120Abs.x, uW120Abs.y, sea) * dM * (1.0 + 1.0 / max(muR, 0.2)));
+  // (WATER-2) a ford is a clear stream over gravel, not the murky river's water: its bed shows in first person
+  float tr = exp(-mix(uW120Abs.x, uW120Abs.y, sea) * mix(1.0, uW120Look.x, vW120Fd) * dM * (1.0 + 1.0 / max(muR, 0.2)));
   // WATER MUST READ AS WATER (it stops a man on foot): a few metres out from the bank at least 40% of what is seen is the
   // water's own body, however shallow or clear (a reef flat, a ford, a pond in a marsh vanished into their beds)
   tr = min(tr, 1.0 - (0.25 + 0.15 * smoothstep(0.10, 0.35, vW120.x)) * smoothstep(0.5, 4.0, vW120S));
@@ -419,14 +430,15 @@ void w120Composite() {
     sh.vertexShader = vs.replace('void main() {', V_PARS + 'void main() {')
       .replace('waterWave119(transformed);', 'waterWave119(transformed);' + V_SWELL)
       .replace('#include <project_vertex>', V_MAIN + '\n#include <project_vertex>');
-    sh.fragmentShader = fs.replace('void main() {', F_PARS + 'void main() {')
+    const mapF = W.marchLod ? '#define W120_MAP(p) textureLod(uW120Map, p, 0.0)\n' : '#define W120_MAP(p) texture2D(uW120Map, p)\n';
+    sh.fragmentShader = fs.replace('void main() {', mapF + F_PARS + 'void main() {')
       .replace('#include <color_fragment>', '#include <color_fragment>' + F_ALB)
       .replace(OFF_SURF, 'w120Lin = gl_FragColor.rgb;')
       .replace('#include <encodings_fragment>', '#include <encodings_fragment>\n  w120Composite();');
     return true;
   };
   /** The material's program key: `|w120` only while ON (OFF keeps today's program). */
-  W.key = function () { return W.on ? '|w120:' + W.ver : ''; };
+  W.key = function () { return W.on ? '|w120:' + W.ver + (W.marchLod ? 'L' : '') : ''; };
 
   // ---------------------------------------------------------------- GLSL: the ground (wet banks, the bed)
   const G_PARS = `
@@ -470,6 +482,47 @@ float w120GN(vec2 p) {
       }
     }
   }`;
+  // v2 (WATER-2, the cost): the shore map is read per VERTEX (the ground is one vertex per cell, at the texel centres, so
+  // the interpolation across a triangle is the bilinear filter it replaces), the test against it comes first, and the
+  // band's noise is one fetch of the sky's noise tile (its G: fbm on a 16-cell lattice) instead of two value noises.
+  const G_VPARS2 = `
+uniform sampler2D uW120Shore;
+uniform vec4 uW120Grid;
+varying vec3 vW120Sh;
+`;
+  const G_VMAIN2 = `
+  vW120Sh = texture2D(uW120Shore, (vGPos.xz + uW120Grid.x) * uW120Grid.y).rgb;
+`;
+  const G_PARS2 = `
+uniform sampler2D uW120Noise;
+uniform vec4 uW120Bank;
+uniform vec3 uW120Silt;
+uniform vec3 uW120Sand;
+uniform vec3 uW120Meadow;
+uniform vec3 uW120TintR;
+uniform vec3 uW120TintS;
+uniform vec3 uW120Eye;
+varying vec3 vW120Sh;
+`;
+  const G_MAIN2 = `
+  if (uW120Bank.x > 0.5 && vW120Sh.r > 0.004) {
+    float w120y = vGPos.y - uW120Bank.y;
+    if (w120y < uW120Bank.w * 1.6) {
+      vec3 w120s = vW120Sh;
+      float w120n = W120_GNOISE(vGPos.xz * 0.194);
+      float w120b = mix(uW120Bank.z, uW120Bank.w, w120s.g) * (0.55 + 0.9 * w120n);
+      float w120w = w120s.r * (1.0 - smoothstep(0.0, w120b, w120y));
+      float w120u = w120s.r * (1.0 - smoothstep(-0.12, 0.01, w120y));
+      vec3 w120bed = mix(mix(uW120Silt, uW120Sand, w120s.g), uW120Meadow, w120s.b) * (0.8 + 0.4 * w120n);
+      diffuseColor.rgb = mix(diffuseColor.rgb, w120bed, w120u * 0.7);
+      diffuseColor.rgb *= 1.0 - 0.42 * w120w * (1.0 - 0.5 * w120u);
+      if (w120y < 0.0) {
+        vec3 w120e = normalize(uW120Eye - vGPos);
+        float w120p = -w120y * 4.0 * (1.0 + 1.0 / max(w120e.y, 0.15));
+        diffuseColor.rgb *= exp(-mix(uW120TintR, uW120TintS, w120s.g) * w120p * w120s.r);
+      }
+    }
+  }`;
   const GA = '#include <emissivemap_fragment>';
   W.groundFails = 0;
   /** Patch the ground's material (after groundsplat.js has, which hands the fragment `vGPos`). Composes with every
@@ -484,9 +537,16 @@ float w120GN(vec2 p) {
       if (!W.on || !W.groundOn) return;
       const fs = sh.fragmentShader;
       if (fs.indexOf(GA) < 0 || fs.indexOf('vGPos') < 0 || fs.indexOf('void main() {') < 0) { W.groundFails++; return; }
+      const vs = sh.vertexShader;
+      if (W.groundV2 && vs.indexOf('vGPos = ') >= 0 && vs.indexOf('#include <project_vertex>') >= 0) {
+        sh.vertexShader = G_VPARS2 + vs.replace('#include <project_vertex>', G_VMAIN2 + '#include <project_vertex>');
+        const nz = W.groundLod ? '#define W120_GNOISE(p) textureLod(uW120Noise, p, 0.0).g\n' : '#define W120_GNOISE(p) texture2D(uW120Noise, p).g\n';
+        sh.fragmentShader = fs.replace('void main() {', nz + G_PARS2 + 'void main() {').replace(GA, GA + '\n' + G_MAIN2);
+        return;
+      }
       sh.fragmentShader = fs.replace('void main() {', G_PARS + 'void main() {').replace(GA, GA + '\n' + G_MAIN);
     };
-    const tag = function () { return W.on && W.groundOn ? '|w120g:' + W.ver : ''; };
+    const tag = function () { return W.on && W.groundOn ? '|w120g:' + W.ver + (W.groundV2 ? 'v2' + (W.groundLod ? 'l' : '') : '') : ''; };
     const had = mat._gradePrevKey !== undefined;
     const base = had ? mat._gradePrevKey : mat.customProgramCacheKey;
     const mine = function () { return (base ? base.call(this) : '') + tag(); };
@@ -1079,6 +1139,10 @@ float w120GN(vec2 p) {
     if (g.mapDef !== this._map || T !== this._terr || W.dirty || this._N !== gridN() || !T.water.geometry.attributes.aW120) this._build(g);
     const gOn = !!T._hasWater && !W.noGround;   // (W.noGround: a cost probe's arm)
     if (gOn !== W.groundOn) { W.groundOn = gOn; if (this._ground) this._ground.needsUpdate = true; }
+    const gv = (W.groundV2 ? 1 : 0) + (W.groundLod ? 2 : 0);   // (WATER-2: the per-vertex shore read, the noise's LOD; a probe's arm can flip them)
+    if (gv !== this._gv) { this._gv = gv; if (this._ground) this._ground.needsUpdate = true; }
+    const wk = W.key();   // (a probe's arm may flip W.marchLod: the water's program follows its key)
+    if (wk !== this._wk) { if (this._wk !== undefined && T.water.material) T.water.material.needsUpdate = true; this._wk = wk; }
     if (!this._wetAny) { U.uW120Bank.value.x = 0; return; }
     if (this.fords) { T.water.visible = true; if (this._boxMine && T._waterBox !== this._boxMine) { this._boxOrig = T._waterBox; T._waterBox = this._boxMine; } }
     this._t = ((this._t || 0) + dt) % 3600; U.uW120T.value = this._t;
