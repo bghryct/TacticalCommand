@@ -43205,7 +43205,16 @@ class Unit {
       const fx = Math.sin(this.face) * sgn, fz = Math.cos(this.face) * sgn;
       // (round 120, `game.bridges120`, BRIDGES-2) NOT INTO THE RIVER BY ACCIDENT: see `_wetStep120`
       if (this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any && !this.def.amphib && !this.def.floats
-        && this._wetStep120(this.pos.x + fx * step, this.pos.z + fz * step, dx, dz)) return;
+        && this._wetStep120(this.pos.x + fx * step, this.pos.z + fz * step, dx, dz)) {
+        // …and SLIDES along the bank instead: the part of the step that stays dry. Refused outright, an armoured car
+        // whose waypoint was the deck's first cell, one cell diagonally on, clipped the water cell at the corner
+        // between and stood there refusing every step for twenty-four minutes (probe_stuck.js, Arnhem seed 23).
+        const Tw = this.game.terrain, ax = this.pos.x + fx * step, az = this.pos.z + fz * step;
+        const sx = Tw.typeAt(worldToCell(ax), worldToCell(this.pos.z)) !== TYPE.water ? fx : 0;
+        const sz = !sx && Tw.typeAt(worldToCell(this.pos.x), worldToCell(az)) !== TYPE.water ? fz : 0;
+        if ((sx || sz) && this.game._vehicleCrush(this, Math.sign(sx), Math.sign(sz), dt) > 0) { this.pos.x += sx * step; this.pos.z += sz * step; }
+        return;
+      }
       // Anything in the way is driven through, or is the thing that stops us.
       const crush = this.game._vehicleCrush(this, fx, fz, dt);
       if (crush <= 0) { this.stuckT = (this.stuckT || 0) + dt; return; }
@@ -44247,9 +44256,13 @@ class Unit {
     const T = this.game.terrain, W = TYPE.water;
     if (T.typeAt(worldToCell(nx), worldToCell(nz)) !== W || T.typeAt(worldToCell(this.pos.x), worldToCell(this.pos.z)) === W) return false;
     const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (TILE * 0.5)));
-    for (let j = 1; j <= n; j++) if (T.typeAt(worldToCell(this.pos.x + dx * j / n), worldToCell(this.pos.z + dz * j / n)) === W) return false;
+    // the leg itself crosses water — two samples or more, not the corner of a water cell a diagonal clips (probe_water.js,
+    // Arnhem seed 23: a halftrack's leg from the shoulder to the deck's first cell clipped one and it drove in)
+    let wetN = 0;
+    for (let j = 1; j <= n; j++) if (T.typeAt(worldToCell(this.pos.x + dx * j / n), worldToCell(this.pos.z + dz * j / n)) === W && ++wetN >= 2) return false;
+    // …or the PLAYER's own order ends in the river (the computer's destinations in the water are moved, `_setPathTo`)
     const e = this.path && this.path.length ? this.path[this.path.length - 1] : null;
-    if (e && T.typeAt(worldToCell(e.x), worldToCell(e.z)) === W) return false;
+    if (e && T.typeAt(worldToCell(e.x), worldToCell(e.z)) === W && this.team === this.game.playerTeam && !this._underAI()) return false;
     this._wetRefused120 = (this._wetRefused120 || 0) + 1;
     return true;
   }
@@ -77287,7 +77300,7 @@ Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (
 Game.prototype.fpvGround118 = false;
 Game.prototype.haze120 = false;      // (round 120, LOOK) aerial perspective (assets/look120.js): the haze brighter and warmer toward the sun, cooler away, lying in a layer over the low ground, the dome's horizon in the same colours. OFF is the old FogExp2 exactly; OFF until main has seen the sheets (.claude/wip120/look)
 Game.prototype.grade120 = false;     // (round 120, LOOK) a filmic split on the box-art grade, amber highlights and slate shadows (assets/look120.js, in the tone curve). OFF is the old curve exactly; OFF until main has seen the sheets
-Game.prototype.bridges120 = false;    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
+Game.prototype.bridges120 = true;    // ON (main, 23 Nov 23:40, from .claude/wip120/bridges/sheet09-13_*_v2.jpg; the owner: 'turn bridges and water on when ready'): Arnhem's river bogging fixed (no sideways step off a deck, AI goals moved off the water, the dam's spurs gone), A/B 6 seeds: Pegasus inside the floor, Arnhem bogged/inWater better than OFF, the bridge a chokepoint where a 138 m dam was (crossings -11, German lost +19); lint 100%; maps without bridges identical; cost Arnhem play +0.33 ms, the other maps <= 0.    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
 Game.prototype.water120 = false;      // (round 120) the water, drawn (assets/water120.js): the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks reflected, foam, wet banks, rain rings. OFF is today's program exactly; ON until main has seen the sheets (.claude/wip120/water)
 Game.prototype.foliage120 = true;   // ON (main, 23 Nov, from .claude/wip120/foliage/sheets/s5_brush.jpg, s5_arras.jpg, s5_sunflowers.jpg). (round 120) THE GROUND FOLIAGE (assets/foliage.js `on120`): Blender drawings by kind and theatre (broom, juniper, maquis, scrub, sunflowers facing one way), the far bands as round 119 (the carpet opt-in: `field.carpet120 = true`). Quiet-machine A/B (ab8/ab7): playing camera -0.35..+0.35 ms, first person -0.70..+0.45; draws and triangles <= OFF; seeded battles identical. false = round 119's field
 Game.prototype.crewSide120 = true;   // ON (main, 23 Nov, from .claude/wip120/crew/sheet1_crew_off_on.jpg). (round 120) GUN CREWS ON THE SIGHT'S SIDE: a towed gun in `CREW_SIGHT_LEFT120` has its detachment mirrored across the bore (`mirrorCrewFig120`), the layer at the telescope left of the breech. Drawing only (seeded battles identical); read when a gun's model is built. OFF until main has seen .claude/wip120/crew

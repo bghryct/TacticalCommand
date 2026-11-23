@@ -274,6 +274,11 @@
       // the bed along the span: the river's own cells beside the deck
       this._bedOf(g, rec);
       if (rec.site) {
+        // (BRIDGES-2) NO SPUR OF THE OLD DAM BESIDE THE DECK: the river's run is interpolated across the strip, so a column
+        // next to the lane could keep a few land cells inside the deck's span — a spur in the river along the bridge that a
+        // halftrack drove out onto and waded off (probe_water.js, Arnhem seed 23, cell 162,209). Two columns either side of
+        // the lane run the full span.
+        if (rec.runs) for (var cs = rec.c0 - 2; cs <= rec.c1 + 2; cs++) if (rec.runs[cs]) rec.runs[cs] = [Math.min(rec.runs[cs][0], rec.s0), Math.max(rec.runs[cs][1], rec.s1)];
         // THE STRIP CUT BACK TO THE DECK: the rest of it over the river is river again, at the bed beside it
         for (var c = rec.lo; c <= rec.hi; c++) {
           if (c >= rec.c0 && c <= rec.c1) continue;
