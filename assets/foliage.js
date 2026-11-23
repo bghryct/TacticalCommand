@@ -509,15 +509,16 @@
     fern:      ['fern_a'],
     reeds:     ['reeds_a'],
     heather:   ['heather_a'],
-    brush:     ['brush_a', 'brush_b', 'brush_c'],
+    brush:     ['brush_a', 'brush_b', 'brush_c', 'brush_d'],
     sunflower: ['sun_f'],
     stubble:   ['dry_a'],
   };
   // the theatre's season: summer-dry grass on the steppe, in Italy and the desert, dead grass under snow
   var V120T = {
-    east:   { grass: ['grass_a', 'grass_d', 'dry_a', 'grass_c'], tallgrass: ['tall_a', 'dry_b', 'tall_b'], brush: ['brush_a', 'brush_c'] },
-    italy:  { grass: ['grass_d', 'dry_a', 'grass_c', 'grass_b'], tallgrass: ['tall_a', 'dry_b'], brush: ['brush_b', 'brush_a'] },
-    desert: { grass: ['dry_a', 'dry_b', 'grass_d'], tallgrass: ['dry_b', 'dry_a'], brush: ['brush_b'] },
+    east:   { grass: ['grass_a', 'grass_d', 'dry_a', 'grass_c'], tallgrass: ['tall_a', 'dry_b', 'tall_b'], brush: ['brush_a', 'brush_c', 'brush_d'] },
+    // (FOLIAGE-2) the maquis and the desert scrub, densified (they were bare sticks), are the south's brush again
+    italy:  { grass: ['grass_d', 'dry_a', 'grass_c', 'grass_b'], tallgrass: ['tall_a', 'dry_b'], brush: ['maquis_a', 'maquis_b', 'brush_b'] },
+    desert: { grass: ['dry_a', 'dry_b', 'grass_d'], tallgrass: ['dry_b', 'dry_a'], brush: ['scrub_a', 'maquis_b'] },
     pacific: { brush: ['tropic_a', 'brush_b'] },
     winter: { grass: ['dry_a', 'grass_d'], tallgrass: ['dry_b', 'dry_a'], heather: ['dry_a'] },
   };
@@ -530,12 +531,16 @@
   var TINT120 = [0x646464, 0x686660, 0x60645e];
   // near the eye (bands 0 and 1) a meadow is a sward, not tufts on a lawn: more of the grasses
   var NEAR120 = { grass: 1.3, tallgrass: 1.2 };
+  // (FOLIAGE-2) with the carpet opt-in (it cost more than the cards it saved: see `update`), the far bands draw the
+  // round-119 cards again: every band at 1 / 1.75 / 1 is the OFF field's own density, blow-up and fade. Kept as a
+  // table for the carpet's sake (`field.carpet120 = true` wants the thinner far bands it was tuned with:
+  // dens 0.85/0.60/0.55, boost 1.45/1.30/1.25, fade 0.90/0.70/0.62 for bands 2-4).
   var BAND120 = [
     { dens: 1.00, boost: 1.75, fade: 1.00 },
-    { dens: 1.00, boost: 1.60, fade: 1.00 },
-    { dens: 0.85, boost: 1.45, fade: 0.90 },
-    { dens: 0.60, boost: 1.30, fade: 0.70 },
-    { dens: 0.55, boost: 1.25, fade: 0.62 },
+    { dens: 1.00, boost: 1.75, fade: 1.00 },
+    { dens: 1.00, boost: 1.75, fade: 1.00 },
+    { dens: 1.00, boost: 1.75, fade: 1.00 },
+    { dens: 1.00, boost: 1.75, fade: 1.00 },
   ];
   // the carpet: cover near the eye (its share of the cell's density), and the
   // distances (x the band's fade) over which it comes up to full
@@ -2791,7 +2796,11 @@
         for (var i = 0; i < this.chunks.length; i++) { var c = this.chunks[i]; if (c.mesh && !c.dirty) { c.dirty = true; this.dirtyList.push(c); } }
         if (this._cp) this._cp.sig.fill(0);
       }
-      if (this.carpet120 !== false) this._carpetTick120(cam);
+      // (FOLIAGE-2) the carpet is OPT-IN (`field.carpet120 = true`). On a quiet machine (22:13-22:19 UTC 23 Nov,
+      // .claude/wip120/foliage/drivers/ab5_verdict.js) it cost +1.5 to +2.9 ms median at the playing camera on
+      // Maginot, Saumur, Village and the crowd, far more than the cards it let the far bands drop; ON without it was
+      // -1.0 to +0.2 ms against OFF. The far bands draw full cards again instead (BAND120).
+      if (this.carpet120 === true) this._carpetTick120(cam);
       else if (this._cp) this._carpetDrop120();
     },
 
@@ -2846,7 +2855,9 @@
       }
       if (out.length) { out.tint = TINT120; out.blend = 0.55; }
       if (out.length && FACE120[def.id] && CELLQ120[FACE120[def.id].back]) out.back = CELLQ120[FACE120[def.id].back].cell;
-      else out.push({ cell: def.atlas, w: def.w, h: def.h });
+      // (FOLIAGE-2) the old cell only for a kind with no drawing of its own: this was an `else` of the line above, so
+      // every listed kind that does not face drew one plant in (n + 1) from the round-113 scribble as well
+      if (!out.length) out.push({ cell: def.atlas, w: def.w, h: def.h });
       if (sprites120 === 'ready' || sprites120 === 'absent' || sprites120 === 'failed') C[def.id] = out;
       return out;
     },

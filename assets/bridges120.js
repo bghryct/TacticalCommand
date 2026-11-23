@@ -87,6 +87,7 @@
   };
 
   var EDGE_N = 1, EDGE_E = 2, EDGE_S = 4, EDGE_W = 8;
+  var EMBANK = 1.0;         // (BRIDGES-2) a ramp's fall to the river off the deck's lane: one height unit a 6 m cell (3 m in 6, 1:2)
   var STEP = 0.85;          // the most a ramp rises a cell (height units): wheels climb 1.0, a tank 1.15
 
   var B = window.Bridges120 = {
@@ -287,6 +288,8 @@
             this.stats.narrowed++;
           }
         }
+        // (BRIDGES-2) THE RAMP MEETS THE RIVER ON AN EMBANKMENT SLOPE, NOT AN EARTH CLIFF (`_embank`)
+        this.stats.embanked = (this.stats.embanked || 0) + this._embank(g, rec);
         delete rec.runs;
       } else {
         // A NEW DECK: flat at the kind's height over the banks (a pontoon on the water), ramps within a wheel's climb
@@ -318,6 +321,50 @@
       this.stats.applied++;
       this.register(g, rec);
       return rec;
+    },
+
+    /** (BRIDGES-2) Cutting a raised strip back to its deck left the wide ramp ending at the river in a cliff as high as the
+     *  deck (Arnhem 5.4 units, 20 m). Off the deck's lane, a bank cell k cells from the water that stands RAISED above the
+     *  natural bank beside the strip is lowered to the bed + k * EMBANK, never below that natural bank and never under a
+     *  building: the ramp falls to the river at 1:2 (a man walks it, a tank climbs it) and the river's own bank is the
+     *  map's. The lane and a one-cell shoulder each side keep their height to the abutment, retained by walls (`_walls`). A strip that was never raised (Pegasus) is left alone. These are
+     *  the sim's heights; the drawing follows them. Returns the cells lowered. */
+    _embank: function (g, rec) {
+      var T = g.terrain, G = GRID, S = g.structures, O = g.obstacles, self = this, n = 0;
+      var idx = function (a, c) { return self._cellIdx(rec, a, c); };
+      var xz = function (a, c) { return rec.ax === 'x' ? [a, c] : [c, a]; };
+      var nat = function (a) {   // the natural bank beside the strip at this along-cell: the lower side, out of the water
+        var best = null;
+        for (var d = 2; d <= 4; d++) for (var sg = -1; sg <= 1; sg += 2) {
+          var c = sg < 0 ? rec.lo - d : rec.hi + d;
+          if (c < 0 || c >= G || a < 0 || a >= G) continue;
+          var i = idx(a, c);
+          if (T.type[i] !== TYPE.water && (best === null || T.h[i] < best)) best = T.h[i];
+        }
+        return best;
+      };
+      for (var c = rec.lo; c <= rec.hi; c++) {
+        if (c >= rec.c0 - 1 && c <= rec.c1 + 1) continue;   // the lane and a shoulder each side keep their height: the retaining walls stand there
+        var rn = rec.runs ? rec.runs[c] : null;
+        if (!rn) continue;
+        for (var sg = -1; sg <= 1; sg += 2) {
+          var edge = sg < 0 ? rn[0] : rn[1], ie = idx(edge, c);
+          if (T.type[ie] !== TYPE.water) continue;
+          var bed = T.h[ie];
+          for (var k = 1; k <= 14; k++) {
+            var a = edge + sg * k;
+            if (a < 1 || a > G - 2) break;
+            var i = idx(a, c), hn = nat(a);
+            if (T.type[i] === TYPE.water || hn === null) break;
+            var want = Math.max(hn, bed + EMBANK * k);
+            if (T.h[i] <= want + 0.05 || T.h[i] < hn + 0.4) break;   // the slope has met the ramp, or it was never raised
+            var p = xz(a, c);
+            if ((S && S.has && S.has(p[0], p[1])) || (O && O.at && O.at(p[0], p[1]))) break;   // a building or a prop stops it
+            T.h[i] = want; n++;
+          }
+        }
+      }
+      return n;
     },
 
     /** The bed under the span (height units, per along-cell): the nearest river cell beside the deck. */
@@ -513,6 +560,79 @@
       if (T._hasWater) { T._maskWater(); T._updateWaterColors(); }
     },
     /** The ground as it is DRAWN (the bed under a span), the mesh's own triangles. */
+    /** (BRIDGES-2) THE RETAINING WALLS. Where `_embank` lowered the ground beside a raised lane, the lane's shoulder stands
+     *  over it: an ashlar wall along each shoulder's outer edge, from the abutment back while the drop is over a metre,
+     *  a parapet a metre over the road, and the shoulder's face over the river down to the bed. Drawing only (the sim's
+     *  shoulder is the cell's height, as before). One mesh a bridge, the kit's material and trim sheet (band `ashlar`). */
+    _walls: function (g, rec, mat) {
+      var T = g.terrain, P = window.BRIDGES120PACK, TH = THREE, self = this;
+      if (!P || !P.bandV || !P.bandV.ashlar || !T) return null;
+      var BVa = P.bandV.ashlar, V0 = BVa[0], VN = (BVa[1] - BVa[0]) * 1024, VM = (BVa[2] || 1.6) / METERS_PER_UNIT, UM = P.uM || 4;
+      var U = 1 / METERS_PER_UNIT, PAR = 1.0 * U, THK = 0.7 * U / TILE;   // parapet over the road (wu); thickness (cells)
+      var pos = [], nor = [], uv = [], col = [], ind = [];
+      var W = function (a, c) { var A = cellCenter(0) + a * TILE, C = cellCenter(0) + c * TILE; return rec.ax === 'x' ? [A, C] : [C, A]; };
+      var H = function (a, c) { return T.h[self._cellIdx(rec, a, c)] * HSCALE; };
+      var tone = function (y) { var hw = (y - T.waterY) * METERS_PER_UNIT; return hw < -0.1 ? 0.55 : hw < 1.4 ? 0.62 + 0.38 * Math.max(0, hw / 1.4) : 1; };
+      // a vertical face over p0 -> p1 (world x, z) from yb up to yt, facing (nx, nz): ashlar rows counted DOWN from the top
+      var face = function (p0, p1, yb, yt, nx, nz) {
+        var L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) * METERS_PER_UNIT;
+        var flip = (-(p1[1] - p0[1]) * nx + (p1[0] - p0[0]) * nz) < 0;
+        for (var r = 0; r < 60; r++) {
+          var y1 = yt - r * VM, y0 = Math.max(yb, yt - (r + 1) * VM);
+          if (y1 <= yb + 1e-6) break;
+          var tb = (y0 - (yt - (r + 1) * VM)) / VM * 0.98 + 0.01, b = pos.length / 3;
+          var Q = [[p0, y0, 0, tb], [p1, y0, L, tb], [p1, y1, L, 0.99], [p0, y1, 0, 0.99]];
+          for (var q = 0; q < 4; q++) {
+            pos.push(Q[q][0][0], Q[q][1], Q[q][0][1]); nor.push(nx, 0, nz);
+            uv.push(Q[q][2] / UM, V0 + (2 + (VN - 4) * Q[q][3]) / 1024);
+            var d = tone(Q[q][1]); col.push(0.94 * d * (d < 1 ? 0.92 : 1), 0.93 * d, 0.89 * d * (d < 1 ? 0.88 : 1));
+          }
+          if (flip) ind.push(b, b + 2, b + 1, b, b + 3, b + 2); else ind.push(b, b + 1, b + 2, b, b + 2, b + 3);
+        }
+      };
+      var cap = function (q0, q1, q2, q3, y) {   // a level quad (the coping), facing up
+        var b = pos.length / 3, Q = [q0, q1, q2, q3];
+        for (var q = 0; q < 4; q++) { pos.push(Q[q][0], y, Q[q][1]); nor.push(0, 1, 0); uv.push((Q[q][0] + Q[q][1]) * METERS_PER_UNIT / UM, V0 + (2 + (VN - 4) * (q < 2 ? 0.2 : 0.6)) / 1024); col.push(1.0, 0.99, 0.96); }
+        var cr = (q1[0] - q0[0]) * (q3[1] - q0[1]) - (q1[1] - q0[1]) * (q3[0] - q0[0]);   // +: q0 q1 q3 turns toward -y in x,z
+        if (cr > 0) ind.push(b, b + 2, b + 1, b, b + 3, b + 2); else ind.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      };
+      var n = 0;
+      for (var sA = -1; sA <= 1; sA += 2) for (var sC = -1; sC <= 1; sC += 2) {
+        var cS = sC < 0 ? rec.c0 - 1 : rec.c1 + 1, cO = cS + sC, cW = cS + sC * 0.5, cI = cW - sC * THK;
+        var aE = sA < 0 ? rec.s0 - 1 : rec.s1 + 1, first = true;
+        for (var k = 0; k < 24; k++) {
+          var a = aE + sA * k;
+          if (a < 1 || a > GRID - 2 || cO < 0 || cO >= GRID) break;
+          var hS = H(a, cS), hO = H(a, cO);
+          if (hS - hO < 0.35 * HSCALE) break;   // less than a metre: the wall ends
+          var yt = hS + PAR, wo = W(a, cO), yb = Math.min(hO, self._drawnY(T, wo[0], wo[1])) - 0.4 * U;
+          var aN = a - 0.5 * sA, aF = a + 0.5 * sA;   // the segment's river end and its inland end
+          var o0 = W(aN, cW), o1 = W(aF, cW), i0 = W(aN, cI), i1 = W(aF, cI);
+          var nv = rec.ax === 'x' ? [0, sC] : [sC, 0];
+          face(o0, o1, yb, yt, nv[0], nv[1]);                       // the outer face, over the lowered ground
+          face(i0, i1, hS - 0.3 * U, yt, -nv[0], -nv[1]);           // the parapet's inner face, over the shoulder
+          cap(o0, o1, i1, i0, yt);
+          if (first) {   // the shoulder's face over the river, from the lane's edge out to the wall, down to the bed
+            var cL = sC < 0 ? rec.c0 - 0.5 : rec.c1 + 0.5, bed = (rec.bed ? rec.bed[sA < 0 ? 0 : rec.bed.length - 1] : hO / HSCALE) * HSCALE;
+            var e0 = W(aN, cL), e1 = W(aN, cW), na = rec.ax === 'x' ? [-sA, 0] : [0, -sA];
+            face(e0, e1, bed - 0.3 * U, yt, na[0], na[1]);
+            first = false;
+          }
+          n++;
+        }
+      }
+      if (!n) return null;
+      var geo = new TH.BufferGeometry();
+      geo.setAttribute('position', new TH.BufferAttribute(new Float32Array(pos), 3)); geo.setAttribute('normal', new TH.BufferAttribute(new Float32Array(nor), 3));
+      geo.setAttribute('uv', new TH.BufferAttribute(new Float32Array(uv), 2)); geo.setAttribute('color', new TH.BufferAttribute(new Float32Array(col), 3));
+      geo.setIndex(new TH.BufferAttribute(pos.length / 3 > 65535 ? new Uint32Array(ind) : new Uint16Array(ind), 1));
+      geo.computeBoundingSphere();
+      var me = new TH.Mesh(geo, mat);
+      me.castShadow = true; me.receiveShadow = true; me.name = 'bridges120:walls:' + rec.kind;
+      me.visible = !!this._texReady; me.userData.tris = ind.length / 3; me.userData.segs = n;
+      me.updateMatrixWorld(true);
+      return me;
+    },
     _drawnY: function (T, wx, wz) {
       var dh = T._drawH120 || this.drawH;
       var u = clamp((wx + HALF - TILE / 2) / TILE, 0, GRID - 1.001), v = clamp((wz + HALF - TILE / 2) / TILE, 0, GRID - 1.001);
@@ -685,6 +805,9 @@
         g.scene.add(lod); this._meshes.push(lod); built.push(lod);
         draws++;
       }
+      // (BRIDGES-2) the retaining walls where the ground beside the raised lane was lowered (`_embank`)
+      var wm = this._walls(g, rec, mat);
+      if (wm) { g.scene.add(wm); this._meshes.push(wm); built.push(wm); draws++; tris += wm.userData.tris; this.stats.walls = (this.stats.walls || 0) + wm.userData.segs; }
       // a deck ribbon for the cursor (never drawn): a click on the deck lands on the deck, not on the bed under it
       var rp = [], ri = [];
       for (var a2 = rec.s0 - 1; a2 <= rec.s1 + 1; a2++) {

@@ -70,14 +70,19 @@
     MFLASH: 11,  // a muzzle flash, laid along the bore as the camera sees it
     STREAK: 12,  // a hot round in flight (a ricochet): laid along its velocity ON SCREEN
     LICK: 13,    // (round 114) flipbook: one tongue of simulated flame
+    PLUME: 14,   // (round 120, `game.smokeCol120`) a puff of a burning wreck's column: its own lit batch (see PLUME_CAP)
   };
+  // (round 120) THE COLUMN BATCH'S CAP. A wreck's column holds ~40 puffs; the game thins every column as the batch
+  // fills (`Game._smokeColumn120`), so fifteen wrecks in view cost what twelve would. The round-20 leak was smoke
+  // with no cap at all.
+  var PLUME_CAP = 480;
 
   // Which layer each behaviour draws in.
   var LAYER = {};
   LAYER[K.SMOKE] = 1; LAYER[K.FIRE] = 0; LAYER[K.SPARK] = 0; LAYER[K.DEBRIS] = 1;
   LAYER[K.BOOM] = 2; LAYER[K.FLASH] = 0; LAYER[K.DUST] = 1; LAYER[K.TRAIL] = 1;
   LAYER[K.GIB] = 1; LAYER[K.EMBER] = 0; LAYER[K.FBALL] = 3; LAYER[K.MFLASH] = 0;
-  LAYER[K.STREAK] = 0; LAYER[K.LICK] = 5;
+  LAYER[K.STREAK] = 0; LAYER[K.LICK] = 5; LAYER[K.PLUME] = 6;
 
   // HOW HARD THE WIND HAS HOLD OF IT.
   //
@@ -95,14 +100,14 @@
   // trajectory and the wind is not going to move them.
   var WIND = {};
   WIND[K.SMOKE] = 0.85; WIND[K.DUST] = 0.5; WIND[K.TRAIL] = 0.7;
-  WIND[K.EMBER] = 0.6;  WIND[K.FIRE] = 0.3; WIND[K.LICK] = 0.25;
+  WIND[K.EMBER] = 0.6;  WIND[K.FIRE] = 0.3; WIND[K.LICK] = 0.25; WIND[K.PLUME] = 0.5;
 
   // Eviction priority — higher survives. A blast core outranks a smoke wisp.
   var PRIO = {};
   PRIO[K.SMOKE] = 1; PRIO[K.FIRE] = 3; PRIO[K.SPARK] = 2; PRIO[K.DEBRIS] = 2;
   PRIO[K.STREAK] = 3; PRIO[K.LICK] = 3;
   PRIO[K.BOOM] = 6; PRIO[K.FLASH] = 6; PRIO[K.DUST] = 2; PRIO[K.TRAIL] = 1;
-  PRIO[K.GIB] = 4; PRIO[K.EMBER] = 2; PRIO[K.FBALL] = 6; PRIO[K.MFLASH] = 5;
+  PRIO[K.GIB] = 4; PRIO[K.EMBER] = 2; PRIO[K.FBALL] = 6; PRIO[K.MFLASH] = 5; PRIO[K.PLUME] = 2;
 
   // ---- sprite sheets ------------------------------------------------------
   // Two 4x4 atlases (a general one and the explosion flipbook) drawn once.
@@ -369,6 +374,11 @@
     'varying float vSoft;',
     'varying vec4 vColF;',
     'varying float vDepth;',
+    '#ifdef PLUME',
+    'attribute float iExt;',     // (round 120) the fire's glow on the puff's underside
+    'varying vec2 vQ;',          // where in the puff, in the camera's plane (-0.5..0.5)
+    'varying float vGlow;',
+    '#endif',
     'void main() {',
     '  vColF = iCol;',
     '  vEr = uFlip.y > 0.5 ? iUv.y : (uMode > 1.5 ? 1.0 - iCol.a : 0.0);',
@@ -386,6 +396,9 @@
     '  vec2 q = position.xy * iSize.xy;',
     '  vec2 qr = vec2(q.x * cr - q.y * sr, q.x * sr + q.y * cr);',
     '  mv.xy += qr;',
+    '#ifdef PLUME',
+    '  vQ = vec2(position.x * cr - position.y * sr, position.x * sr + position.y * cr); vGlow = iExt;',
+    '#endif',
     // SOFT AT THE GROUND: where a puff's quad would cut the ground it thins out
     // first, so smoke and dust settle on the field instead of ending in a line.
     // The world height of this corner is the particle's plus the camera's axes;
@@ -410,6 +423,12 @@
     'uniform float uHeat;',    // how bright heat 1.0 is, linear — tone mapped after
     'uniform float uGlowOnly;', // 1 while PostFX draws the glow source: fire only, no smoke
     'uniform float uHot;',     // how far up the fire ramp this sheet's hottest texel goes
+    '#ifdef PLUME',
+    'uniform vec3 uSunV;',     // (round 120) the sun, in view space
+    'uniform float uAmb;',     // the shaded side's share of the light
+    'varying vec2 vQ;',
+    'varying float vGlow;',
+    '#endif',
     'varying float vEr;',
     'uniform vec2 uFlip;',
     'varying vec2 vUvF;',
@@ -452,7 +471,20 @@
     '      e = vec4(hot * heat * uHeat * (1.0 - fog), vColF.a);',
     '    } else if (uMode < 1.5) {',
     '      if (cov < 0.004) discard;',
+    '#ifdef PLUME',
+    // (round 120) A COLUMN IS A VOLUME, LIT FROM ONE SIDE. Each puff is shaded as the ball it stands for, toward
+    // the sun: bright on the sun side, its own shadow on the other, the sheet's knots kept at half strength. The
+    // fire under it lights its underside (`vGlow`), which is what you see of it at night.
+    '      vec2 qq = vQ * 2.0; float q2 = min(1.0, dot(qq, qq));',
+    '      vec3 nn = vec3(qq, sqrt(1.0 - q2));',
+    '      float ndl = dot(nn, uSunV);',
+    '      float sh = uAmb + (1.15 - uAmb) * clamp(0.6 * max(ndl, 0.0) + 0.4 * (0.5 + 0.5 * ndl), 0.0, 1.0);',
+    '      vec3 sm = (0.55 + 0.45 * lit) * sh * vColF.rgb * uLight;',
+    '      sm += vec3(1.0, 0.34, 0.06) * vGlow * clamp(0.55 - qq.y * 0.9, 0.0, 1.0);',
+    '      e = vec4(mix(sm, uFogColor, fog), cov);',
+    '#else',
     '      e = vec4(mix(lit * vColF.rgb * uLight, uFogColor, fog), cov);',
+    '#endif',
     '    } else {',
     // premultiplied: the smoke covers what is behind it, the fire adds on top
     '      if (cov < 0.003 && heat < 0.003) discard;',
@@ -527,6 +559,11 @@
     g.setAttribute('iCol', this.aCol);
     g.setAttribute('iSize', this.aSize);
     g.setAttribute('iUv', this.aUv);
+    if (o.plume) {                // (round 120) the column batch: the fire's glow per puff
+      this.ext = new Float32Array(cap);
+      this.aExt = new THREE.InstancedBufferAttribute(this.ext, 1).setUsage(THREE.DynamicDrawUsage);
+      g.setAttribute('iExt', this.aExt);
+    }
     g.instanceCount = 0;
     // Particles are everywhere and cheap to draw; culling the whole batch by a
     // bounding sphere that would have to be recomputed every frame is a worse
@@ -556,6 +593,11 @@
       blending: premul ? THREE.CustomBlending : additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       side: THREE.DoubleSide,
     });
+    if (o.plume) {
+      this.mat.defines = { PLUME: 1 };
+      this.mat.uniforms.uSunV = { value: new THREE.Vector3(0.3, 0.8, 0.5) };
+      this.mat.uniforms.uAmb = { value: 0.42 };
+    }
     if (premul) {
       this.mat.blendSrc = THREE.OneFactor; this.mat.blendDst = THREE.OneMinusSrcAlphaFactor;
       this.mat.blendSrcAlpha = THREE.OneFactor; this.mat.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
@@ -576,6 +618,7 @@
     this.aSize.updateRange.count = n * 3; this.aSize.needsUpdate = true;
     this.aUv.updateRange.count = n * 2; this.aUv.needsUpdate = true;
     if (this.frames) { this.aGnd.updateRange.count = n; this.aGnd.needsUpdate = true; }
+    if (this.ext) { this.aExt.updateRange.count = n; this.aExt.needsUpdate = true; }
   };
   Batch.prototype.dispose = function () {
     this.mesh.parent && this.mesh.parent.remove(this.mesh);
@@ -645,6 +688,12 @@
     if (sh.lick) {
       this.batches[5] = new Batch(scene, sh.lick, false, 256, { enc: true, premul: true, grid: bk.lick.grid, heat: Math.min(1.6, bk.lick.heat), hot: 0.55, frames: bk.lick.frames });
       this.lickFrames = bk.lick.frames;
+    }
+    // (round 120, `game.smokeCol120`) THE COLUMN OVER A BURNING WRECK, in a batch of its own (one draw while any
+    // stands): the simulated puff sheet, each puff lit as a ball toward the sun and glowing at its foot.
+    this.plumeN = 0; this.plumeCap = PLUME_CAP; this.sunX = 0.35; this.sunY = 0.8; this.sunZ = 0.45;
+    if (sh.billow) {
+      this.batches[6] = new Batch(scene, sh.billow, false, PLUME_CAP, { enc: true, grid: bk.billow.grid, frames: bk.billow.frames, plume: true });
     }
     this.boomFrames = bk ? bk.boom.frames : 16;
     this.boomGround = bk ? bk.boom.ground : 0.5;      // where the ground line sits in a cell (from the bottom)
@@ -776,7 +825,7 @@
         // the hull an exhaust rides on) is not part of the picture
         if (!o.keepV) { this.vx[i] *= k; this.vy[i] *= k; this.vz[i] *= k; this.grav[i] *= k; }
       }
-      if (this.flip[i] || kind === K.LICK) this.gnd[i] = this.terrain ? this.terrain.heightAt(this.px[i], this.pz[i]) : -1e4;
+      if (this.flip[i] || kind === K.LICK || kind === K.PLUME) this.gnd[i] = this.terrain ? this.terrain.heightAt(this.px[i], this.pz[i]) : -1e4;
       return i;
     },
 
@@ -785,19 +834,25 @@
      *  game from its own `wind`, so one weather system drives the clouds, the
      *  foliage sway and every particle. */
     setWind: function (x, z) { this.windX = x || 0; this.windZ = z || 0; },
+    /** (round 120) Where the sun is (a world direction toward it): the column batch is lit from that side. */
+    setSun: function (x, y, z) { var l = Math.sqrt(x * x + y * y + z * z) || 1; this.sunX = x / l; this.sunY = y / l; this.sunZ = z / l; },
 
     update: function (dt, camera) {
       if (dt <= 0) dt = 0.0001;
       this._t += dt;
       var b0 = this.batches[0], b1 = this.batches[1], b2 = this.batches[2], b3 = this.batches[3] || null;
-      var b4 = this.batches[4] || null, b5 = this.batches[5] || null;
-      var n0 = 0, n1 = 0, n2 = 0, n3 = 0, n4 = 0, n5 = 0;
+      var b4 = this.batches[4] || null, b5 = this.batches[5] || null, b6 = this.batches[6] || null;
+      var n0 = 0, n1 = 0, n2 = 0, n3 = 0, n4 = 0, n5 = 0, n6 = 0, np = 0, pglow = 0;
       var T = this.terrain;
       // the view matrix, for laying a muzzle flash along its bore on screen
       var ve = camera ? camera.matrixWorldInverse.elements : null;
       var pool = F118('fxPool118');
       if (camera) { this._camX = camera.position.x; this._camY = camera.position.y; this._camZ = camera.position.z; this._ve = ve; }
       var G = typeof window !== 'undefined' ? window.game : null; this._fpv = G && G.fpv ? 1 : 0;
+      if (b6 && ve) {                   // (round 120) the sun in view space, for the column batch
+        var su = b6.mat.uniforms.uSunV.value, sx0 = this.sunX, sy0 = this.sunY, sz0 = this.sunZ;
+        su.set(ve[0] * sx0 + ve[4] * sy0 + ve[8] * sz0, ve[1] * sx0 + ve[5] * sy0 + ve[9] * sz0, ve[2] * sx0 + ve[6] * sy0 + ve[10] * sz0);
+      }
 
       for (var i = 0; i < this.n; i++) {
         this.life[i] -= dt;
@@ -916,6 +971,17 @@
               this.rot[i] = Math.atan2(-vx, vy);
             }
           }
+        } else if (k === K.PLUME) {
+          // (round 120) DARK AND DENSE WHERE IT LEAVES THE HULL, opening into grey-brown haze as it climbs: the puff's
+          // colour walks from its own (soot) toward the haze (`dirx` its brightness) and its cover thins; the fire's
+          // glow (`dirz`) is on it only for its first seconds, while it is still over the flames.
+          np++;
+          var pa = 1 - t, hz = pa < 0.03 ? 0 : Math.min(1, (pa - 0.03) / 0.55), hb = this.dirx[i] || 1;
+          hz = hz * hz * (3 - 2 * hz);
+          cr += (0.36 * hb - cr) * hz; cg += (0.33 * hb - cg) * hz; cb += (0.29 * hb - cb) * hz;
+          a *= Math.min(1, pa * this.maxLife[i] / 0.6) * (1 - 0.42 * hz) * (t < 0.2 ? t / 0.2 : 1);
+          pglow = this.dirz[i] * Math.max(0, 1 - pa / 0.2);
+          sy = sx * (1 + 0.9 * Math.max(0, 1 - pa / 0.3));    // drawn upright and long while it is still rising off the fire
         } else if (k === K.DEBRIS || k === K.GIB) {
           a *= Math.min(1, t * 4);
         }
@@ -925,6 +991,21 @@
         // -- pack ----------------------------------------------------------
         var layer = LAYER[k], B, at;
         if (layer === 3 && !b3) layer = 2;
+        if (k === K.PLUME) {
+          if (b6) {
+            if (n6 >= b6.cap) continue;
+            B = b6; at = n6++;
+            B.pos[at * 3] = this.px[i]; B.pos[at * 3 + 1] = this.py[i]; B.pos[at * 3 + 2] = this.pz[i];
+            B.col[at * 4] = cr; B.col[at * 4 + 1] = cg; B.col[at * 4 + 2] = cb; B.col[at * 4 + 3] = a;
+            B.size[at * 3] = sx; B.size[at * 3 + 1] = sy; B.size[at * 3 + 2] = this.rot[i];
+            // past the sheet's first frames (a knot), and only a little erosion: a column stays a column
+            var pg = 1 - t, per = pg > 0.55 ? (pg - 0.55) / 0.45 : 0;
+            B.uv[at * 2] = Math.min(B.frames - 1.001, (0.25 + pg * 0.75) * (B.frames - 1)); B.uv[at * 2 + 1] = per * per * 0.6;
+            B.gnd[at] = this.gnd[i]; B.ext[at] = pglow;
+            continue;
+          }
+          layer = 1; cellIdx = S.PUFF;     // no simulated sheet: a round puff in the alpha layer
+        }
         if (this.flip[i] || k === K.LICK) {
           // A simulated sheet: the frame walks over the life and blends in the shader.
           if (k === K.LICK) { if (!b5 || n5 >= b5.cap) continue; B = b5; at = n5++; }
@@ -959,10 +1040,13 @@
       // the flipbook layer is additive too, so neither needs this.
       if (n1 > 1 && n1 <= 2400 && camera) this._sortAlpha(b1, n1, camera);
       if (b4 && n4 > 1 && camera) this._sortAlpha(b4, n4, camera);
+      if (b6 && n6 > 1 && camera) this._sortAlpha(b6, n6, camera);
 
       b0.flush(n0); b1.flush(n1); b2.flush(n2); if (b3) b3.flush(n3); if (b4) b4.flush(n4); if (b5) b5.flush(n5);
+      if (b6) { b6.flush(n6); b6.mesh.visible = n6 > 0; }   // (round 120) no column, no draw
+      this.plumeN = np;
       this.stats.live = this.n;
-      this.stats.draws = (n0 > 0) + (n1 > 0) + (n2 > 0) + (n3 > 0) + (n4 > 0) + (n5 > 0);
+      this.stats.draws = (n0 > 0) + (n1 > 0) + (n2 > 0) + (n3 > 0) + (n4 > 0) + (n5 > 0) + (n6 > 0);
     },
 
     _sortAlpha: function (B, n, camera) {
@@ -984,6 +1068,7 @@
       for (i = 0; i < n; i++) { j = view[i]; tmp[i * 2] = B.uv[j * 2]; tmp[i * 2 + 1] = B.uv[j * 2 + 1]; }
       B.uv.set(tmp.subarray(0, n * 2));
       if (B.frames) { for (i = 0; i < n; i++) tmp[i] = B.gnd[view[i]]; B.gnd.set(tmp.subarray(0, n)); }
+      if (B.ext) { for (i = 0; i < n; i++) tmp[i] = B.ext[view[i]]; B.ext.set(tmp.subarray(0, n)); }
       for (i = 0; i < n; i++) { j = view[i]; tmp[i * 4] = B.col[j * 4]; tmp[i * 4 + 1] = B.col[j * 4 + 1]; tmp[i * 4 + 2] = B.col[j * 4 + 2]; tmp[i * 4 + 3] = B.col[j * 4 + 3]; }
       B.col.set(tmp.subarray(0, n * 4));
     },
