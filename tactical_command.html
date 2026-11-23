@@ -34693,6 +34693,40 @@ let MODEL_BUILD_UNIT = null;
   // gets the box as before. The box stays inside as the far LOD and as the
   // model until the file has loaded — a spawn never waits on a parse.
   // =========================================================================
+  /** (round 120, `game.crewSide120`: round 119's crewSide119, redone) THE TOWED GUNS WHOSE SIGHT IS LEFT OF THE
+   *  BREECH, by the scale model's file. The box detachment (`gunDetachment`) kneels its layer at -x, which is the gun's
+   *  RIGHT (the gun faces +z, so its left is +x); the real pieces below, and their Blender scripts (whose -X afv.py's
+   *  MIRROR_X makes the gun's left), put the layer's telescope and handwheels on the LEFT. ON mirrors these guns' men
+   *  across the bore: the layer at his sight, the loader the other side of the breech, the ammunition number behind
+   *  him, the commander off the left trail. Drawing only: the crew figures are never read by the simulation.
+   *  THE EXCEPTIONS keep the box's side: flak38 (one seat on the centre line, its reflector sight right of centre),
+   *  ukbofors (a layer each side), arty155, uslongtom, fr155gpf (heavy pieces laid from both sides: direction left,
+   *  elevation right; their models carry no sight) and the Nebelwerfer (no layer at the piece).
+   *  A SET OF STRINGS, NOT A `{ key: 1 }` TABLE: tools/roster_r115.py copies a row into every `const NAME = {` table
+   *  keyed by an analog unit, and round 119's `uk2pdr: 1,` took one (test_round115: "+201 bytes"). */
+  const CREW_SIGHT_LEFT120 = new Set([
+    'pak40',      // PaK 40: Z.F. 3x8 left of the breech (pak40.py: telescope at lx -0.27, both handwheels)
+    'pak38',      // PaK 38: the telescope at -0.235, the sight port in the shield at -0.25
+    'pak43',      // PaK 43 on its cross mount: the layer's telescope and handwheels left (its model has no sight)
+    'sixpdr',     // 6-pounder: No. 22c telescope at -0.24, both handwheels, on the left
+    'us57mm',     // 57 mm M1: the 6-pounder built in the United States (us57mm.py is sixpdr.py)
+    'zis3',       // ZiS-3: telescope at -0.25, the panorama above it, both handwheels
+    'sov45mm', 'frcanon25', 'frcanon47', 'itcannone47', 'jptype1at', 'us37mm', 'fr75',   // lightgun.py: sight at -0.24
+    'leig18',     // le.IG 18: the panoramic sight's stalk at -0.20, the elevating handwheel at -0.24
+    'flak88',     // 8.8 cm Flak in the ground role: the Z.F. 20 telescope at -0.30 (its layers' wheels both sides)
+    'qf17pdr', 'us3inch', 'qf25pdr',                                              // sight ports at -0.40, -0.36, -0.34
+    'lefh18', 'sig33', 'us105', 'uk55in', 'fr105l36',                             // howitzer.py: sight port at -w * 0.25
+    'uk2pdr',     // 2-pounder: the layer's seat at -0.40
+  ]);
+  const crewMirror120 = file => CREW_SIGHT_LEFT120.has(file) && !!(window.game && window.game.crewSide120);
+  /** A crewman mirrored across the gun's centre line (x -> -x): the reflection of a figure placed at p, turned (rx,
+   *  ry, rz), scaled s is the figure at (-p.x, p.y, p.z), turned (rx, -ry, -rz), scaled (-s, s, s): his pose is
+   *  mirrored with him, so the layer still leans into his eyepiece. three flips the winding of a mirrored mesh itself
+   *  (determinant < 0), and `_mergeCrewFigs` bakes the parts into the FIGURE's frame, so the merge keeps the mirror. */
+  const mirrorCrewFig120 = f => {
+    f.position.x = -f.position.x; f.rotation.y = -f.rotation.y; f.rotation.z = -f.rotation.z; f.scale.x = -f.scale.x;
+    f.userData.crewSide120 = true;
+  };
   const bakedVehicle = (unit, teamC, file, boxBuild) => {
     // the theatre's paint (see `paintVariantFor`): ask for it once; when it
     // lands, every unit on this model is rebuilt in it
@@ -34734,18 +34768,22 @@ let MODEL_BUILD_UNIT = null;
       // 88's pivot is 0.83 u behind its model's origin: the detachment ended
       // up on the muzzle side of the shield.
       const dy = bx.turret.position.y - turret.position.y;
+      const mir = crewMirror120(file);          // (round 120) onto the sight's side
       for (const f of bx.crewFigs) {
         const p = f.position.clone();
         if (f.parent) f.parent.remove(f);
         turret.add(f); f.position.set(p.x, p.y + dy, p.z);
+        if (mir) mirrorCrewFig120(f);
       }
     } else if (bx.crewFigs && bx.crewFigs.length) {
       // A piece with no traversing part (the Nebelwerfer): the detachment hangs
       // off the box's root, which is hidden with the box — move the men out to
       // the unit's group, where they stand exactly where they stood.
+      const mir = crewMirror120(file);          // (round 120) onto the sight's side
       for (const f of bx.crewFigs) {
         if (f.parent !== bx.group) continue;
         bx.group.remove(f); g.add(f);
+        if (mir) mirrorCrewFig120(f);
       }
     }
     // Whose it is, at a glance: a small patch in the team colour on the hull
@@ -76589,6 +76627,7 @@ Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (
 Game.prototype.fpvGround118 = false;
 Game.prototype.bridges120 = false;    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
 Game.prototype.water120 = false;      // (round 120) the water, drawn (assets/water120.js): the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks reflected, foam, wet banks, rain rings. OFF is today's program exactly; ON until main has seen the sheets (.claude/wip120/water)
+Game.prototype.crewSide120 = true;   // ON (main, 23 Nov, from .claude/wip120/crew/sheet1_crew_off_on.jpg). (round 120) GUN CREWS ON THE SIGHT'S SIDE: a towed gun in `CREW_SIGHT_LEFT120` has its detachment mirrored across the bore (`mirrorCrewFig120`), the layer at the telescope left of the breech. Drawing only (seeded battles identical); read when a gun's model is built. OFF until main has seen .claude/wip120/crew
 Game.prototype.water119 = true;       // (round 119) the water's swell in the vertex shader, not 2 sines a vertex on the CPU (Terrain.ambient). ON: Terrain.ambient 2.0-3.3 ms -> 0 (Argenta Gap, Purple Heart Lane, A/B with a null arm), the same picture (0 mean abs, 1-10 px differ by 0.33/255 vs a null's 0-12)
 Game.prototype.coverAuto119 = true;   // (round 119, COHESION) ON: a man of the player's side on Auto halted by the close-up's "ahead" rule takes cover near him on an AI leg (`_coh119Cover`), not `orderTakeCover` (whose `orderMove` sets `explicit`: off the autopilot until he arrives). Player on Auto, 6 seeds x 1800 s a map, off/null/on: his men off the autopilot Ortona 1.7-11.4% -> 0-0.7%, Village 0.5-2.6% -> 0-0.5%; Ortona adrift 14.0 -> 6.4%, fire 216 -> 620 rounds; nothing worse beyond the floor (handoff, round 119 coverAuto119). `= false` is the old line
 Game.prototype.cohChase119 = false;   // (round 119, COHESION) a chase closes no further than 25 m from a mate (`_coh119Clamp`); OFF: session 1 suspected it of Ortona's attacker fire 350 -> 153
