@@ -76572,7 +76572,9 @@ Game.prototype.fxPool118 = true;      // ON: no worse on Ponyri x13 and Hedgerow
 Game.prototype.shadowSet119 = true;    // ON: no worse at any camera on Village or Ortona, Village's zoom limit -1.1 ms (handoff, round 119 Village's frame)
 // (round 120) TREES BY SPECIES: branches and leaf cards, three LODs, impostors (assets/trees120.js). OFF: the
 // trees of round 113 exactly. Read at map load (`Obstacles.add`) and at the batcher's bake.
-Game.prototype.trees120 = false;
+// ON (main, 23 Nov 2026, from .claude/wip120/trees/sheet1_village_off_on.jpg and sheet3_*): Village's playing camera
+// -10 ms, zoom limit about half; first person facing open country +1.4 ms; seeded battles identical.
+Game.prototype.trees120 = true;
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 // (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —

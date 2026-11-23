@@ -376,7 +376,8 @@
         var r = rads[k2], ao = aos[k2], y = pts[k2][1];
         var flare = 1;
         if (lvl === 0 && !palm) flare = k2 === 0 ? 1.55 : k2 === 1 ? 1.32 : k2 === 2 ? 1.14 : k2 === 3 ? 1.04 : 1;
-        var tb = Math.max(0, Math.min(1, (y / top - 0.40) / 0.25));
+        // (TREES-2) the Scots pine's orange upper bole from a quarter of its height (only the pine has a barkTop)
+        var tb = Math.max(0, Math.min(1, (y / top - 0.26) / 0.22));
         var bc = [bark[0] + (barkTop[0] - bark[0]) * tb, bark[1] + (barkTop[1] - bark[1]) * tb, bark[2] + (barkTop[2] - bark[2]) * tb];
         for (var j = 0; j < S; j++) {
           var th = j / S * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
