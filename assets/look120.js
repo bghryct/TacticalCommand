@@ -44,6 +44,25 @@
  *                  person, where every material tones its own fragments and so
  *                  pays for the foliage overdraw (section 3).
  *
+ *   game.sky120    THE SUN IN THE HAZE (LOOK-4; needs haze120, a no-op without it):
+ *                  - a broad halo round the sun in the haze's OWN sunward colour,
+ *                    the same term on the dome and on the far haze (fog_vertex,
+ *                    uHz120e.yz), so the horizon band meets the haze with no seam;
+ *                  - a tight glow and the disc drawn AFTER the haze, so a low sun
+ *                    shines through the band (sky117's disc sat under it and a
+ *                    dusk sun vanished into a flat cream band), warmer and softer
+ *                    the more haze it shines through;
+ *                  - cloud light by the sun's angle: the sun-facing side of a
+ *                    mass lit and the far side shaded, thin edges bright toward
+ *                    the sun, the thick middle darker, a low sun lighting the
+ *                    bases from below, under a deck the thin cloud toward the sun
+ *                    glowing;
+ *                  - every strength scales with the sun's height, the cover and
+ *                    the night (dusk and night follow the same rules: no halo or
+ *                    disc once the sun is down, the halo ~0.1 and the rims dimmed
+ *                    under a deck).
+ *                  Sky pixels and a few vertex ops; uniforms (Look120.skyCfg).
+ *
  * HOW THE SWITCHES REACH EVERY PROGRAM (and why OFF is the old drawing exactly)
  *   three r128 keys a program on its parameters; editing a ShaderChunk at run
  *   time reaches nothing that already compiled (the four-identical-frames trap).
@@ -69,7 +88,7 @@
 (function (root) {
   'use strict';
   var THREE = root.THREE;
-  var L = root.Look120 = { ok: false, gradeOk: false, reason: '', gradeReason: '', version: 3 };
+  var L = root.Look120 = { ok: false, gradeOk: false, reason: '', gradeReason: '', version: 4 };
 
   // Tunables (probe knobs; the defaults are the ones the LOOK-2 sheets were taken at).
   L.cfg = {
@@ -105,6 +124,20 @@
   // beige, and s9's (hi 0.30) still creamed it.
   // `fold` 3 (LOOK-3): the cheaper exact rewrite; 2: LOOK-2's text (the A/B arm). Read when the copy is made.
   L.gradeCfg = { pivot: 0.18, lo: -0.16, hi: 0.20, split: [0.70, 0.15, -0.70], fold: 3 };
+  // sky120 (LOOK-4): the sun in the haze and the light on the cloud. Uniforms: retune live, no recompile.
+  L.skyCfg = {
+    halo: 0.55,     // the broad halo's strength in the haze colour (dome AND far haze): mix(away, sun, lobe + halo h)
+    haloK: 24,      // its tightness: h = (1 / (1 + haloK (1 - mu)))^2 (half at ~11 degrees)
+    aureole: 0.45,  // the haze's own sunward colour pulled over the sky ABOVE the band near the sun (a milky aureole; it
+                    // fades into the band, where the dome is already the haze: no seam)
+    glow: 0.75,     // the tight glow round the disc, toward the haze's sunward hue at full brightness (dome only)
+    glowK: 170,     // its tightness (half at ~4.5 degrees)
+    disc: 0.9,      // the disc drawn after the haze: through a thick band it is warmer and half as bright, never gone
+    rim: 0.5,       // cloud: the sun-facing side of a mass lit, the far side shaded (x(1 +- rim)); thin edges bright toward the sun
+    base: 0.35,     // cloud: the thick middle of a mass darker (its own shadow), most overhead
+    under: 0.55,    // cloud: a low sun (0-12 degrees) lights the bases from below
+    deckGlow: 0.35  // under a deck: the thinner cloud toward the sun glows (the sun behind it)
+  };
 
   // ---------------------------------------------------------------- 1. the shared haze uniform
   // ONE Float32Array; FIVE vec4 uniforms, each a VIEW into it, put into every built-in ShaderLib's uniforms. three's
@@ -115,7 +148,7 @@
   //   b [4]  haze colour toward the sun rgb, aerial coefficient
   //   c [8]  haze colour away from the sun rgb, fmax
   //   d [12] near zone, 1 / layer, lobe, haze floor y
-  //   e [16] unit share, 0, 0, 0
+  //   e [16] unit share, sky120's halo strength (0 OFF), its tightness, 0
   var HZ = L.hz = new Float32Array(20);
   var HZV = L.hzv = [HZ.subarray(0, 4), HZ.subarray(4, 8), HZ.subarray(8, 12), HZ.subarray(12, 16), HZ.subarray(16, 20)];
   var NEXT = new Float32Array(20);
@@ -158,7 +191,10 @@
       '\t\tfloat hzF = 1.0 - exp( - hzT * hzT ) * ( 1.0 - uHz120c.w * ( 1.0 - exp( - hzA ) ) );',
       '\t\tfloat hzMu = dot( hzV, uHz120a.xyz ) / max( hzR, 1e-4 );',
       '\t\tfloat hzW = 1.0 / ( 1.0 + uHz120d.z * ( 1.0 - hzMu ) );',
-      '\t\tvHaze120 = vec2( hzF, hzW * hzW );',
+      // (LOOK-4, sky120) the sun's broad halo in the haze, the dome's own term (uHz120e.y is 0 with sky120 OFF: the
+      // old colour exactly); a weight past 1 carries the colour further from `away` toward and past `sun`: brighter, warmer
+      '\t\tfloat hzS = 1.0 / ( 1.0 + uHz120e.z * ( 1.0 - hzMu ) );',
+      '\t\tvHaze120 = vec2( hzF, hzW * hzW + uHz120e.y * hzS * hzS );',
       '\t}',
       '#endif', ''].join('\n');
     C.fog_pars_fragment = C.fog_pars_fragment + [''].concat(
@@ -356,7 +392,43 @@
         '  c = mix(c, hzC, max(max(uHaze.y, uHz120K.z), 1.0 - smoothstep(0.0, uHaze.x * uHz120K.y, y))); }'].join('\n'));
     L.domeOk = true;
   }
-  function setDome(g, on) {
+  // (LOOK-4) sky120: the same horizon swap, plus the sun IN the haze and the light on the cloud. A second compile hook (its
+  // own program key: three keys a ShaderMaterial on its hook's text), so haze120's dome program is untouched.
+  var CLOUD_LINE = 'col = mix(col, cl, a * ap);';
+  function domeSky(sh) {
+    var fs = sh.fragmentShader;
+    if (fs.indexOf(DOME_LINE) < 0 || fs.indexOf(CLOUD_LINE) < 0) { L.skyReason = 'the dome horizon or cloud line moved'; domeBefore(sh); return; }
+    sh.fragmentShader = fs
+      .replace('uniform vec3 uFog;', 'uniform vec3 uFog;\nuniform vec3 uHz120Sun;\nuniform vec3 uHz120Away;\nuniform vec3 uHz120Dir;\nuniform vec3 uHz120K;\nuniform vec4 uSky120a;\nuniform vec4 uSky120b;\nuniform vec4 uSky120c;')
+      .replace(CLOUD_LINE, [
+        '{ // (sky120) cloud light by the sun\'s angle: the sun-facing side of a mass lit and the far side shaded, the thick',
+        '  // middle darker (its own shadow, most overhead), thin edges bright toward the sun, a low sun under the bases, and',
+        '  // under a deck the thinner cloud toward the sun glowing',
+        '  float skF = 1.0 / (1.0 + 4.0 * (1.0 - mu)); skF *= skF;',
+        '  float skL = clamp((n - n2) * 4.0, -0.5, 0.6);',
+        '  float skT = smoothstep(uCloud.x, uCloud.x + uCloud.y + 0.3, n);',
+        '  cl *= (1.0 + uSky120b.y * skL) * (1.0 - uSky120b.z * skT * (0.5 + 0.5 * y));',
+        '  cl += uSunCol * (uSky120b.y * (1.0 - skT) * skF * 1.3 + uSky120b.x * skT * (1.0 - y)) + uAmb * (uSky120c.y * skF * (1.0 - 0.7 * skT)); }',
+        CLOUD_LINE].join('\n'))
+      .replace(DOME_LINE, [
+        '{ float hzMu = dot(d, uHz120Dir), hzS1 = 1.0 - hzMu;',
+        '  float hzW = 1.0 / (1.0 + uHz120K.x * hzS1); hzW *= hzW;',
+        '  float skH = 1.0 / (1.0 + uSky120a.y * hzS1); skH *= skH;',          // the broad halo: the far haze's own term
+        '  vec3 hzC = mix(uHz120Away, uHz120Sun, hzW + uSky120a.x * skH);',
+        '  float hzM = max(max(uHaze.y, uHz120K.z), 1.0 - smoothstep(0.0, uHaze.x * uHz120K.y, y));',
+        '  c = mix(c, hzC, hzM);',
+        // the aureole: the haze's own colour (halo and all) over the sky near the sun ABOVE the band; 0 in the band (no seam)
+        '  c = mix(c, hzC, uSky120c.x * skH * (1.0 - hzM));',
+        // the sun in the haze: a tight glow toward the haze's sunward hue at full brightness, stronger through more haze
+        '  float skG = 1.0 / (1.0 + uSky120b.w * hzS1); skG *= skG;',
+        '  vec3 skHue = mix(vec3(1.0), uHz120Sun / max(max(uHz120Sun.r, uHz120Sun.g), max(uHz120Sun.b, 0.05)), 0.7);',
+        '  c = mix(c, skHue, clamp(uSky120a.z * skG * (0.45 + 0.55 * hzM) * (1.0 - 0.75 * a), 0.0, 1.0));',
+        // the disc after the haze: never gone, warmer and half as bright through a thick band
+        '  float skD = smoothstep(0.99985, 0.99996, hzMu);',
+        '  c += mix(vec3(1.0, 0.97, 0.9), skHue, hzM) * (skD * uSky120a.w * (1.0 - 0.5 * hzM) * (1.0 - a)); }'].join('\n'));
+    L.skyOk = true;
+  }
+  function setDome(g, on, sky) {
     var dome = g.skyNew, m = dome && dome.mat;
     if (!m) return;
     if (!m.uniforms.uHz120Sun) {
@@ -365,11 +437,18 @@
       m.uniforms.uHz120Dir = { value: new THREE.Vector3(0, 1, 0) };
       m.uniforms.uHz120K = { value: new THREE.Vector3(1.0, 1.8, 0) };
     }
-    var want = !!on;
-    if (!!m._hz120 === want) return;
-    m._hz120 = want;
-    if (want) { m._hz120Prev = m.onBeforeCompile; m.onBeforeCompile = domeBefore; }
-    else { m.onBeforeCompile = m._hz120Prev || THREE.ShaderMaterial.prototype.onBeforeCompile; }
+    if (!m.uniforms.uSky120a && THREE.Vector4) {
+      m.uniforms.uSky120a = { value: new THREE.Vector4(0, 0, 0, 0) };
+      m.uniforms.uSky120b = { value: new THREE.Vector4(0, 0, 0, 0) };
+      m.uniforms.uSky120c = { value: new THREE.Vector4(0, 0, 0, 0) };
+    }
+    var want = on ? (sky && m.uniforms.uSky120a ? 2 : 1) : 0, cur = m._hz120 === true ? 1 : (m._hz120 | 0);
+    if (cur === want) return;
+    if (!cur) m._hz120Prev = m.onBeforeCompile;
+    m._hz120 = want === 1 ? true : want;
+    if (want === 1) m.onBeforeCompile = domeBefore;
+    else if (want === 2) m.onBeforeCompile = domeSky;
+    else { m._hz120 = false; m.onBeforeCompile = m._hz120Prev || THREE.ShaderMaterial.prototype.onBeforeCompile; }
     m.needsUpdate = true;
   }
 
@@ -466,7 +545,7 @@
     }
     // ---- haze120
     var on = g.haze120 === true && L.ok;
-    if (!on) { hazeOff(g); setDome(g, false); HZ[3] = 0; NEXT[3] = 0; return; }
+    if (!on) { hazeOff(g); setDome(g, false); HZ[3] = 0; NEXT[3] = 0; HZ[17] = 0; NEXT[17] = 0; return; }
     var f = hazeOn(g);
     if (!f) return;
     var c = L.cfg, k;
@@ -513,7 +592,9 @@
     NEXT[7] = c.aerial * wxK * (c.nightAerial + (1 - c.nightAerial) * (day == null ? 1 : day));
     NEXT[11] = c.fmax;
     NEXT[12] = nearOf(g, c); NEXT[13] = 1 / Math.max(1, c.layer); NEXT[14] = c.lobe; NEXT[15] = floorOf(g);
-    NEXT[16] = c.unitShare; NEXT[17] = 0; NEXT[18] = 0; NEXT[19] = 0;
+    // sky120 (LOOK-4): the broad halo, only while the sun is up and the sky clear enough to show it (S)
+    var sky = g.sky120 === true, K = L.skyCfg;
+    NEXT[16] = c.unitShare; NEXT[17] = sky ? K.halo * S : 0; NEXT[18] = sky ? K.haloK : 0; NEXT[19] = 0;
     // a group is written only when it has moved past a step (or a knob changed): the sun creeps every frame
     for (var q = 0; q < 20; q += 4) {
       var mv = 0;
@@ -522,12 +603,22 @@
     }
     L._Q = Q;
     // the dome's horizon in the same colours, its band wider and a veil over it on a clear day
-    setDome(g, true);
+    setDome(g, true, sky);
     var u = g.skyNew && g.skyNew.mat && g.skyNew.mat.uniforms;
     if (u && u.uHz120Sun) {
       u.uHz120Sun.value.set(HZ[4], HZ[5], HZ[6]); u.uHz120Away.value.set(HZ[8], HZ[9], HZ[10]);
       u.uHz120Dir.value.set(sx, sy, sz);
       u.uHz120K.value.set(c.lobe, 1.3 + (c.band - 1.3) * Q, c.veil * Q);
+    }
+    if (u && u.uSky120a) {
+      // the disc while it is above the horizon (the dome also shows UNDER the map at the zoom limit); a low sun (0-12
+      // degrees) under the cloud; the rims as clear as the sky
+      var up = sstep(-0.5, 1, elDeg) * (1 - nt), low = sstep(-3, 0.5, elDeg) * (1 - sstep(3, 12, elDeg)) * (1 - 0.7 * covK);
+      if (sky) {
+        u.uSky120a.value.set(HZ[17], HZ[18], K.glow * S, K.disc * up);
+        u.uSky120b.value.set(K.under * low, K.rim * (1 - 0.6 * covK), K.base * (1 - 0.75 * covK), K.glowK);
+        u.uSky120c.value.set(K.aureole * S, K.deckGlow * covK * sstep(-2, 8, elDeg) * (1 - nt), 0, 0);
+      } else { u.uSky120a.value.set(0, 0, 0, 0); u.uSky120b.value.set(0, 0, 0, 0); u.uSky120c.value.set(0, 0, 0, 0); }
     }
   };
 
@@ -543,6 +634,7 @@
     var H = Math.exp(-HZ[13] * Math.max(cy + 0.5 * vy - HZ[15], 0));
     var a = HZ[7] * Math.max(dist - HZ[12], 0) * H * (unit ? HZ[16] : 1);
     var mu = (dx * HZ[0] + dy * HZ[1] + dz * HZ[2]) / len, w = 1 / (1 + HZ[14] * (1 - mu)); w *= w;
+    var hs = 1 / (1 + HZ[18] * (1 - mu)); w += HZ[17] * hs * hs;   // sky120's halo (0 OFF)
     return [HZ[8] + (HZ[4] - HZ[8]) * w, HZ[9] + (HZ[5] - HZ[9]) * w, HZ[10] + (HZ[6] - HZ[10]) * w,
       1 - Math.exp(-t * t) * (1 - HZ[11] * (1 - Math.exp(-a)))];
   };
@@ -551,7 +643,7 @@
     g = g || root.game;
     var f = g && g.scene && g.scene.fog;
     return { ok: L.ok, reason: L.reason, gradeOk: L.gradeOk, gradeReason: L.gradeReason, gradeFolded: !!L.gradeFolded, gradeOps: L.gradeOps || '', libs: L.libs,
-      unitsOk: !!L.unitsOk, domeOk: !!L.domeOk, haze: !!(f && f.isHaze120), toneMapping: g && g.renderer ? g.renderer.toneMapping : null,
+      unitsOk: !!L.unitsOk, domeOk: !!L.domeOk, skyOk: !!L.skyOk, skyReason: L.skyReason || '', haze: !!(f && f.isHaze120), toneMapping: g && g.renderer ? g.renderer.toneMapping : null,
       theatre: L._th ? { kind: L._th.kind, snow: L._th.snow, sand: L._th.sand, dry: L._th.dry, era: L._th.era } : null, Q: L._Q,
       hz: Array.prototype.slice.call(HZ).map(function (x) { return +x.toFixed(5); }) };
   };

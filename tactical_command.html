@@ -19926,7 +19926,10 @@ class Terrain {
         // (round 120, EFFECTS-3) …and on a bright field (sand, chalk) a soot stain, not a black hole: every cap x the
         // field's key against the reference (0.5 at the brightest)
         const gk120 = Math.min(1, Math.max(0.5, Math.pow(GROUND_KEY_REF / Math.max(GROUND_KEY_REF, this.groundKey || GROUND_KEY_REF), 0.9)));
-        const cap = (dx && dz ? 0.18 : dx || dz ? 0.35 : 1) * gk120;
+        // (round 120, EFFECTS-4) …and under a brewed-up wreck the char DECAL is the scorch (`_wreckLitter120` marks
+        // its cells): the ground there takes only a trace, so the field shows between the decal's blotches. The 3 x 3
+        // stamp of the wreck's own ground fire was the near-uniform dark cone of sheet5_6 (main, 08:39).
+        const cap = (dx && dz ? 0.18 : dx || dz ? 0.35 : 1) * gk120 * (this._wreck120 && this._wreck120[this.idx(x + dx, z + dz)] ? SCORCH120.under : 1);
         if (!inGrid(x + dx, z + dz) || this.scorch[this.idx(x + dx, z + dz)] >= cap) continue;
         this.addScorch(x + dx, z + dz, Math.min(cap - this.scorch[this.idx(x + dx, z + dz)], amt * (dx && dz ? 0.1 : dx || dz ? 0.25 : 1)));
       } }
@@ -20112,6 +20115,9 @@ class Terrain {
     const ga = this.mesh.geometry.attributes;
     const sp = anyC && ga.splatA && ga.splatE && window.GroundSplat ? [ga.splatA.array, ga.splatB.array, ga.splatC.array, ga.splatD.array, ga.splatE.array] : null;
     const lay = sp ? TYPE_DEF.map(t => window.GroundSplat.layerOfType(t.name)) : null;
+    // (round 120, BRIDGES-5) THE DRAWN SURFACE: the colour and the splat read `TY`, which is the sim's `type` except where
+    // `_drawOv120` paints a cell as another surface (`_drawTypes120`). The battle never reads it (bridgeBank120's turf).
+    const TY = this._drawOv120 ? this._drawTypes120() : this.type;
     // Only walk what changed: the tiles (a shell crater is a few, not 50k cells).
     for (let k = 0; k < boxes.length; k += 5) {
       const X0 = boxes[k], Z0 = boxes[k + 1], X1 = boxes[k + 2], Z1 = boxes[k + 3];
@@ -20120,17 +20126,17 @@ class Terrain {
         const i = this.idx(x, z);
         if (doH) { const dh = this._drawH120; pos.setY(i, (dh && dh[i] === dh[i] ? dh[i] : this.h[i]) * HSCALE); }   // (round 120) the bed under a bridge
         if (doC) {
-          c.copy(typeCol(this.type[i]));
+          c.copy(typeCol(TY[i]));
           // Soft transitions between terrain types (blend with 4-neighbours)
           if (x > 0 && x < GRID - 1 && z > 0 && z < GRID - 1) {
             mix.setRGB(0, 0, 0)
-              .add(typeCol(this.type[i - 1])).add(typeCol(this.type[i + 1]))
-              .add(typeCol(this.type[i - GRID])).add(typeCol(this.type[i + GRID]))
+              .add(typeCol(TY[i - 1])).add(typeCol(TY[i + 1]))
+              .add(typeCol(TY[i - GRID])).add(typeCol(TY[i + GRID]))
               .multiplyScalar(0.25);
             c.lerp(mix, 0.3);
           }
           // Broad patchiness drifts — per surface, for richer, less-flat ground
-          const p = this.patch[i], ty = this.type[i];
+          const p = this.patch[i], ty = TY[i];
           if (ty === TYPE.grass) c.lerp(mix.setHex(0x707c36), p * 0.4);
           else if (ty === TYPE.crops) c.lerp(mix.setHex(p > 0.5 ? 0xb4ac4a : 0x76702c), Math.abs(p - 0.5) * 0.8);   // golden wheat sway
           else if (ty === TYPE.forest) c.lerp(mix.setHex(p > 0.5 ? 0x243f1e : 0x3f5c30), Math.abs(p - 0.5) * 0.6);  // canopy clumps
@@ -20202,7 +20208,7 @@ class Terrain {
           // earth, and the darks are most of what separates it from a render.
           c.multiplyScalar(TERRAIN_ALBEDO);
           col.setXYZ(i, c.r, c.g, c.b);
-          if (sp) this._splatCell(i, x, z, sl, sp, lay);
+          if (sp) this._splatCell(i, x, z, sl, sp, lay, TY);
         }
       }
       if (doH) this._bakeNormals(X0, Z0, X1, Z1);   // analytic heightfield normals over the box
@@ -20242,7 +20248,7 @@ class Terrain {
    *  which is what stops one tile of it repeating across a field. Steep faces
    *  go to rock, wheel ruts and scorched ground to turned earth — the same
    *  three things the colour above darkens, now with the right texture. */
-  _splatCell(i, x, z, sl, sp, lay) {
+  _splatCell(i, x, z, sl, sp, lay, TY) {
     const NL = 20;
     const w = this._splatW || (this._splatW = new Float32Array(NL));
     w.fill(0);
@@ -20257,7 +20263,7 @@ class Terrain {
     // and heath mix in a second (rank grass, rushes and water, bare peat).
     const n1 = vnoise(x * 0.045 + 3.1, z * 0.045 - 7.7), n2 = vnoise(x * 0.027 - 11.3, z * 0.027 + 5.9);
     const n3 = vnoise(x * 0.11 + 17.7, z * 0.11 - 4.2);   // a finer one (~9 cells) for the painted kinds below
-    const T = this.type, vary = this.vary113 !== false;   // `terrain.vary113 = false`: one texture a surface, as before
+    const T = TY || this.type, vary = this.vary113 !== false;   // (round 120, BRIDGES-5) the drawn surface   // `terrain.vary113 = false`: one texture a surface, as before
     const add = (ty, k) => {
       const L = lay[ty] === undefined ? 1 : lay[ty];
       if (!vary) { if (L === 0) { w[0] += k * (1 - g2); w[11] += k * g2; } else w[L] += k; }
@@ -20297,6 +20303,19 @@ class Terrain {
     move(1, this.scorch[i] * 0.6);
     const o = i * 4;
     for (let a = 0; a < 5; a++) for (let j = 0; j < 4; j++) sp[a][o + j] = (Math.min(1, w[a * 4 + j]) * 255 + 0.5) | 0;
+  }
+
+  /** (round 120, BRIDGES-5) THE SURFACE AS DRAWN: a copy of the sim's `type` with `_drawOv120` laid over it — `{ idx, was,
+   *  to }`, a cell drawn as `to` while its sim type is still `was` (a crater that floods it, or the editor, wins). Only
+   *  the colour bake and `_splatCell` read it; the foliage is sown from the sim's type, because the battle reads what
+   *  grows (`coverAt`, `concealAt`, `flammableAt`). Set by `Bridges120._bankGrass`, cleared by `Bridges120.clear`. */
+  _drawTypes120() {
+    const o = this._drawOv120, ty = this.type;
+    let D = this._drawTy120;
+    if (!D || D.length !== ty.length) D = this._drawTy120 = new Uint8Array(ty.length);
+    D.set(ty);
+    for (let k = 0; k < o.idx.length; k++) { const i = o.idx[k]; if (ty[i] === o.was[k]) D[i] = o.to[k]; }
+    return D;
   }
 
   /** Heightfield normals straight from the neighbouring heights — exact for a
@@ -29006,6 +29025,13 @@ const SMK120 = { rate: 1.5, base: 0.45, drag: 0.05, full: 90, near: 110, far: 24
 // with about half the drawn area; denser each, so the column is not thinner.
 Object.assign(SMK120, { aloft: 0.25, aloftV: 1.65, aloftS: 6.0, aloftG: 0.17, aloftL: 36, aloftTall: 2.4, aloftA: 0.93 });
 const WRK120 = { full: 70, end: 200, reach: 240, every: 0.1, flame: 0.8 };
+// (round 120, EFFECTS-4, `debris120`) THE CHAR UNDER A WRECK: the decal laid along the hull, `along` hull lengths by
+// `across` hull widths (its core is the hull's footprint); the ground under it scorched to at most `under` (the decal
+// carries the shape); `n` litter pieces (min, spread) at `big` x their size, so the pieces read at the playing camera.
+const SCORCH120 = { under: 0.12, along: 2.2, across: 4.2, n: [20, 8], big: 2.0 };
+// (round 120, EFFECTS-4, `game.hulkFar120`) where a hulk's rust-and-ash mottle starts to fade toward its mean tone (u;
+// gone by 1.6x): from far off the mottle read as camouflage (main, 08:39). assets/unitshade.js `uUsLt.w`.
+const HULK_FAR120 = 50;
 const CHAR120 = new THREE.Color(0.16, 0.105, 0.075);
 // (round 120, EFFECTS-2) THE HULK'S SHARE OF THE UNIT SHADER'S FILL (assets/unitshade.js `uUsLive`). All of it drew a
 // charred hulk pale blue-white; none drew a black cut-out with no form (main, sheet6b); 0.35 keeps the bounce's sky-
@@ -37421,6 +37447,14 @@ class Unit {
       // every step by the switch, stood at the bank for 873 s (stuck4.js, Arnhem seed 23); 40 reaches a bank on every bridged river
       const dry120 = this.game.pathfinder.nearestPassable(worldToCell(fdx), worldToCell(fdz), this.game.bridgeWet120 === true ? 40 : 10);
       if (dry120) { fdx = cellCenter(dry120.x); fdz = cellCenter(dry120.z); }
+      // (BRIDGES-5, `game.bridgeWet120`) …AND WHERE THAT DRY GROUND IS UNDER HIM, HE IS THERE. On a deck the nearest dry
+      // ground to a goal in the river beside it is the deck under the hull, often its own cell: routed to that cell's centre
+      // on every re-plan, two armoured cars side by side on Arnhem's deck could never come within the 0.3 u arrival radius
+      // and stood 210 s each (seed 47, jam5.js). Its own cell or a neighbour: no route, as far as the river lets it go.
+      if (dry120 && this.game.bridgeWet120 === true && Math.abs(dry120.x - worldToCell(this.pos.x)) <= 1 && Math.abs(dry120.z - worldToCell(this.pos.z)) <= 1) {
+        this.path = []; this.pathIdx = 0; this._pathPartial = false; this._wetHere120 = (this._wetHere120 || 0) + 1;
+        return;
+      }
     }
     if (this.def.vehicle && this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any) this.game.pathfinder._wclsNext120 = window.Bridges120.clsOf(this.def, this.type);   // (round 120)
     // (round 120, `game.bridgeWet120`, BRIDGES-4) …AND IT DOES NOT PLAN TO WADE EITHER. Its goals in the water are moved
@@ -68573,45 +68607,107 @@ class Game {
    *  draws for every wreck on the field, built on first use (cosmetic stream). Nothing reads them. */
   _fxKit120() {
     if (this._kit120) return this._kit120;
-    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const cv = document.createElement('canvas'); cv.width = cv.height = 256;
     const x = cv.getContext('2d');
     let seed = 4410;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    // (round 120, EFFECTS-4) BLOTCHES AND STREAKS WITH THE GROUND BETWEEN THEM. The painted gradients below still
+    // summed to a soft dark cone (sheet5_6, with the terrain's 3 x 3 stamp under it). Per pixel now: a core the
+    // hull's footprint (the decal's v is the hull's length), char blotches where a value noise clears a threshold
+    // that rises toward the rim (solid under the hull, islands at the edge, nothing past it), streaks thrown out from
+    // the hull and broken by the noise, soot specks, and ash flecks on the char. Laid along the hull by
+    // `_wreckLitter120`; the terrain under it keeps a trace (`Terrain.addScorch`, `SCORCH120.under`).
+    if (cv.width === 256) {
+      const N = 256, img = x.createImageData(N, N), Dd = img.data, LT = new Float32Array(64 * 64);
+      for (let i = 0; i < LT.length; i++) LT[i] = rnd();
+      const vn = (px, py) => { const ix = Math.floor(px), iy = Math.floor(py), fx = px - ix, fy = py - iy;
+        const a = LT[(iy & 63) * 64 + (ix & 63)], b = LT[(iy & 63) * 64 + ((ix + 1) & 63)], c = LT[((iy + 1) & 63) * 64 + (ix & 63)], d = LT[((iy + 1) & 63) * 64 + ((ix + 1) & 63)];
+        const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+        return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy; };
+      const fbm = (px, py) => 0.5 * vn(px, py) + 0.3 * vn(px * 2.03 + 17.3, py * 2.03 + 5.1) + 0.2 * vn(px * 4.1 + 3.7, py * 4.1 + 29.9);
+      const SK = []; for (let k = 0; k < 9; k++) SK.push({ a: rnd() * 6.283, l: 0.3 + rnd() * 0.45, w: 0.035 + rnd() * 0.05, o: rnd() * 40 });
+      const ss = (e0, e1, v) => { const t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+      for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+        const u = (px + 0.5) / N * 2 - 1, v = (py + 0.5) / N * 2 - 1, r = Math.sqrt(u * u + v * v);
+        const n1 = fbm(u * 4.2 + 11, v * 4.2 + 7), n2 = vn(u * 14 + 40, v * 14 + 3), n3 = vn(u * 30 + 9, v * 30 + 51), n4 = vn(u * 22 + 70, v * 22 + 13);
+        // the core: the hull's footprint (u across, v along), its edge torn by the noise
+        const e = Math.sqrt((u / 0.3) * (u / 0.3) + (v / 0.5) * (v / 0.5)) + 0.55 * (n1 - 0.5);
+        const core = 1 - ss(0.72, 1.08, e);
+        // blotches: a threshold that rises toward the rim, so the char breaks up into islands and stops
+        const th = 0.38 + 0.36 * ss(0.3, 0.95, r);
+        const blot = ss(th - 0.035, th + 0.05, n1) * (1 - ss(0.82, 0.98, r));
+        // streaks thrown out from the hull, tapering, broken
+        let st = 0;
+        const th2 = Math.atan2(v, u);
+        for (const s of SK) {
+          let da = th2 - s.a; da -= Math.round(da / 6.283) * 6.283;
+          const along = r * Math.cos(da), perp = Math.abs(r * Math.sin(da)), r0 = 0.42, t = (along - r0) / s.l;
+          if (t < -0.15 || t > 1) continue;
+          const w = s.w * (1 - 0.65 * Math.max(0, t));
+          st = Math.max(st, (1 - ss(w * 0.4, w, perp)) * (1 - ss(0.55, 1, t)) * ss(-0.15, 0.05, t) * ss(0.3, 0.55, vn(along * 9 + s.o, s.o)));
+        }
+        // soot specks out to the rim; ash flecks on the char
+        const speck = ss(0.8, 0.88, n4) * ss(0.35, 0.6, r) * (1 - ss(0.9, 1.0, r)) * 0.8;
+        let a = 1 - (1 - core * 0.9) * (1 - blot * (0.78 - 0.3 * r)) * (1 - st * 0.62) * (1 - speck * 0.55);
+        a *= 0.82 + 0.18 * n2;
+        const rim = ss(0.25, 0.85, r), ash = ss(0.7, 0.8, n3) * ss(0.4, 0.8, core + blot) * 0.35;   // small pale flecks, not a pattern
+        let cr = 18 + 26 * rim, cg = 15 + 19 * rim, cb = 13 + 12 * rim;
+        cr += (118 - cr) * ash; cg += (112 - cg) * ash; cb += (104 - cb) * ash;
+        const o = (py * N + px) * 4;
+        Dd[o] = cr; Dd[o + 1] = cg; Dd[o + 2] = cb; Dd[o + 3] = Math.max(0, Math.min(255, a * 255));
+      }
+      x.putImageData(img, 0, 0);
+    }
     // (EFFECTS-2) NOT A DISC: a burnt patch is blotches, streaks thrown out from the hull, scattered scorch and a pale
     // rim of ash and scorched grass (main, sheet4: the first one read as a uniform black disc)
     const blot = (cx, cy, r, c0, c1) => { const gr = x.createRadialGradient(cx, cy, 0, cx, cy, r);
       gr.addColorStop(0, c0); gr.addColorStop(1, c1); x.fillStyle = gr; x.beginPath(); x.arc(cx, cy, r, 0, 6.283); x.fill(); };
-    for (let k = 0; k < 14; k++) {            // the rim: ash and singed grass, paler than the char
+    if (cv.width === 128) for (let k = 0; k < 14; k++) {            // the rim: ash and singed grass, paler than the char
       const a = k / 14 * 6.283 + rnd() * 0.4, d = 40 + rnd() * 14;
       blot(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 8 + rnd() * 9, 'rgba(118,104,84,0.32)', 'rgba(118,104,84,0)');
     }
-    for (let k = 0; k < 7; k++) {             // blotches of char, uneven, none of them a ring
+    if (cv.width === 128) for (let k = 0; k < 7; k++) {             // blotches of char, uneven, none of them a ring
       const a = rnd() * 6.283, d = 6 + rnd() * 26;
       blot(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 9 + rnd() * 13, 'rgba(26,22,18,' + (0.45 + rnd() * 0.25).toFixed(2) + ')', 'rgba(40,33,26,0)');
     }
-    for (let k = 0; k < 11; k++) {            // streaks thrown out from the hull
+    if (cv.width === 128) for (let k = 0; k < 11; k++) {            // streaks thrown out from the hull
       const a = rnd() * 6.283, l = 18 + rnd() * 34, w = 2 + rnd() * 4;
       x.save(); x.translate(64, 64); x.rotate(a);
       const gl = x.createLinearGradient(6, 0, 6 + l, 0);
       gl.addColorStop(0, 'rgba(22,19,16,0.55)'); gl.addColorStop(1, 'rgba(30,26,21,0)');
       x.fillStyle = gl; x.beginPath(); x.ellipse(6 + l * 0.5, 0, l * 0.5, w, 0, 0, 6.283); x.fill(); x.restore();
     }
-    blot(64, 64, 16, 'rgba(12,10,9,0.7)', 'rgba(16,13,11,0)');   // soot where the fuel ran out under the hull
-    for (let k = 0; k < 28; k++) {            // scattered scorch
+    if (cv.width === 128) blot(64, 64, 16, 'rgba(12,10,9,0.7)', 'rgba(16,13,11,0)');   // soot where the fuel ran out under the hull
+    if (cv.width === 128) for (let k = 0; k < 28; k++) {            // scattered scorch
       const a = rnd() * 6.283, d = 14 + rnd() * 46;
       blot(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 1.5 + rnd() * 4, 'rgba(20,17,14,0.6)', 'rgba(20,17,14,0)');
     }
-    for (let k = 0; k < 50; k++) {            // ash flecks
+    if (cv.width === 128) for (let k = 0; k < 50; k++) {            // ash flecks
       const a = rnd() * 6.283, d = rnd() * 52;
       x.fillStyle = 'rgba(132,124,112,' + (0.15 + rnd() * 0.3).toFixed(2) + ')';
       x.fillRect(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 1 + rnd() * 2, 1 + rnd() * 2);
     }
     const tex = new THREE.CanvasTexture(cv);
     tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
-    const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
+    // (round 120, EFFECTS-4) THE CHAR LIES ON THE GROUND. A flat plane at the hull's height was buried by any rise round
+    // the wreck (on El Alamein's dunes it never showed: e4/cap/c1). Each char is a SEG x SEG grid draped on the terrain
+    // when it is laid (`_wreckLitter120`), all of them in one geometry, drawn to `count`: one draw.
+    const SEG = 12, VP = (SEG + 1) * (SEG + 1), CAPD = 128;
+    const geo = new THREE.BufferGeometry();
+    const dpos = new Float32Array(CAPD * VP * 3), dnor = new Float32Array(CAPD * VP * 3), duv = new Float32Array(CAPD * VP * 2), didx = new Uint16Array(CAPD * SEG * SEG * 6);
+    for (let d = 0, q = 0; d < CAPD; d++) for (let r = 0; r <= SEG; r++) for (let c = 0; c <= SEG; c++, q++) {
+      dnor[q * 3 + 1] = 1; duv[q * 2] = c / SEG; duv[q * 2 + 1] = r / SEG;
+      if (r < SEG && c < SEG) { const a = q, b2 = q + 1, c2 = q + SEG + 1, d2 = c2 + 1, o = (d * SEG * SEG + r * SEG + c) * 6;
+        didx[o] = a; didx[o + 1] = c2; didx[o + 2] = b2; didx[o + 3] = b2; didx[o + 4] = c2; didx[o + 5] = d2; }
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(dpos, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('normal', new THREE.BufferAttribute(dnor, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(duv, 2));
+    geo.setIndex(new THREE.BufferAttribute(didx, 1)); geo.setDrawRange(0, 0);
     const smat = new THREE.MeshLambertMaterial({ map: tex, transparent: true, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-    const scorch = new THREE.InstancedMesh(geo, smat, 128);
+    const scorch = new THREE.Mesh(geo, smat);
+    scorch.userData.seg = SEG; scorch.userData.cap = CAPD;
     scorch.count = 0; scorch.frustumCulled = false; scorch.receiveShadow = true; scorch.castShadow = false; scorch.renderOrder = 1;
     const lmat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     const litter = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), lmat, 1200);
@@ -68633,30 +68729,53 @@ class Game {
     const gy = T.heightAt(u.pos.x, u.pos.z);
     K.scorch.visible = K.litter.visible = K.wheels.visible = true;
     // the char: about twice the hull's length across, turned at random
-    const i = K.ns % 128; K.ns++;
-    const D = b.L * (1.3 + Math.random() * 0.35);    // (EFFECTS-2) smaller: the patch, not a disc round the field
-    K.e.set(0, Math.random() * 6.283, 0); K.q.setFromEuler(K.e);
-    K.p.set(u.pos.x, gy + 0.02, u.pos.z); K.s.set(D, 1, D * (0.8 + Math.random() * 0.3));
-    K.m.compose(K.p, K.q, K.s); K.scorch.setMatrixAt(i, K.m);
-    K.scorch.count = Math.min(128, K.ns); K.scorch.instanceMatrix.needsUpdate = true;
+    const SEG = K.scorch.userData.seg, CAPD = K.scorch.userData.cap, VP = (SEG + 1) * (SEG + 1);
+    const i = K.ns % CAPD; K.ns++;
+    // (round 120, EFFECTS-4) laid ALONG THE HULL (the decal's core is its footprint, so the darkest char is under it),
+    // `SCORCH120.along` hull lengths by `across` hull widths, end for end at random and a little off true; DRAPED: every
+    // vertex of its grid on the ground (`heightAt`) a few centimetres up
+    const D = b.L * SCORCH120.along * (0.92 + Math.random() * 0.16), DW = (b.W || b.L * 0.5) * SCORCH120.across * (0.92 + Math.random() * 0.16);
+    const yaw = (u.face || 0) + (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.3, cs = Math.cos(yaw), sn = Math.sin(yaw);
+    { const pa = K.scorch.geometry.attributes.position, A = pa.array;
+      for (let r = 0, k = i * VP * 3; r <= SEG; r++) for (let c = 0; c <= SEG; c++, k += 3) {
+        const lx = (c / SEG - 0.5) * DW, lz = (r / SEG - 0.5) * D, wx = u.pos.x + lx * cs + lz * sn, wz = u.pos.z - lx * sn + lz * cs;
+        A[k] = wx; A[k + 1] = T.heightAt(wx, wz) + 0.03; A[k + 2] = wz;
+      }
+      pa.needsUpdate = true; }
+    // (round 120, EFFECTS-4) the ground under the decal keeps only a trace of scorch (`Terrain.addScorch` reads the
+    // mark): what the brew-up and its fire already wrote there is taken down to it. A picture: the scorch field feeds
+    // the ground's colour and the foliage's health uniform only.
+    if (T && T.scorch && T.idx) {
+      if (!T._wreck120 || T._wreck120.length !== T.scorch.length) T._wreck120 = new Uint8Array(T.scorch.length);
+      const cx = worldToCell(u.pos.x), cz = worldToCell(u.pos.z), R = Math.max(1, Math.round(Math.max(D, DW) * 0.5 / TILE));
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        if (!inGrid(cx + dx, cz + dz)) continue;
+        const ci = T.idx(cx + dx, cz + dz), cap = SCORCH120.under * (dx || dz ? 0.5 : 1);
+        T._wreck120[ci] = 1;
+        if (T.scorch[ci] > cap) { T._scorchSum = (T._scorchSum || 0) - (T.scorch[ci] - cap); T.scorch[ci] = cap; T._touch(cx + dx, cz + dz); T.colorsDirty = true; }
+      }
+    }
+    K.scorch.count = Math.min(CAPD, K.ns); K.scorch.geometry.setDrawRange(0, K.scorch.count * SEG * SEG * 6);
     // (round 120, EFFECTS-3) the char decal as dark as the field takes it: on sand a soot stain (the key's share, >= 0.5)
     { const gk = (T && T.groundKey) || GROUND_KEY_REF; K.scorch.material.opacity = Math.min(1, Math.max(0.5, Math.pow(GROUND_KEY_REF / Math.max(GROUND_KEY_REF, gk), 0.9))); }
     // the litter: thrown from the hull, landing out to about two hull lengths
-    const n = 15 + Math.floor(Math.random() * 7), roof = b.roof || b.H, big = 1.55;   // (EFFECTS-2) read at 46 u
+    const n = SCORCH120.n[0] + Math.floor(Math.random() * SCORCH120.n[1]), roof = b.roof || b.H, big = SCORCH120.big;   // (EFFECTS-2) read at 46 u; (EFFECTS-4) more, bigger
     const paint = u.flashMats && u.flashMats[0] && u.flashMats[0].userData && u.flashMats[0].userData._paint;
     for (let k = 0; k < n; k++) {
       const kind = Math.random(), a = Math.random() * 6.283, sp = (0.7 + Math.random() * 2.2) * b.L / 1.6;
       let w, h, l, col;
-      if (kind < 0.34) { w = 0.12 + Math.random() * 0.14; h = 0.012; l = 0.1 + Math.random() * 0.16; col = 0x2a2622; }          // a plate, burnt
-      else if (kind < 0.58) { w = 0.1; h = 0.016; l = 0.3 + Math.random() * 0.35; col = 0x1e1d1b; }                               // a length of track
+      if (kind < 0.34) { w = 0.12 + Math.random() * 0.14; h = 0.012; l = 0.1 + Math.random() * 0.16;                              // a plate, burnt
+        const pc = Math.random(); col = pc < 0.45 ? 0x0e0d0c : pc < 0.75 ? 0x2e140a : 0x3e3c38; }                                 // (EFFECTS-4) black, rust, ash (linear)
+      else if (kind < 0.58) { w = 0.1; h = 0.016; l = 0.3 + Math.random() * 0.35; col = 0x0b0b0a; }                               // a length of track
       else if (kind < 0.82) { w = 0.08 + Math.random() * 0.05; h = 0.06 + Math.random() * 0.04; l = 0.12 + Math.random() * 0.1;   // stowage: a box, a can
-        col = Math.random() < 0.5 ? 0x4a5238 : 0x5a5040; }                                                                       // (EFFECTS-2) paler: read on dark ground
-      else { w = 0.2; h = 0.07; l = 0.2; col = 0x252321; }                                                                       // a road wheel
-      w *= big; l *= big; h *= Math.sqrt(big);
+        col = Math.random() < 0.5 ? 0x1c2412 : 0x2c2416; }                                                                       // (EFFECTS-4) olive, tan (linear)
+      else { w = 0.2; h = 0.07; l = 0.2; col = 0x0f0e0d; }                                                                       // a road wheel
+      const bk = kind >= 0.82 ? 1.55 : kind >= 0.34 && kind < 0.58 ? 1.3 : big;   // (EFFECTS-4) a road wheel keeps its size; a track length x1.3 (x2 read as planks, c2)
+      w *= bk; l *= bk; h *= Math.sqrt(bk);
       const wheel = kind >= 0.82;
       const fl = { wheel, i: -1, x: u.pos.x, y: gy + roof, z: u.pos.z, vx: Math.cos(a) * sp, vy: 1.2 + Math.random() * 2.2, vz: Math.sin(a) * sp,
         w, h, l, yaw: Math.random() * 6.283, spin: (Math.random() - 0.5) * 9, rx: 0, rz: 0, t: 0 };
-      if (paint && !wheel && Math.random() < 0.3) col = new THREE.Color().copy(paint).multiplyScalar(0.7).getHex();   // a piece of its own paint
+      if (paint && !wheel && (kind < 0.34 || kind >= 0.58) && Math.random() < 0.3) col = new THREE.Color().copy(paint).multiplyScalar(0.7).getHex();   // a piece of its own paint (EFFECTS-4: never a track length)
       const M = wheel ? K.wheels : K.litter, cap = wheel ? 240 : 1200;
       fl.i = (wheel ? K.nw++ : K.nl++) % cap;
       M.count = Math.min(cap, wheel ? K.nw : K.nl);
@@ -73688,6 +73807,7 @@ class Game {
     if (window.UnitShade && window.UnitShade.amb) {
       const A = window.UnitShade.amb, on = this.unitLight120 === true;
       A.lt.value.x = on ? 1 : 0;
+      A.lt.value.w = this.hulkFar120 === true ? HULK_FAR120 : 0;   // (round 120, EFFECTS-4) where a hulk's mottle fades
       if (on && this.ambientLight && this.hemiLight && this.sun) {
         const al = this.ambientLight.color, ai = this.ambientLight.intensity, hc = this.hemiLight.color, hi = this.hemiLight.intensity;
         const so = this.sunOffset, sy = this.sun.intensity * Math.max(0, so.y / (so.length() || 1)), sc2 = this.sun.color;
@@ -74822,6 +74942,7 @@ class Game {
     if (this._kit120) { const K = this._kit120; K.scorch.count = K.litter.count = K.wheels.count = 0; K.ns = K.nl = K.nw = 0; K.fly.length = 0;
       K.scorch.visible = K.litter.visible = K.wheels.visible = false; }   // an empty instanced mesh is still a draw
     this._wrk120 = null;
+    if (this.terrain) this.terrain._wreck120 = null;   // (round 120, EFFECTS-4) the cells under a wreck's char decal
   }
 
   /** BLOOD ON THE GROUND (round 106, a picture). A man who goes down or dies
@@ -77918,8 +78039,15 @@ cosmeticClass(Game, ['_treeFireFx120', '_treeGroundFx120']);   // (round 120, `t
 // OFF = round 119 exactly. Read each step by `_updateSmokeInstanced`; `wreckFx120` also by `_updateCorpse`/`_becomeHulk`.
 cosmeticClass(Game, ['_smokeColumn120', '_wreckFx120', '_fxKit120', '_wreckLitter120', '_debris120Tick']);
 Game.prototype.smokeCol120 = true;   // ON (main, 24 Nov 08:56 UTC, from .claude/wip120/effects/sheet10_column.jpg: a tall, leaning column; +0.27/+0.09/-0.74 ms at 1/5/15 wrecks). false = the round-119 column.
-Game.prototype.wreckFx120 = false;
+Game.prototype.wreckFx120 = true;   // ON (main, 24 Nov 13:38 UTC, from .claude/wip120/effects/sheet11_scorch_*.jpg: the fire on a brewed-up hull and the burnt-out hulk; cost ~0; Det identical).
 Game.prototype.debris120 = false;
+// (round 120, EFFECTS-4) `hulkFar120`: a hulk's rust-and-ash mottle (`hulkChar120`) fades toward its mean tone past
+// HULK_FAR120 (50 u, gone by 80): from far off it read as camouflage. A uniform (unitshade `uUsLt.w`): no recompile.
+Game.prototype.hulkFar120 = true;   // ON (main, 24 Nov 13:38 UTC: the hulk's rust mottle fades out between 50 and 80 u, so it no longer reads as camouflage; no new programs).
+// (round 120, EFFECTS-4) `fireNight120`: at night the fire's glow on smoke (assets/vfx.js, the column batch: a burning
+// wood's pall, a wreck's column) is added after the grade, toned as light (it read salmon-pink), and a fire's round
+// glow card is wider and dimmer (`VFX.TUNE.nightGlow`; it read as a bright spot). Read once a frame by `VFX.update`.
+Game.prototype.fireNight120 = false;
 // (round 120, EFFECTS-2) `flameCol120`: every flame graded as light (assets/vfx.js `fireTone`): orange-yellow by day,
 // covering the field behind it, instead of pink with blue-black edges; read once a frame by `VFX.update`. OFF = as before.
 // (round 120, EFFECTS-3) `unitLight120`: the unit shader's fill is the paint x the scene's light (sky above, the lit
@@ -78004,10 +78132,11 @@ Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of
 Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
 Game.prototype.fpvGround118 = false;
 Game.prototype.haze120 = true;       // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/look/sheets/s9-s10; quiet re-time Village play +0.28, fpv +0.135, nulls -0.08/+0.03). (round 120, LOOK / LOOK-2) aerial perspective (assets/look120.js): a far haze past a CLEAR NEAR ZONE (rifle range in first person; the RTS camera's distance to its target + 45 u), warm and luminous in the theatre's dust (summer gold, desert/steppe ochre, winter blue-white; greyer under a deck and in rain), brighter toward the sun, units at 0.4 of it, the dome's horizon in the same colours. Drawing only: sight and fog of war read the same density. OFF is the old FogExp2 exactly; OFF until main has seen the sheets (.claude/wip120/look)
+Game.prototype.sky120 = true;        // ON (main, 24 Nov 13:38 UTC, from .claude/wip120/look/sheets/s16/s16_detail_Village.jpg: the sun shows in the dusk band, a warm aureole at noon; cost inside the nulls; Det identical). (round 120, LOOK-4) THE SUN IN THE HAZE (assets/look120.js; needs haze120): a halo round the sun in the haze's own sunward colour on the dome AND the far haze (no seam at the horizon), the disc and a tight glow drawn after the haze (a low sun shines through the band), cloud light by the sun's angle (lit rims, darker bases, a low sun under them); dusk and night by the same rules. Drawing only. OFF is the shipped sky exactly; OFF until main has seen the sheets (.claude/wip120/look)
 Game.prototype.grade120 = true;      // ON (main, 24 Nov 08:56 UTC, v3 from .claude/wip120/look/sheets/s10-s11: ~1 op a fragment, every view within the nulls). (round 120, LOOK / LOOK-2 / LOOK-3) a filmic split folded into the box-art grade, amber highlights and slate shadows (assets/look120.js: a copy of the installed curve with a stronger split; LOOK-3's v3 rewrites the copy exactly to ~1 op a fragment over OFF: Village quiet hold play -0.04 / fpv +0.04 ms, nulls -0.14/-0.09, where LOOK-2's copy read +0.27/+0.25). OFF is the old curve exactly; OFF until main judges it
 Game.prototype.bridgeLod120 = true;    // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/bridges/sheet14_lod_arnhem_remagen.jpg: the same picture; Arnhem play +0.22 -> -0.11, deck +0.47 -> +0.04). (round 120, BRIDGES-3): the truss by distance — far sections the kit's lo pieces in a Lambert, the road's surfaces Lambert near too (assets/bridges120.js `_build`, `_materialLo`; .claude/wip120/bridges/NOTES.md ## BRIDGES-3)
 Game.prototype.bridgeWet120 = false;   // (round 120, BRIDGES-4) OFF until main has seen the A/B: the computer's vehicles do not wade on a map with a bridge — the search keeps out of the river and a step into it is refused (`_setPathTo`, `Pathfinder.find`, `Unit._wetStep120`; .claude/wip120/bridges/NOTES.md ## BRIDGES-4)
-Game.prototype.bridgeBank120 = false;  // (round 120, BRIDGES-3) OFF until main has seen the sheets and the A/B: grass on the slopes `_embank` cut beside a bridge's ramp, setts only on the lane (assets/bridges120.js `_bankGrass`; a surface change on those cells only)
+Game.prototype.bridgeBank120 = true;   // ON (main, 24 Nov 13:54 UTC, from .claude/wip120/bridges/sheet17_bank_look_arnhem.jpg: a turfed embankment where OFF has a cobbled hillside; BRIDGES-5 made it a LOOK, so whole 1800 s battles on Arnhem, Remagen and Son keep identical fingerprints). (round 120, BRIDGES-3) OFF until main has seen the sheets: grass on the slopes `_embank` cut beside a bridge's ramp, setts only on the lane (assets/bridges120.js `_bankGrass`). Since BRIDGES-5 a DRAWN surface only (`Terrain._drawOv120`): the cells' sim type is unchanged
 Game.prototype.bridges120 = true;    // ON (main, 23 Nov 23:40, from .claude/wip120/bridges/sheet09-13_*_v2.jpg; the owner: 'turn bridges and water on when ready'): Arnhem's river bogging fixed (no sideways step off a deck, AI goals moved off the water, the dam's spurs gone), A/B 6 seeds: Pegasus inside the floor, Arnhem bogged/inWater better than OFF, the bridge a chokepoint where a 138 m dam was (crossings -11, German lost +19); lint 100%; maps without bridges identical; cost Arnhem play +0.33 ms, the other maps <= 0.    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
 // ON (main, 24 Nov 09:37 UTC, from .claude/wip120/water/sheets/sheet18_half_{Waal,PHL,Vierville}_w6_s2.jpg: murky river water
 // with reflections and glints, the half-resolution pass CHEAPER than OFF on the Waal, Vierville and PHL; Det identical on four maps;

@@ -84,7 +84,7 @@
   //  `game.smokeCol120` — the colour a column's puffs walk toward as they climb: `haze` low, `hazeAloft` for the
   //  long-lived puffs that carry the column up (`stretch` > 1 marks one, drawn that much taller), and how much their
   //  cover thins on the way (`thin`, `thinAloft`).
-  var TUNE = { hot: 0.72, occ: 1.8, tint: [0.15, 0.11, 0.08], glowG: 0.3, glowDay: 0.5,
+  var TUNE = { nightGlow: [0.6, 0.7], nightSmoke: 0.65, hot: 0.72, occ: 1.8, tint: [0.15, 0.11, 0.08], glowG: 0.3, glowDay: 0.5,
                haze: [0.27, 0.25, 0.225], hazeAloft: [0.215, 0.2, 0.182], thin: 0.32, thinAloft: 0.26, frameAloft: 0.58 };
 
   // Which layer each behaviour draws in.
@@ -436,6 +436,7 @@
     'uniform float uHot;',     // how far up the fire ramp this sheet's hottest texel goes
     'uniform float uFlame;',   // (round 120, `game.flameCol120`) 1: this batch's fire is graded as light (`fireTone`)
     'uniform float uFlameOcc;', // how much of what is behind it a bright flame hides by day, x its toned luminance
+    'uniform float uNight120;', // (round 120, EFFECTS-4, `game.fireNight120`) > 0: the fire's glow on smoke is added as light, x this
     'uniform vec4 uTone;',     // the grade's exposure gain, 1/sqrt(pivot), shoulder, warmth (assets/grade.js)
     '#ifdef PLUME',
     'uniform vec3 uSunV;',     // (round 120) the sun, in view space
@@ -515,7 +516,14 @@
     '      float ndl = dot(nn, uSunV);',
     '      float sh = uAmb + (1.15 - uAmb) * clamp(0.6 * max(ndl, 0.0) + 0.4 * (0.5 + 0.5 * ndl), 0.0, 1.0);',
     '      vec3 sm = (0.55 + 0.45 * lit) * sh * vColF.rgb * uLight;',
-    '      sm += vec3(1.0, 0.34, 0.06) * vGlow * clamp(0.55 - qq.y * 0.9, 0.0, 1.0);',
+    '      vec3 gw = vec3(1.0, 0.34, 0.06) * vGlow * clamp(0.55 - qq.y * 0.9, 0.0, 1.0);',
+    // (round 120, EFFECTS-4, `game.fireNight120`) THE FIRE'S LIGHT ON THE SMOKE IS LIGHT. Graded with the smoke, the
+    // split tone (+blue under mid grey) and the saturation turned an orange glow on dark night smoke salmon-pink (a
+    // burning wood's pall, a wreck's column). The smoke takes the grade; the glow is added after it, toned as a flame is.
+    '#ifdef TONE_MAPPING',
+    '      if (uNight120 > 0.0 && vGlow > 0.0) { vec3 st = toneMapping(mix(sm, uFogColor, fog)) + fireTone(gw * uNight120 * (1.0 - fog)); gl_FragColor = vec4(linearToOutputTexel(vec4(min(st, vec3(1.0)), 1.0)).rgb, cov); return; }',
+    '#endif',
+    '      sm += gw;',
     '      e = vec4(mix(sm, uFogColor, fog), cov);',
     '#else',
     '      e = vec4(mix(lit * vColF.rgb * uLight, uFogColor, fog), cov);',
@@ -633,6 +641,7 @@
         uHot: { value: o.hot || 1 },
         uFlame: { value: 0 },
         uFlameOcc: { value: TUNE.occ },
+        uNight120: { value: 0 },
         uTone: { value: new THREE.Vector4(1.55, 2.5, 0.06, 0.35) },
         uFogColor: { value: new THREE.Color(0xa9c6dd) },
         uFogDensity: { value: 0.002 },
@@ -909,6 +918,8 @@
       this.flameOn = flame;
       if (b5) { b5.mat.uniforms.uFlame.value = flame ? 1 : 0; b5.mat.uniforms.uHot.value = flame ? TUNE.hot : b5.hot0; b5.mat.uniforms.uFlameOcc.value = TUNE.occ; }
       b0.mat.uniforms.uFlame.value = flame ? 1 : 0;
+      this.night120 = F118('fireNight120');   // (round 120, EFFECTS-4) the glow on smoke as light; a fire's glow card wider and dimmer at night
+      if (b6) b6.mat.uniforms.uNight120.value = this.night120 ? TUNE.nightSmoke : 0;   // the glow's gain as light (n1: x1 read a hot orange smear)
       b2.mat.uniforms.uFlame.value = flame ? 1 : 0; if (b3) b3.mat.uniforms.uFlame.value = flame ? 1 : 0;   // (main 03:28) bursts and fireballs too
       if (flame) {
         var GC = typeof window !== 'undefined' && window.Grade && window.Grade.current, tv;
@@ -993,6 +1004,9 @@
             // (round 120, `flameCol120`) a glow that cooled to deep red read pink on a pale field: it stays orange,
             // and daylight washes most of it out, as it does a real fire's
             if (flame) { cg = Math.max(cg, cr * TUNE.glowG); a *= 1 - TUNE.glowDay * this.day; fglow = 1; }
+            // (round 120, EFFECTS-4, `game.fireNight120`) at night a fire's round GLOW card read as a bright spot: wider
+            // and dimmer (`TUNE.nightGlow` = [alpha x, size +]), the same light spread over the ground round it
+            if (this.night120 && cellIdx === S.GLOW) { var nn = 1 - this.day; a *= 1 - TUNE.nightGlow[0] * nn; sx *= 1 + TUNE.nightGlow[1] * nn; sy *= 1 + TUNE.nightGlow[1] * nn; }
           }
         } else if (k === K.SPARK || k === K.EMBER) {
           a *= t * t;

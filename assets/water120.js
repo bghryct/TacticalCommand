@@ -70,6 +70,9 @@
     // (WATER-6) THE HALF-RESOLUTION PASS (while ON): the water's own shader at 1/halfScale^2 of the pixels, upsampled by the
     // water mask at full resolution. `half = false` = the full-resolution ON shader (WATER-5's program; a probe arm).
     half: true, halfScale: 2 };
+  // (WATER-7) A FORDS-ONLY MAP (Village's stream) drawn with `fordMaps` true: the fords' OWN cheap water (`C._fords`: the
+  // ground's own triangles over the fords, blended over the bed) and nothing else; false = the full ON path for them (WATER-6).
+  W.fordOverlay = true;
 
   // ---------------------------------------------------------------- knobs
   W.K = {
@@ -805,6 +808,234 @@ void main() {
     return out;
   }
   W.overlayIndex = overlayIndex;
+  // ---------------------------------------------------------------- (WATER-7) THE FORDS' OWN WATER (a fords-only map)
+  // Village's stream is FORD cells: OFF draws no water there (a gravel bed), and the ON path drew it with the whole water
+  // program and the half pass, which replace nothing there (+0.4..1.0 ms). Here the stream is the GROUND'S OWN TRIANGLES over
+  // the fords (an index into the ground's position buffer, shared, as the wet band's overlay is) with a water LEVEL per vertex:
+  // the depth (level - the drawn bed) is exact per pixel, so the waterline is where the drawn bank crosses the level (flat
+  // water: a bank vertex takes its lowest ford neighbour's level). Its own small program: two ripple reads (the wind's frame,
+  // the stream's own flow), the sky as the dome draws it (its table, the clouds' mean, as the cheap ford had), Fresnel, the
+  // sun's glint, the light through 36 cm of clear water; blended over the bed the ground drew (wet: darker) and fogged by the
+  // game's own fog chunks (haze120's too). No lights or shadows of its own (the bed under it keeps the ground's), no second
+  // pass, no target, no plane.
+  const FO_VS = `
+attribute float aW7L;
+attribute vec2 aW7F;
+varying vec3 vW7P;
+varying float vW7D;
+varying vec2 vW7F;
+#include <fog_pars_vertex>
+#ifdef W7_VTONE
+#include <tonemapping_pars_fragment>
+#include <encodings_pars_fragment>
+uniform vec3 uW120BodyR;
+uniform vec3 uW120Amb;
+uniform vec3 uW120SunC;
+uniform vec4 uW120Rain;
+uniform vec3 uWaterSun;
+varying vec3 vW7B;
+#endif
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vW7P = wp.xyz;
+  vW7D = aW7L - wp.y;
+  vW7F = aW7F;
+  // the surface is drawn AT the level where the water stands over the ground (what stands in a ford, grass or a man's legs,
+  // is in it to 36 cm, as the plane drew it); over the bank it lies on the ground (the wet band, then nothing)
+  wp.y = max(wp.y, aW7L);
+  vec4 mvPosition = viewMatrix * wp;
+  gl_Position = projectionMatrix * mvPosition;
+#include <fog_vertex>
+#ifdef W7_VTONE
+  // the water's body as the screen shows it: the same on every pixel, so toned here, once a vertex
+  vec3 bL = uW120BodyR * (uW120Amb + uW120SunC * max(normalize(uWaterSun).y, 0.0) * uW120Rain.z);
+  vW7B = W7_OUT(W7_TONE(bL));
+#endif
+}`;
+  const FO_FS = `
+uniform sampler2D uW120Ripple;
+uniform sampler2D uW120Lut;
+uniform vec4 uW120Wind;
+uniform vec4 uW120Rain;
+uniform vec4 uW120Cloud;
+uniform vec4 uW120Tone;
+uniform vec4 uW120Haze;
+uniform vec3 uW120Fog;
+uniform vec3 uW120SkySun;
+uniform vec3 uW120SkyAmb;
+uniform vec3 uW120SkyMean;
+uniform vec2 uW120SunH;
+uniform float uW120T;
+uniform vec3 uW120Eye;
+uniform vec3 uW120SunC;
+uniform vec3 uW120Amb;
+uniform vec3 uW120BodyR;
+uniform vec3 uWaterSun;
+uniform vec4 uW7K;    // x the ripples' slope, y the stream's absorption per metre, z the wet bed (its light x this), w the least body
+uniform vec4 uW7Dbg;  // (cost probes; 1 = on) x the flow's read, y the sky's table, z the body's tone, w the glint
+uniform vec4 uW7K2;   // x the waterline's feather (u of depth), y the flow's stretch, z the glint, w the wet band over the waterline (u)
+varying vec3 vW7P;
+varying float vW7D;
+varying vec2 vW7F;
+#ifdef W7_VTONE
+varying vec3 vW7B;
+#endif
+#include <fog_pars_fragment>
+vec3 w7Disp(vec3 c) {
+#if defined( TONE_MAPPING )
+  c = toneMapping(c);
+#endif
+  return linearToOutputTexel(vec4(c, 1.0)).rgb;
+}
+// the sky along d as the dome draws it, with the clouds' MEAN (water120's w120Sky below its Fresnel gate; display space)
+vec3 w7Sky(vec3 d) {
+  float y = max(d.y, 0.0);
+  if (uW120Rain.w < 0.5) return mix(uW120Fog, uW120Fog * vec3(0.55, 0.68, 0.92), pow(y, 0.6));
+  vec2 hd = d.xz * inversesqrt(max(dot(d.xz, d.xz), 1e-6));
+  vec2 luv = vec2(0.5 - 0.5 * dot(hd, uW120SunH), sqrt(y)) * (31.0 / 32.0) + 0.5 / 32.0;
+  vec3 tab = textureLod(uW120Lut, luv, 0.0).rgb;
+  vec3 sc = tab * tab * (uW120Haze.z * uW120Tone.x);
+  float cia = uW120SkyMean.z * uW120Cloud.w * smoothstep(0.03, 0.3, y);
+  float ca = uW120SkyMean.x, thick = uW120SkyMean.y;
+  sc = mix(sc, uW120SkySun * 0.75 + uW120SkyAmb, cia * 0.55);
+  vec3 cl = uW120SkySun * (0.62 * (1.0 - 0.6 * thick)) + uW120SkyAmb * (1.0 - 0.42 * thick) * mix(1.0, 0.78 + 0.4 * y, uW120Cloud.z);
+  float ap = mix(0.3 + 0.7 * smoothstep(0.0, 0.25, y), 1.0, uW120Cloud.z);
+  sc = mix(sc, cl, ca * ap);
+  vec3 c = sqrt(1.0 - exp(-sc));
+  c = mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, 1.18) * uW120Tone.y;
+  c += uW120Tone.z * vec3(0.045, 0.070, 0.140) * (1.0 - ca * 0.55);
+  c += uW120Tone.w * vec3(0.55, 0.6, 0.75) * (0.35 + 0.65 * ca);
+  float fogW = max(uW120Haze.y, 1.0 - smoothstep(0.0, uW120Haze.x, y));
+  return clamp(mix(c, uW120Fog, fogW), 0.0, 1.0);
+}
+void main() {
+  float dep = vW7D;
+  if (dep <= 0.0) {
+    // THE BANK over the waterline (the ring of quads round the fords): wet and darker in a band, then nothing
+    float wb = 1.0 + dep / uW7K2.w;
+    if (wb <= 0.0) discard;
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.36 * wb * wb);
+#include <fog_fragment>
+    return;
+  }
+  if (uW7Dbg.w < -0.5) { gl_FragColor = vec4(0.2, 0.25, 0.22, 0.6); return; }   // (cost probe: the layer alone, a flat colour)
+  vec3 sp = vec3(vW7P.x, vW7P.y + dep, vW7P.z);   // the surface over this point of the bed
+  vec3 dv = uW120Eye - sp;
+  vec3 v = dv * inversesqrt(max(dot(dv, dv), 1e-8));
+  vec2 pm = vW7P.xz * 4.0;   // metres
+  float t = uW120T;
+  // the wind's small waves (its own frame: one rotation for the whole stream)
+  vec2 wd = uW120Wind.xy;
+  vec2 pw = vec2(dot(pm, wd), dot(pm, vec2(-wd.y, wd.x)));
+  vec2 sa = texture2D(uW120Ripple, pw / 7.0 - vec2(t * (0.06 + 0.05 * uW120Wind.w), 0.0)).rg * 2.0 - 1.0;
+  sa = vec2(sa.x * wd.x - sa.y * wd.y, sa.x * wd.y + sa.y * wd.x) * (0.35 + 0.65 * uW120Wind.w);
+  // the stream running downstream: the pattern in the flow's frame, stretched along it, carried at its speed
+  float fs = length(vW7F);
+  vec2 fd = fs > 1e-3 ? vW7F / fs : wd, fq = vec2(-fd.y, fd.x);
+  vec2 q = vec2(dot(pm, fd), dot(pm, fq));
+  vec2 fm = uW7Dbg.x > 0.5 ? texture2D(uW120Ripple, vec2((q.x - t * (0.2 + fs)) * uW7K2.y, q.y) / 3.4 + vec2(0.37, 0.11)).ba * 2.0 - 1.0 : vec2(0.0);
+  fm = fd * (fm.x * uW7K2.y) + fq * fm.y;
+  vec2 s = (sa * 0.30 + fm * (0.55 + 0.5 * min(fs, 1.0))) * uW7K.x;
+  vec3 n = normalize(vec3(-s.x, 1.0, -s.y));
+  float nv = max(dot(n, v), 0.0);
+  float x1 = 1.0 - nv, x2 = x1 * x1;
+  float fres = 0.03 + 0.97 * x2 * x2 * x1;
+  vec3 r = reflect(-v, n);
+  r.y = max(r.y, 0.006);
+  r = normalize(r);
+  vec3 refl = uW7Dbg.y > 0.5 ? w7Sky(r) : mix(uW120Fog, uW120Fog * vec3(0.55, 0.68, 0.92), pow(r.y, 0.6));
+  vec3 sunL = normalize(uWaterSun);
+  float nh = max(dot(n, normalize(sunL + v)), 0.0);
+  float spec = pow(nh, 900.0) * uW7K2.z * fres * uW120Rain.z * uW7Dbg.w;
+  vec3 glint = spec > 0.0008 ? w7Disp(uW120SunC * spec) : vec3(0.0);
+  // the light through the water, down to the bed and back up (a clear stream); and WATER READS AS WATER: some body always
+  float muR = sqrt(1.0 - (1.0 - nv * nv) * 0.565);
+  float tr = min(exp(-uW7K.y * dep * 4.0 * (1.0 + 1.0 / max(muR, 0.2))), 1.0 - uW7K.w);
+  vec3 bodyL = uW120BodyR * (uW120Amb + uW120SunC * max(sunL.y, 0.0) * uW120Rain.z);
+#ifdef W7_VTONE
+  vec3 body = uW7Dbg.z > 0.5 ? vW7B : sqrt(bodyL);
+#else
+  vec3 body = uW7Dbg.z > 0.5 ? w7Disp(bodyL) : sqrt(bodyL);
+#endif
+  vec3 pc = fres * refl + (1.0 - fres) * (1.0 - tr) * body + glint;
+  // over the bed the ground drew: what passes the water (wet stone: darker), the rest is the water's own light
+  float a = 1.0 - (1.0 - fres) * tr * uW7K.z;
+  a = clamp(max(a, max(pc.r, max(pc.g, pc.b)) * 0.999), 1e-3, 1.0);
+  // the waterline: over the last few cm of depth the water fades into the wet band's darkening (no pale seam between them)
+  float fe = smoothstep(0.0, uW7K2.x, dep), ae = mix(0.36, a, fe);
+  gl_FragColor = vec4(pc * fe / max(ae, 1e-3), ae);
+#include <fog_fragment>
+}`;
+  W.FO_VS = FO_VS; W.FO_FS = FO_FS;
+  /** (WATER-7) Per vertex of the ground (= per cell): the water LEVEL over the fords (world units; G - 1 where there is none),
+   *  the flow (from the analysis), and the index of the quads with any water in them (PlaneGeometry's own winding).
+   *  G: the drawn ground's world height per vertex. A ford vertex: its own drawn bed + depth. A vertex beside a ford: the
+   *  lowest ford neighbour's level (flat water: the waterline falls where the drawn bank crosses it), or just under its own
+   *  ground where that is lower (the water then ends a hair short of it). */
+  function fordLevels(T, N, TY, G, A, depth) {
+    const FT = TY.ford, L = new Float32Array(N * N), F = new Float32Array(N * N * 2), has = new Uint8Array(N * N);
+    for (let i = 0; i < N * N; i++) L[i] = G[i] - 1;
+    const index = [];
+    if (FT == null) return { L, F, index, quads: 0, fords: 0, ring: new Int32Array(0) };
+    let fords = 0;
+    for (let i = 0; i < N * N; i++) if (T.type[i] === FT) {
+      L[i] = G[i] + depth; has[i] = 1; fords++;
+      if (A && A.flow) { F[i * 2] = A.flow[i * 2]; F[i * 2 + 1] = A.flow[i * 2 + 1]; }
+    }
+    for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
+      const i = z * N + x; if (has[i] === 1) continue;
+      let lv = 1e9, fx = 0, fz = 0, n = 0;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, zz = z + dz; if (xx < 0 || zz < 0 || xx >= N || zz >= N) continue;
+        const j = zz * N + xx; if (has[j] !== 1) continue;
+        if (L[j] < lv) lv = L[j]; fx += F[j * 2]; fz += F[j * 2 + 1]; n++;
+      }
+      if (!n) continue;
+      L[i] = Math.min(lv, G[i] - 0.02); F[i * 2] = fx / n; F[i * 2 + 1] = fz / n; has[i] = 2;
+    }
+    let nr = 0; for (let i = 0; i < N * N; i++) if (has[i]) nr++;
+    const ring = new Int32Array(nr); nr = 0; for (let i = 0; i < N * N; i++) if (has[i]) ring[nr++] = i;   // every vertex with a level
+    for (let z = 0; z < N - 1; z++) for (let x = 0; x < N - 1; x++) {
+      const a = z * N + x, b = a + N, c = b + 1, d = a + 1;
+      if (Math.max(L[a] - G[a], L[b] - G[b], L[c] - G[c], L[d] - G[d]) <= 0) continue;
+      index.push(a, b, d, b, c, d);
+    }
+    return { L, F, index, quads: index.length / 6, fords, ring };
+  }
+  W.fordLevels = fordLevels;
+  /** (WATER-7) the fords' material: the water's own uniforms (shared objects: one write a frame serves both), the fog's (with
+   *  haze120's views, shared by reference), the game's sun direction (the shipped water's own uniform object). */
+  function fordMaterial() {
+    const sun = (typeof WATER_U !== 'undefined' && WATER_U && WATER_U.uWaterSun) || { value: new THREE.Vector3(0.4, 0.8, 0.3) };
+    const u = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), U, { uWaterSun: sun, uW7K: W.foK, uW7K2: W.foK2, uW7Dbg: W.foDbg });
+    const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: FO_VS, fragmentShader: FO_FS, fog: true,
+      transparent: true, depthWrite: false, depthTest: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+    m.name = 'water120-fords';
+    // the body toned once a vertex: the renderer's own tone slot (look120 flips Custom <-> Cineon to recompile; the program key
+    // carries the slot and the encode, so this runs again) and encode; anything unexpected keeps the per-pixel call
+    m.onBeforeCompile = function (sh, r) {
+      if (W.foVTone !== true || !r) return;   // (WATER-7 t2: toned a vertex = the same cost as a pixel; default the per-pixel call)
+      const T_ = THREE, tm = this.toneMapped ? r.toneMapping : T_.NoToneMapping;
+      const fn = tm === T_.CustomToneMapping ? 'CustomToneMapping' : tm === T_.CineonToneMapping ? 'OptimizedCineonToneMapping'
+        : tm === T_.ACESFilmicToneMapping ? 'ACESFilmicToneMapping' : tm === T_.ReinhardToneMapping ? 'ReinhardToneMapping'
+        : tm === T_.LinearToneMapping ? 'LinearToneMapping' : tm === T_.NoToneMapping ? '' : null;
+      const enc = r.getRenderTarget && r.getRenderTarget() ? null : r.outputEncoding;
+      const out = enc === T_.sRGBEncoding ? 'LinearTosRGB(vec4(c, 1.0)).rgb' : enc === T_.LinearEncoding ? '(c)' : null;
+      const chunk = (T_.ShaderChunk && T_.ShaderChunk.tonemapping_pars_fragment) || '';
+      if (fn === null || out === null || (fn && chunk.indexOf('vec3 ' + fn + '(') < 0)) { W.foVToneOff = (W.foVToneOff || 0) + 1; return; }
+      const d = '#define W7_VTONE\n';
+      sh.vertexShader = d + '#define W7_TONE(c) ' + (fn ? fn + '(c)' : '(c)') + '\n#define W7_OUT(c) ' + out + '\n' + sh.vertexShader;
+      sh.fragmentShader = d + sh.fragmentShader;
+      W.foVToneOn = (W.foVToneOn || 0) + 1;
+    };
+    m.customProgramCacheKey = function () { return 'water120-fords:' + (W.foVTone === true ? 'v' : 'f'); };   // (a probe's arm flips foVTone)
+    return m;
+  }
+  // the knobs (probe arms may move them): x the ripples' slope, y the absorption per metre (river 1.15 x WATER-2's clear-stream
+  // 0.35), z the wet bed, w the least body; x2 the waterline's feather (u), the flow's stretch, the glint
+  W.foK = { value: v4(0.30, 0.40, 0.72, 0.30) };
+  W.foK2 = { value: v4(0.06, 0.45, 2.6, 0.12) };
+  W.foDbg = { value: v4(1, 1, 1, 1) };   // (cost probes) x the flow's read, y the sky's table, z the body's tone, w the glint
   W.groundFails = 0;
   /** Patch the ground's material (after groundsplat.js has, which hands the fragment `vGPos`). Composes with every
    *  earlier hook and key, with the grade's `_gradePrevKey` as weather119.js does. */
@@ -1612,13 +1843,72 @@ void main() {
         size: (0.06 + Math.random() * 0.06) * h, life: 1.2 + Math.random() * 0.8, cell: VC.DROP, r: 1.2, g: 1.3, b: 1.4, a: 0.9, gravity: 17, drag: 0.15 });
     }
   };
+  /** (WATER-7) THE FORDS' OWN WATER on a fords-only map (see FO_FS): built per map, and again when the ground's heights move
+   *  (a crater in the stream: at most twice a second), its uniforms each frame; hidden otherwise. */
+  C._fords = function (g, dt, fo) {
+    const T = g.terrain;
+    let m = this._fo;
+    const N = gridN(), gm = T && T.mesh, pa = gm && gm.geometry && gm.geometry.attributes.position;
+    const TY = root.TYPE || (typeof TYPE !== 'undefined' ? TYPE : null);
+    if (!fo || !pa || pa.count !== N * N || !TY) { if (m) m.visible = false; this.foOn = false; return; }
+    this._foWait = Math.max(0, (this._foWait || 0) - Math.max(0, dt || 0));
+    const stale = !m || m.parent !== gm || m.geometry.attributes.position !== pa || this._foMap !== g.mapDef || this._foTerr !== T;
+    if (!stale && this._foVer !== pa.version && this._foWait <= 0 && this._foG && this._foRing) {
+      // THE GROUND MOVED (a crater): only the fords' ring is read again, and the levels redone in place if a vertex of it moved
+      // (at most twice a second; the quads stay: a crater deepens the water it is in, it opens no new channel)
+      this._foVer = pa.version; this._foWait = 0.5;
+      const t0 = performance.now(), e = gm.matrixWorld.elements, G = this._foG, ring = this._foRing;
+      let moved = 0;
+      for (let k = 0; k < ring.length; k++) { const i = ring[k], y = e[1] * pa.getX(i) + e[5] * pa.getY(i) + e[9] * pa.getZ(i) + e[13]; if (Math.abs(y - G[i]) > 1e-4) { G[i] = y; moved++; } }
+      if (moved) {
+        const R = fordLevels(T, N, TY, G, this._foA, K.fordDepth), ga = m.geometry.attributes;
+        ga.aW7L.array.set(R.L); ga.aW7L.needsUpdate = true; ga.aW7F.array.set(R.F); ga.aW7F.needsUpdate = true;
+        this.foRebeds = (this.foRebeds || 0) + 1; this.foRebedMs = +(performance.now() - t0).toFixed(1);
+      }
+    }
+    if (stale) {
+      const t0 = performance.now(), self = this;
+      cosmetic(function () {
+        if (m) { if (m.parent) m.parent.remove(m); m.geometry.deleteAttribute('position'); m.geometry.dispose(); }   // (the position is the ground's)
+        gm.updateWorldMatrix(true, false);
+        const e = gm.matrixWorld.elements, G = new Float32Array(N * N);
+        for (let i = 0; i < N * N; i++) G[i] = e[1] * pa.getX(i) + e[5] * pa.getY(i) + e[9] * pa.getZ(i) + e[13];
+        const A = self._foA && self._foMap === g.mapDef && self._foTerr === T ? self._foA : analyse(T, N, (g.mapDef && g.mapDef.name) || '', TY);
+        const R = fordLevels(T, N, TY, G, A, K.fordDepth);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', pa);
+        geo.setAttribute('aW7L', new THREE.BufferAttribute(R.L, 1));
+        geo.setAttribute('aW7F', new THREE.BufferAttribute(R.F, 2));
+        geo.setIndex(R.index);
+        if (!self._foMat) self._foMat = fordMaterial();
+        m = self._fo = new THREE.Mesh(geo, self._foMat);
+        m.name = 'water120-fords'; m.frustumCulled = false; m.castShadow = m.receiveShadow = false;
+        m.renderOrder = (T.water && T.water.renderOrder || 0) - 1;
+        gm.add(m);
+        self._foA = A; self.foQuads = R.quads; self.foFords = R.fords; self._foG = G; self._foRing = R.ring;
+      }, this);
+      this._foVer = pa.version; this._foMap = g.mapDef; this._foTerr = T; this._foWait = 0.5;
+      this.foMs = +(performance.now() - t0).toFixed(1); this.foBuilds = (this.foBuilds || 0) + 1;
+    }
+    m.visible = (this.foQuads || 0) > 0;
+    this.foOn = m.visible;
+    if (!m.visible) return;
+    // the uniforms it shares with the water's program (the sky, the light, the wind, the eye) and the water's clock
+    this._N = N;
+    this._t = ((this._t || 0) + Math.max(0, Math.min(0.25, dt || 0))) % 3600; U.uW120T.value = this._t;
+    this._uniforms(g, dt);
+  };
   C.frame = function (g, dt) {
     // (main, 24 Nov) A MAP WHOSE ONLY WATER IS FORDS (Village's stream: OFF draws no water there) keeps OFF's drawing: the pass
     // replaces nothing there, so it is pure addition (WATER-6: Village +0.38..0.98 ms against a +0.5 bar), while on the river
     // and sea maps the half-resolution pass is cheaper than OFF. `Water120.fordMaps = true` draws the fords too.
-    const on = g.water120 === true && !(g.terrain && !g.terrain._hasWater && W.fordMaps !== true);
+    const fordOnly = !!(g.terrain && !g.terrain._hasWater);
+    // (WATER-7) a fords-only map with `fordMaps`: the fords' own cheap water (`_fords`); the water plane stays OFF's there
+    const fo = g.water120 === true && fordOnly && W.fordMaps === true && W.fordOverlay !== false;
+    const on = g.water120 === true && !(fordOnly && W.fordMaps !== true) && !fo;
     { const T0 = g.terrain; if (this._hcm && T0 && T0.water && T0.water.material === this._hcm) T0.water.material = this._hon; }   // (WATER-6)
     if (on !== this._on) this._switch(g, on);
+    if (fo || this._fo) { try { this._fords(g, dt, fo); } catch (e) { W.foFails = (W.foFails || 0) + 1; W.foErr = String(e && e.message || e); if (this._fo) this._fo.visible = false; } }
     if (!on) return;
     dt = Math.max(0, Math.min(0.25, dt || 0));
     const T = g.terrain;
@@ -1760,7 +2050,8 @@ void main() {
   C.stats = function () {
     return { on: this._on, N: this._N, bodies: this.bodies.slice(0, 8), hs: +this.hs.toFixed(2), buildMs: this.buildMs, skyMs: this.skyMs, fords: this.fords || 0,
       fails: W.fails, groundFails: W.groundFails, ground: !!this._ground, rings: this.rings.length, lite: W.liteNow, skipMean: this.skipMean || 0, rebeds: this.rebeds || 0, rebedMs: this.rebedMs || 0, liveQuads: this.liveQuads || 0, cullFails: W.cullFails || 0, skipDirMean: this.skipDirMean || 0,
-      overlay: !!W.groundOverlay, ovTris: this._ovTris || 0, half: !!this.halfOn, halfSize: [this.halfW || 0, this.halfH || 0], halfFails: W.halfFails || 0, warmMs: this.warmMs || 0, warmHeld: this.warmHeld || 0, warmFails: W.warmFails || 0 };
+      overlay: !!W.groundOverlay, ovTris: this._ovTris || 0, half: !!this.halfOn, halfSize: [this.halfW || 0, this.halfH || 0], halfFails: W.halfFails || 0, warmMs: this.warmMs || 0, warmHeld: this.warmHeld || 0, warmFails: W.warmFails || 0,
+      fordOv: { on: !!this.foOn, fords: this.foFords || 0, quads: this.foQuads || 0, ms: this.foMs || 0, builds: this.foBuilds || 0, rebeds: this.foRebeds || 0, rebedMs: this.foRebedMs || 0, fails: W.foFails || 0, err: W.foErr || null } };
   };
 
   // every entry from the loop runs on the cosmetic stream (the wade test draws; three.js objects draw UUIDs)

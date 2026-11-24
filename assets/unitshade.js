@@ -211,6 +211,9 @@
     L.push('    float chUp = clamp(vUsN, 0.0, 1.0);');
     L.push('    float chR = smoothstep(0.36, 0.56, chA + 0.2 * (chB - 0.5)) * (1.0 - 0.55 * chUp);');
     L.push('    float chS = smoothstep(0.42, 0.62, chB) * chUp;');
+    // (round 120, EFFECTS-4, `game.hulkFar120`) from far off the rust-and-ash mottle read as camouflage: past
+    // `uUsLt.w` u (0 = never) it walks to its mean tone, gone by 1.6x that.
+    L.push('    if (uUsLt.w > 0.0) { float chF = smoothstep(uUsLt.w, uUsLt.w * 1.6, length(vUsVP)); chR = mix(chR, 0.4 * (1.0 - 0.55 * chUp), chF); chS = mix(chS, 0.35 * chUp, chF); chB = mix(chB, 0.5, chF); }');
     L.push('    vec3 chC = mix(vec3(0.062, 0.054, 0.048), vec3(0.25, 0.14, 0.08), chR * 0.85);');
     L.push('    chC = mix(chC, vec3(0.25, 0.24, 0.225), chS * 0.7);');
     L.push('    chC *= chG * (0.8 + 0.4 * chB);');

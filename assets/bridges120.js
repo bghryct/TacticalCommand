@@ -151,7 +151,7 @@
       this.list.length = 0; this.any = false; this.minCls = 9;
       if (this.cap) { this.cap.fill(0); this.bid.fill(0); this.par.fill(0); this.axl.fill(0); this.drawH.fill(NaN); this.wet.fill(0); }
       var T = g && g.terrain;
-      if (T) { T._deck120 = null; T._drawH120 = null; T._wet120 = null; }
+      if (T) { T._deck120 = null; T._drawH120 = null; T._wet120 = null; T._drawOv120 = null; }
       if (g && g.pathfinder) g.pathfinder.deck120 = null;
     },
 
@@ -191,15 +191,20 @@
      *  which reads as a huge paved slope (main, 23:40). Every cell `_embank` lowered that is still a road surface
      *  (road, cobble, gravel) is grass: the lane and its shoulders keep their setts, the retaining walls stand where
      *  the drop is (`_walls`, unchanged), and the slope is turf (the foliage is sown from the surfaces after this).
-     *  The heights are the shipped game's (this runs after the grader); a simulation change in the surfaces only
-     *  (grass 1.00 speed / 0.05 cover against cobble 1.15 / 0), on the cells `rec.emb` names. Returns cells changed. */
+     *  The heights are the shipped game's (this runs after the grader).
+     *  (BRIDGES-5) A LOOK, NOT A SURFACE: as a sim type the grass's cover and stealth (0.05 / 0.05 against the setts'
+     *  0 / 0) drew the AI's bounds onto the slope at the water's edge, and one more vehicle a battle bogged in the Rhine
+     *  (main's A/B, 04:14 UTC 24 Nov). So the cells keep their sim type and are DRAWN as grass: `Terrain._drawOv120`
+     *  (`{ idx, was, to }`), read by the colour bake and `_splatCell` only (`Terrain._drawTypes120`). The foliage is not
+     *  sown on them: the battle reads what grows. Returns the cells drawn as grass. */
     _bankGrass: function (g) {
-      var T = g.terrain, n = 0, RT = [TYPE.road, TYPE.cobble, TYPE.gravel];
+      var T = g.terrain, n = 0, RT = [TYPE.road, TYPE.cobble, TYPE.gravel], ov = { idx: [], was: [], to: [] };
       for (var r = 0; r < this.list.length; r++) {
         var E = this.list[r].emb;
         if (!E) continue;
-        for (var k = 0; k < E.length; k++) { var i = E[k]; if (RT.indexOf(T.type[i]) >= 0) { T.type[i] = TYPE.grass; n++; } }
+        for (var k = 0; k < E.length; k++) { var i = E[k]; if (RT.indexOf(T.type[i]) >= 0 && ov.idx.indexOf(i) < 0) { ov.idx.push(i); ov.was.push(T.type[i]); ov.to.push(TYPE.grass); n++; } }
       }
+      T._drawOv120 = n ? ov : null;
       return n;
     },
 
