@@ -73,6 +73,10 @@
   // (WATER-7) A FORDS-ONLY MAP (Village's stream) drawn with `fordMaps` true: the fords' OWN cheap water (`C._fords`: the
   // ground's own triangles over the fords, blended over the bed) and nothing else; false = the full ON path for them (WATER-6).
   W.fordOverlay = true;
+  // (WATER-8) with `fordMaps` on a fords-only map: true = the fords drawn by the GROUND's own program (`C._fordsG`: no second
+  // draw, no blended overdraw); false = WATER-7's overlay (`fordOverlay`). `W.fordG` is the live state (the ground's key `|w8f`).
+  W.fordGround = false;
+  W.fordG = false;
 
   // ---------------------------------------------------------------- knobs
   W.K = {
@@ -359,6 +363,9 @@ vec4 w120Bank(vec3 wp, vec3 r, float jit) {
     float hzA = uHz120b.w * (max(hzE + hitT - uHz120d.x, 0.0) - max(hzE - uHz120d.x, 0.0))
               * exp(-uHz120d.y * max(wp.y + 0.5 * sl * hitT - uHz120d.w, 0.0));
     float hzW = 1.0 / (1.0 + uHz120d.z * (1.0 - dot(r, uHz120a.xyz))); hzW *= hzW;
+    // (WATER-8: LOOK-4's hook, sky120) the sun's broad halo in the haze, the dome's and fog_vertex's own term (uHz120e.y is 0
+    // with sky120 OFF: the old weight exactly): a bank reflected toward a low sun takes the halo as the far haze does
+    float hzS = 1.0 / (1.0 + uHz120e.z * (1.0 - dot(r, uHz120a.xyz))); hzW += uHz120e.y * hzS * hzS;
     c = mix(c, mix(uHz120c.xyz, uHz120b.xyz, hzW), uHz120c.w * (1.0 - exp(-hzA)));
   }
 #endif
@@ -1036,6 +1043,151 @@ void main() {
   W.foK = { value: v4(0.30, 0.40, 0.72, 0.30) };
   W.foK2 = { value: v4(0.06, 0.45, 2.6, 0.12) };
   W.foDbg = { value: v4(1, 1, 1, 1) };   // (cost probes) x the flow's read, y the sky's table, z the body's tone, w the glint
+  // ---------------------------------------------------------------- (WATER-8) THE FORDS IN THE GROUND'S OWN PROGRAM
+  // WATER-7's overlay drew the stream as a second, blended layer over the ground: at 26 m a flat colour on that layer alone cost
+  // +0.36 ms (memory normandy-ford-water-layer). Here the GROUND's own fragment computes the water (the same colour, ripple and
+  // wet band as FO_FS) where a per-vertex ford depth is over zero: no second draw, no blended overdraw. The attribute `aW8`
+  // (x: the water's depth over the vertex + 2 (u), from WATER-7's fordLevels, so the same waterline; yz: the flow) is set on the
+  // ground's geometry; the program carries the chunk only while `W.fordG` (key `|w8f`), so every other map keeps its program.
+  // The ground over a ford is lifted to the level in the vertex stage (as the overlay's surface was: what stands in a ford, grass
+  // or a man's legs, is in the water to 36 cm); `vGPos` (groundsplat's, written before) stays the bed. Drawing only.
+  const GF_VPARS = `
+attribute vec3 aW8;
+uniform vec3 uW8Up;
+varying vec3 vW8;
+`;
+  const GF_VMAIN = `
+  vW8 = vec3(aW8.x - 2.0, aW8.y, aW8.z);
+  transformed += uW8Up * max(vW8.x, 0.0);
+`;
+  const GF_PARS = `
+uniform sampler2D uW120Ripple;
+uniform sampler2D uW120Lut;
+uniform vec4 uW120Wind;
+uniform vec4 uW120Rain;
+uniform vec4 uW120Cloud;
+uniform vec4 uW120Tone;
+uniform vec4 uW120Haze;
+uniform vec3 uW120Fog;
+uniform vec3 uW120SkySun;
+uniform vec3 uW120SkyAmb;
+uniform vec3 uW120SkyMean;
+uniform vec2 uW120SunH;
+uniform float uW120T;
+uniform vec3 uW120Eye;
+uniform vec3 uW120SunC;
+uniform vec3 uW120Amb;
+uniform vec3 uW120BodyR;
+uniform vec3 uWaterSun;
+uniform vec4 uW7K;
+uniform vec4 uW7K2;
+uniform vec4 uW7Dbg;
+varying vec3 vW8;
+vec3 w8Disp(vec3 c) {
+#if defined( TONE_MAPPING )
+  c = toneMapping(c);
+#endif
+  return linearToOutputTexel(vec4(c, 1.0)).rgb;
+}
+vec3 w8Sky(vec3 d) {
+  float y = max(d.y, 0.0);
+  if (uW120Rain.w < 0.5) return mix(uW120Fog, uW120Fog * vec3(0.55, 0.68, 0.92), pow(y, 0.6));
+  vec2 hd = d.xz * inversesqrt(max(dot(d.xz, d.xz), 1e-6));
+  vec2 luv = vec2(0.5 - 0.5 * dot(hd, uW120SunH), sqrt(y)) * (31.0 / 32.0) + 0.5 / 32.0;
+  vec3 tab = textureLod(uW120Lut, luv, 0.0).rgb;
+  vec3 sc = tab * tab * (uW120Haze.z * uW120Tone.x);
+  float cia = uW120SkyMean.z * uW120Cloud.w * smoothstep(0.03, 0.3, y);
+  float ca = uW120SkyMean.x, thick = uW120SkyMean.y;
+  sc = mix(sc, uW120SkySun * 0.75 + uW120SkyAmb, cia * 0.55);
+  vec3 cl = uW120SkySun * (0.62 * (1.0 - 0.6 * thick)) + uW120SkyAmb * (1.0 - 0.42 * thick) * mix(1.0, 0.78 + 0.4 * y, uW120Cloud.z);
+  float ap = mix(0.3 + 0.7 * smoothstep(0.0, 0.25, y), 1.0, uW120Cloud.z);
+  sc = mix(sc, cl, ca * ap);
+  vec3 c = sqrt(1.0 - exp(-sc));
+  c = mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, 1.18) * uW120Tone.y;
+  c += uW120Tone.z * vec3(0.045, 0.070, 0.140) * (1.0 - ca * 0.55);
+  c += uW120Tone.w * vec3(0.55, 0.6, 0.75) * (0.35 + 0.65 * ca);
+  float fogW = max(uW120Haze.y, 1.0 - smoothstep(0.0, uW120Haze.x, y));
+  return clamp(mix(c, uW120Fog, fogW), 0.0, 1.0);
+}
+`;
+  // before the fog (the ground's colour is in display space here, as the bed under WATER-7's overlay was; the fog is affine in
+  // it, so the result is the overlay's blend exactly): bed x (1 - a) + the water's light
+  const GF_MAIN = `
+  {
+    float w8d = vW8.x;
+    if (w8d > -uW7K2.w) {
+      if (w8d <= 0.0) {
+        // THE BANK over the waterline: wet and darker in a band
+        float w8b = 1.0 + w8d / uW7K2.w;
+        gl_FragColor.rgb *= 1.0 - 0.36 * w8b * w8b;
+      } else if (uW7Dbg.w < -0.5) {
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.2, 0.25, 0.22), 0.6);   // (cost probe: the water's pixels a flat colour)
+      } else {
+        vec3 w8sp = vec3(vGPos.x, vGPos.y + w8d, vGPos.z);   // the surface over this point of the bed
+        vec3 w8dv = uW120Eye - w8sp;
+        vec3 w8v = w8dv * inversesqrt(max(dot(w8dv, w8dv), 1e-8));
+        vec2 w8pm = vGPos.xz * 4.0;   // metres
+        float w8t = uW120T;
+        vec2 w8wd = uW120Wind.xy;
+        vec2 w8pw = vec2(dot(w8pm, w8wd), dot(w8pm, vec2(-w8wd.y, w8wd.x)));
+        vec2 w8sa = texture2D(uW120Ripple, w8pw / 7.0 - vec2(w8t * (0.06 + 0.05 * uW120Wind.w), 0.0)).rg * 2.0 - 1.0;
+        w8sa = vec2(w8sa.x * w8wd.x - w8sa.y * w8wd.y, w8sa.x * w8wd.y + w8sa.y * w8wd.x) * (0.35 + 0.65 * uW120Wind.w);
+        float w8fs = length(vW8.yz);
+        vec2 w8fd = w8fs > 1e-3 ? vW8.yz / w8fs : w8wd, w8fq = vec2(-w8fd.y, w8fd.x);
+        vec2 w8q = vec2(dot(w8pm, w8fd), dot(w8pm, w8fq));
+        vec2 w8fm = uW7Dbg.x > 0.5 ? texture2D(uW120Ripple, vec2((w8q.x - w8t * (0.2 + w8fs)) * uW7K2.y, w8q.y) / 3.4 + vec2(0.37, 0.11)).ba * 2.0 - 1.0 : vec2(0.0);
+        w8fm = w8fd * (w8fm.x * uW7K2.y) + w8fq * w8fm.y;
+        vec2 w8s = (w8sa * 0.30 + w8fm * (0.55 + 0.5 * min(w8fs, 1.0))) * uW7K.x;
+        vec3 w8n = normalize(vec3(-w8s.x, 1.0, -w8s.y));
+        float w8nv = max(dot(w8n, w8v), 0.0);
+        float w8x1 = 1.0 - w8nv, w8x2 = w8x1 * w8x1;
+        float w8fr = 0.03 + 0.97 * w8x2 * w8x2 * w8x1;
+        vec3 w8r = reflect(-w8v, w8n);
+        w8r.y = max(w8r.y, 0.006);
+        w8r = normalize(w8r);
+        vec3 w8refl = uW7Dbg.y > 0.5 ? w8Sky(w8r) : mix(uW120Fog, uW120Fog * vec3(0.55, 0.68, 0.92), pow(w8r.y, 0.6));
+        vec3 w8sun = normalize(uWaterSun);
+        float w8nh = max(dot(w8n, normalize(w8sun + w8v)), 0.0);
+        float w8spec = pow(w8nh, 900.0) * uW7K2.z * w8fr * uW120Rain.z * uW7Dbg.w;
+        vec3 w8gl = w8spec > 0.0008 ? w8Disp(uW120SunC * w8spec) : vec3(0.0);
+        float w8muR = sqrt(1.0 - (1.0 - w8nv * w8nv) * 0.565);
+        float w8tr = min(exp(-uW7K.y * w8d * 4.0 * (1.0 + 1.0 / max(w8muR, 0.2))), 1.0 - uW7K.w);
+        vec3 w8bL = uW120BodyR * (uW120Amb + uW120SunC * max(w8sun.y, 0.0) * uW120Rain.z);
+        vec3 w8body = uW7Dbg.z > 0.5 ? w8Disp(w8bL) : sqrt(w8bL);
+        vec3 w8pc = w8fr * w8refl + (1.0 - w8fr) * (1.0 - w8tr) * w8body + w8gl;
+        float w8a = 1.0 - (1.0 - w8fr) * w8tr * uW7K.z;
+        w8a = clamp(max(w8a, max(w8pc.r, max(w8pc.g, w8pc.b)) * 0.999), 1e-3, 1.0);
+        float w8fe = smoothstep(0.0, uW7K2.x, w8d), w8ae = mix(0.36, w8a, w8fe);
+        gl_FragColor.rgb = gl_FragColor.rgb * (1.0 - w8ae) + w8pc * w8fe;
+      }
+    }
+  }
+`;
+  W.GF_VPARS = GF_VPARS; W.GF_VMAIN = GF_VMAIN; W.GF_PARS = GF_PARS; W.GF_MAIN = GF_MAIN;
+  // the ground's own uniforms for it (shared objects; the water's U is assigned beside them). uWaterSun: the shipped water's
+  const FG_U = W.FG_U = { uW8Up: { value: new THREE.Vector3(0, 1, 0) }, uW7K: W.foK, uW7K2: W.foK2, uW7Dbg: W.foDbg,
+    uWaterSun: { value: new THREE.Vector3(0.4, 0.8, 0.3) } };
+  function fgSun() { const s = typeof WATER_U !== 'undefined' && WATER_U && WATER_U.uWaterSun; if (s && FG_U.uWaterSun !== s) FG_U.uWaterSun = s; }
+  /** (WATER-8) the ford chunk into the ground's program (anchors: groundsplat's `vGPos`, project_vertex, the fog's include) */
+  function fordGroundInject(sh) {
+    const vs = sh.vertexShader, fs = sh.fragmentShader;
+    if (vs.indexOf('#include <project_vertex>') < 0 || vs.indexOf('vGPos = ') < 0 || fs.indexOf('#include <fog_fragment>') < 0
+      || fs.indexOf('void main() {') < 0 || fs.indexOf('vGPos') < 0) { W.fgInjFails = (W.fgInjFails || 0) + 1; return false; }
+    sh.vertexShader = GF_VPARS + vs.replace('#include <project_vertex>', GF_VMAIN + '#include <project_vertex>');
+    sh.fragmentShader = fs.replace('void main() {', GF_PARS + 'void main() {').replace('#include <fog_fragment>', GF_MAIN + '#include <fog_fragment>');
+    W.fgInj = (W.fgInj || 0) + 1;
+    return true;
+  }
+  /** (WATER-8) per vertex of the ground: x = the water's depth over it + 2 (u; clamped to +-1.5: -1 where no ford is near), yz =
+   *  the flow (WATER-7's fordLevels R: the level per vertex and the flow) */
+  function fillW8(arr, R, G, N) {
+    const L = R.L, Fl = R.F;
+    for (let i = 0; i < N * N; i++) {
+      const d = L[i] - G[i];
+      arr[i * 3] = Math.max(-1.5, Math.min(1.5, d)) + 2; arr[i * 3 + 1] = Fl[i * 2]; arr[i * 3 + 2] = Fl[i * 2 + 1];
+    }
+  }
+  W.fillW8 = fillW8;
   W.groundFails = 0;
   /** Patch the ground's material (after groundsplat.js has, which hands the fragment `vGPos`). Composes with every
    *  earlier hook and key, with the grade's `_gradePrevKey` as weather119.js does. */
@@ -1045,7 +1197,9 @@ void main() {
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = function (sh, renderer) {
       if (prev) prev.call(this, sh, renderer);
-      Object.assign(sh.uniforms, U);
+      fgSun();
+      Object.assign(sh.uniforms, U, FG_U);   // (always: a program compiled later reuses this object for every key's program)
+      if (W.fordG) fordGroundInject(sh);
       if (!W.on || !W.groundOn) return;
       const fs = sh.fragmentShader;
       if (fs.indexOf(GA) < 0 || fs.indexOf('vGPos') < 0 || fs.indexOf('void main() {') < 0) { W.groundFails++; return; }
@@ -1058,7 +1212,7 @@ void main() {
       }
       sh.fragmentShader = fs.replace('void main() {', G_PARS + 'void main() {').replace(GA, GA + '\n' + G_MAIN);
     };
-    const tag = function () { return W.on && W.groundOn ? '|w120g:' + W.ver + (W.groundV2 ? 'v2' + (W.groundLod ? 'l' : '') : '') : ''; };
+    const tag = function () { return (W.on && W.groundOn ? '|w120g:' + W.ver + (W.groundV2 ? 'v2' + (W.groundLod ? 'l' : '') : '') : '') + (W.fordG ? '|w8f' : ''); };
     const had = mat._gradePrevKey !== undefined;
     const base = had ? mat._gradePrevKey : mat.customProgramCacheKey;
     const mine = function () { return (base ? base.call(this) : '') + tag(); };
@@ -1898,6 +2052,68 @@ void main() {
     this._t = ((this._t || 0) + Math.max(0, Math.min(0.25, dt || 0))) % 3600; U.uW120T.value = this._t;
     this._uniforms(g, dt);
   };
+  /** (WATER-8) THE FORDS IN THE GROUND'S OWN PROGRAM (`W.fordGround`, on a fords-only map with `fordMaps`): the attribute
+   *  `aW8` on the ground's geometry (built per map; a crater re-reads the fords' ring at most twice a second and redoes it in
+   *  place), the ground's material patched (W.patchGround: one wrapper, its key `|w8f` only while W.fordG) and the water's
+   *  uniforms each frame. Off: W.fordG false, the ground's program is OFF's again (the attribute stays, unread). */
+  C._fordsG = function (g, dt, on) {
+    const T = g.terrain, gm = T && T.mesh, geo = gm && gm.geometry, pa = geo && geo.attributes.position;
+    const N = gridN(), TY = root.TYPE || (typeof TYPE !== 'undefined' ? TYPE : null), mat = gm && gm.material;
+    let live = !!on && !!pa && pa.count === N * N && !!TY && !!mat;
+    if (live && mat !== this._fgMat && (mat.userData.groundSplat || !root.GroundSplat || (this._fgWaitT = (this._fgWaitT || 0) + Math.max(0, dt || 0)) > 8)) {
+      if (W.patchGround(mat) || mat._w120) { this._fgMat = mat; this._fgWaitT = 0; }
+    }
+    live = live && this._fgMat === mat;
+    if (!live) { if (W.fordG) { W.fordG = false; if (this._fgMat) this._fgMat.needsUpdate = true; } this.fgOn = false; return; }
+    fgSun();
+    this._fgWait = Math.max(0, (this._fgWait || 0) - Math.max(0, dt || 0));
+    const stale = this._fgGeo !== geo || !geo.attributes.aW8 || geo.attributes.aW8 !== this._fgAttr || this._fgMap !== g.mapDef || this._fgTerr !== T;
+    if (!stale && this._fgVer !== pa.version && this._fgWait <= 0 && this._fgG && this._fgRing) {
+      // THE GROUND MOVED (a crater): the fords' ring read again, the depths redone in place if a vertex of it moved
+      this._fgVer = pa.version; this._fgWait = 0.5;
+      const t0 = performance.now(), e = gm.matrixWorld.elements, G = this._fgG, ring = this._fgRing;
+      let moved = 0;
+      for (let k = 0; k < ring.length; k++) { const i = ring[k], y = e[1] * pa.getX(i) + e[5] * pa.getY(i) + e[9] * pa.getZ(i) + e[13]; if (Math.abs(y - G[i]) > 1e-4) { G[i] = y; moved++; } }
+      if (moved) {
+        const R = fordLevels(T, N, TY, G, this._fgA, K.fordDepth);
+        fillW8(this._fgAttr.array, R, G, N); this._fgAttr.needsUpdate = true;
+        this.fgRebeds = (this.fgRebeds || 0) + 1; this.fgRebedMs = +(performance.now() - t0).toFixed(1);
+      }
+    }
+    if (stale) {
+      const t0 = performance.now(), self = this;
+      cosmetic(function () {
+        gm.updateWorldMatrix(true, false);
+        const e = gm.matrixWorld.elements, G = new Float32Array(N * N);
+        for (let i = 0; i < N * N; i++) G[i] = e[1] * pa.getX(i) + e[5] * pa.getY(i) + e[9] * pa.getZ(i) + e[13];
+        const same = self._fgMap === g.mapDef && self._fgTerr === T;
+        const A = same && self._fgA ? self._fgA : (self._foA && self._foMap === g.mapDef && self._foTerr === T ? self._foA : analyse(T, N, (g.mapDef && g.mapDef.name) || '', TY));
+        const R = fordLevels(T, N, TY, G, A, K.fordDepth);
+        const at = new THREE.BufferAttribute(new Float32Array(N * N * 3), 3);
+        fillW8(at.array, R, G, N);
+        geo.setAttribute('aW8', at);
+        // the world's up in the ground's own frame (the lift is made there; the ground's matrix is the identity today)
+        FG_U.uW8Up.value.set(0, 1, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(gm.matrixWorld).invert());
+        self._fgA = A; self._fgG = G; self._fgRing = R.ring; self._fgAttr = at; self.fgFords = R.fords; self.fgQuads = R.quads;
+      }, this);
+      this._fgGeo = geo; this._fgVer = pa.version; this._fgMap = g.mapDef; this._fgTerr = T; this._fgWait = 0.5;
+      this.fgMs = +(performance.now() - t0).toFixed(1); this.fgBuilds = (this.fgBuilds || 0) + 1;
+      // THE VAO TRAP: the new attribute is uploaded by three's next projection only (once per info.render.frame); a program that
+      // draws the ground before that sets up its VAO with aW8 disabled, for good. OFF's program for two frames first.
+      this._fgHold = 2;
+      if (W.fordG) { W.fordG = false; mat.needsUpdate = true; }
+    }
+    if ((this._fgHold || 0) > 0) { this._fgHold--; this.fgOn = false; return; }
+    // a map with no ford (a dry map counts as fords-only: no T._hasWater) keeps OFF's program; `fgForce` (a cost probe) compiles
+    // the chunk in anyway, to price it where it is never taken
+    if (!((this.fgFords || 0) > 0) && W.fgForce !== true) { if (W.fordG) { W.fordG = false; mat.needsUpdate = true; } this.fgOn = false; return; }
+    if (!W.fordG) { W.fordG = true; mat.needsUpdate = true; }
+    this.fgOn = true;
+    // the uniforms it shares with the water's program (the sky, the light, the wind, the eye) and the water's clock
+    this._N = N;
+    this._t = ((this._t || 0) + Math.max(0, Math.min(0.25, dt || 0))) % 3600; U.uW120T.value = this._t;
+    this._uniforms(g, dt);
+  };
   C.frame = function (g, dt) {
     // (main, 24 Nov) A MAP WHOSE ONLY WATER IS FORDS (Village's stream: OFF draws no water there) keeps OFF's drawing: the pass
     // replaces nothing there, so it is pure addition (WATER-6: Village +0.38..0.98 ms against a +0.5 bar), while on the river
@@ -1908,7 +2124,10 @@ void main() {
     const on = g.water120 === true && !(fordOnly && W.fordMaps !== true) && !fo;
     { const T0 = g.terrain; if (this._hcm && T0 && T0.water && T0.water.material === this._hcm) T0.water.material = this._hon; }   // (WATER-6)
     if (on !== this._on) this._switch(g, on);
-    if (fo || this._fo) { try { this._fords(g, dt, fo); } catch (e) { W.foFails = (W.foFails || 0) + 1; W.foErr = String(e && e.message || e); if (this._fo) this._fo.visible = false; } }
+    // (WATER-8) `fordGround`: the fords in the ground's own program instead of WATER-7's overlay
+    const fgr = fo && W.fordGround === true;
+    if (fo || this._fo) { try { this._fords(g, dt, fo && !fgr); } catch (e) { W.foFails = (W.foFails || 0) + 1; W.foErr = String(e && e.message || e); if (this._fo) this._fo.visible = false; } }
+    if (fgr || W.fordG) { try { this._fordsG(g, dt, fgr); } catch (e) { W.fgFails = (W.fgFails || 0) + 1; W.fgErr = String(e && e.message || e); if (W.fordG) { W.fordG = false; if (this._fgMat) this._fgMat.needsUpdate = true; } this.fgOn = false; } }
     if (!on) return;
     dt = Math.max(0, Math.min(0.25, dt || 0));
     const T = g.terrain;
@@ -2051,7 +2270,8 @@ void main() {
     return { on: this._on, N: this._N, bodies: this.bodies.slice(0, 8), hs: +this.hs.toFixed(2), buildMs: this.buildMs, skyMs: this.skyMs, fords: this.fords || 0,
       fails: W.fails, groundFails: W.groundFails, ground: !!this._ground, rings: this.rings.length, lite: W.liteNow, skipMean: this.skipMean || 0, rebeds: this.rebeds || 0, rebedMs: this.rebedMs || 0, liveQuads: this.liveQuads || 0, cullFails: W.cullFails || 0, skipDirMean: this.skipDirMean || 0,
       overlay: !!W.groundOverlay, ovTris: this._ovTris || 0, half: !!this.halfOn, halfSize: [this.halfW || 0, this.halfH || 0], halfFails: W.halfFails || 0, warmMs: this.warmMs || 0, warmHeld: this.warmHeld || 0, warmFails: W.warmFails || 0,
-      fordOv: { on: !!this.foOn, fords: this.foFords || 0, quads: this.foQuads || 0, ms: this.foMs || 0, builds: this.foBuilds || 0, rebeds: this.foRebeds || 0, rebedMs: this.foRebedMs || 0, fails: W.foFails || 0, err: W.foErr || null } };
+      fordOv: { on: !!this.foOn, fords: this.foFords || 0, quads: this.foQuads || 0, ms: this.foMs || 0, builds: this.foBuilds || 0, rebeds: this.foRebeds || 0, rebedMs: this.foRebedMs || 0, fails: W.foFails || 0, err: W.foErr || null },
+      fordG: { on: !!this.fgOn, key: !!W.fordG, fords: this.fgFords || 0, quads: this.fgQuads || 0, ms: this.fgMs || 0, builds: this.fgBuilds || 0, rebeds: this.fgRebeds || 0, rebedMs: this.fgRebedMs || 0, inj: W.fgInj || 0, injFails: W.fgInjFails || 0, fails: W.fgFails || 0, err: W.fgErr || null } };
   };
 
   // every entry from the loop runs on the cosmetic stream (the wade test draws; three.js objects draw UUIDs)

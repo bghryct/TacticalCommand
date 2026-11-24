@@ -84,7 +84,9 @@
   //  `game.smokeCol120` — the colour a column's puffs walk toward as they climb: `haze` low, `hazeAloft` for the
   //  long-lived puffs that carry the column up (`stretch` > 1 marks one, drawn that much taller), and how much their
   //  cover thins on the way (`thin`, `thinAloft`).
-  var TUNE = { nightGlow: [0.6, 0.7], nightSmoke: 0.65, hot: 0.72, occ: 1.8, tint: [0.15, 0.11, 0.08], glowG: 0.3, glowDay: 0.5,
+  // (round 120, EFFECTS-5) `nightGlow[1]` 0.7 -> 0.4: the night glow card 1.4x across, not 1.7x. The same look on OBSTACLES'
+  // Village wood at night (no round balls; sheet17), and +0.06 ms where 1.7x cost +0.43 (15 wrecks + 374 trees alight).
+  var TUNE = { nightGlow: [0.6, 0.4], nightSmoke: 0.65, hot: 0.72, occ: 1.8, tint: [0.15, 0.11, 0.08], glowG: 0.3, glowDay: 0.5,
                haze: [0.27, 0.25, 0.225], hazeAloft: [0.215, 0.2, 0.182], thin: 0.32, thinAloft: 0.26, frameAloft: 0.58 };
 
   // Which layer each behaviour draws in.

@@ -21769,6 +21769,21 @@ const BUSH_STOP120 = { light: 0.08, heavy: 0.15 };
  *  OBS_SHAPE120 as 3 must have one; the rest keep the cell test (crate, cart — drawn 0.9 m off centre —, well, statue:
  *  too few on Village to measure; pool over maps next). */
 const PROP_BODY120 = { rock: 0.228, haystack: 0.579, grave: 0.119, logstack: 0.241, wreckedcar: 0.47 };
+/** (round 120, OBSTACLES-6, `game.rockHit120`, under obsHit120) …AS DRAWN. Those radii were the bounding box's mean chord,
+ *  and a raycast onto the drawing stops 0.5-0.85 of the lines they do (OBSTACLES-5: haystack 0.304 vs 0.515, wreck 0.257
+ *  vs 0.418, rock 0.124 vs 0.203). Here the disc at the cell's centre that stops as many level lines across the cell as
+ *  the drawn mesh does (o6/measure6.js in the page, 10 maps: 366 rocks, 40 haystacks, 20 graves, 13 woodpiles, 61 wrecks
+ *  with OBSTACLES-5's; lines uniform in bearing, in offset over +-B, B = 0.75 TILE, and in height under the sim's top; a
+ *  disc of radius r stops r / B of them), by quarter of the sim's top, lowest first, world units. Table figures, never
+ *  the mesh. A haystack's dome and a boulder's shoulders narrow upward; a wreck is widest at its body, not its wheels. */
+const ROCK_HIT120 = {rock:  [0.163, 0.166, 0.139, 0.088], haystack:  [0.423, 0.471, 0.372, 0.159], grave:  [0.11, 0.044, 0.047, 0.043], logstack:  [0.227, 0.2, 0.234, 0.191], wreckedcar:  [0.269, 0.399, 0.279, 0.194]};
+/** …and a boulder by its own variant: the shapes differ two-fold (a squat 0.72 m sandstone stops 0.18 of the lines, a
+ *  1.17 m one 0.10), so a row by its sim top in cm (`PROP_VARIANT_H.rock`, unique over the five stones) where at least
+ *  five were measured; any other boulder the pooled row. */
+const ROCK_VAR120 = {'55': [0.136, 0.155, 0.083, 0.069], '56': [0.194, 0.163, 0.143, 0.07], '63': [0.165, 0.16, 0.141, 0.061], '64': [0.222, 0.179, 0.182, 0.121], '68': [0.163, 0.164, 0.159, 0.098], '71': [0.158, 0.168, 0.107, 0.053], '72': [0.209, 0.242, 0.207, 0.152], '77': [0.171, 0.169, 0.137, 0.071], '84': [0.085, 0.106, 0.085, 0.043], '88': [0.145, 0.158, 0.102, 0.078], '89': [0.146, 0.146, 0.128, 0.095], '96': [0.161, 0.148, 0.127, 0.077], '105': [0.127, 0.175, 0.109, 0.055], '114': [0.14, 0.125, 0.132, 0.065], '115': [0.165, 0.172, 0.16, 0.109], '117': [0.134, 0.122, 0.111, 0.07]};
+/** …the widest radius a body can have (segHit120's reach in plan). */
+const ROCK_REACH120 = (() => { const R = {}; for (const k in ROCK_HIT120) R[k] = Math.max(...ROCK_HIT120[k]);
+  for (const v in ROCK_VAR120) R.rock = Math.max(R.rock, ...ROCK_VAR120[v]); return R; })();
 /** (round 120, OBSTACLES-5, `game.propHit120`, under obsHit120) THE OTHER PROPS AS DRAWN. They stopped every round in their
  *  whole 6 m cell below the sim's top. A body is now the disc at its cell's centre that stops as many level lines across
  *  the cell as the drawing's own triangles do (o5/census_props.js in the page: lines uniform in bearing and in offset over
@@ -26146,6 +26161,7 @@ class Obstacles {
     const NB = this._sh120, SO = this._shO120;
     if (!NB || !SO) return null;
     const BR = typeof game !== 'undefined' && game && game.bushHit120 === true ? BUSH_DRAWN120 : BUSH_R120;   // (OBSTACLES-4) the clump as drawn
+    const RK = typeof game !== 'undefined' && game && game.rockHit120 === true;   // (OBSTACLES-6) the hard bodies as drawn (ROCK_HIT120)
     // nothing shaped within 3 cells of either end (the count grid `_sh120Touch` keeps): an open field asks nothing
     if (!(NB[worldToCell(az) * GRID + worldToCell(ax)] || NB[worldToCell(bz) * GRID + worldToCell(bx)])) return null;
     const ux = bx - ax, uy = by - ay, uz = bz - az, L2 = ux * ux + uz * uz;
@@ -26162,7 +26178,7 @@ class Obstacles {
       // the line's closest approach to the axis, in plan; nothing of it reaches the step: on (before the ground is asked)
       const tc = L2 > 1e-12 ? ((cx - ax) * ux + (cz - az) * uz) / L2 : 0.5, tcc = tc < 0 ? 0 : tc > 1 ? 1 : tc;
       const ex = ax + ux * tcc - cx, ez = az + uz * tcc - cz;
-      const reach = sh === 1 ? top * TREE_HIT_OFF120[4] : sh === 2 ? (BR[o.type] || 0.5) * top : (PROP_BODY120[o.type] || 0);
+      const reach = sh === 1 ? top * TREE_HIT_OFF120[4] : sh === 2 ? (BR[o.type] || 0.5) * top : (RK && ROCK_REACH120[o.type] || PROP_BODY120[o.type] || 0);
       if (ex * ex + ez * ez > reach * reach) continue;
       const y0 = this.floorAt(o, gx, gz, cx, cz);
       if (yhi < y0 || ylo > y0 + top) continue;
@@ -26201,7 +26217,11 @@ class Obstacles {
         }
       } else {
         // a hard prop by its drawn footprint: the first point of its chord in this step below its top
-        const r = PROP_BODY120[o.type];
+        let r = PROP_BODY120[o.type];
+        // (round 120, OBSTACLES-6, `game.rockHit120`) …as drawn: its disc by quarter of the top where the step passes the axis
+        // (a boulder by its own variant's row). From the record (type, sim top), never the mesh.
+        const RR = RK ? (o.type === 'rock' && ROCK_VAR120[Math.round(o.height * METERS_PER_UNIT * 100)]) || ROCK_HIT120[o.type] : null;
+        if (RR) { const bd = Math.floor((ay + uy * tcc - y0) / o.height * 4); r = RR[bd < 0 ? 0 : bd > 3 ? 3 : bd]; }
         if (!r || d2 >= r * r || L2 <= 1e-12) continue;
         const hh = Math.sqrt((r * r - d2) / L2), lo = Math.max(0, tc - hh), hi = Math.min(1, tc + hh);
         if (lo > hi) continue;
@@ -29027,8 +29047,220 @@ Object.assign(SMK120, { aloft: 0.25, aloftV: 1.65, aloftS: 6.0, aloftG: 0.17, al
 const WRK120 = { full: 70, end: 200, reach: 240, every: 0.1, flame: 0.8 };
 // (round 120, EFFECTS-4, `debris120`) THE CHAR UNDER A WRECK: the decal laid along the hull, `along` hull lengths by
 // `across` hull widths (its core is the hull's footprint); the ground under it scorched to at most `under` (the decal
-// carries the shape); `n` litter pieces (min, spread) at `big` x their size, so the pieces read at the playing camera.
-const SCORCH120 = { under: 0.12, along: 2.2, across: 4.2, n: [20, 8], big: 2.0 };
+// carries the shape). (EFFECTS-5) The litter's numbers are LITTER120's.
+const SCORCH120 = { under: 0.12, along: 2.2, across: 4.2 };
+// (round 120, EFFECTS-5, `debris120`) THE LITTER IS PIECES. EFFECTS-1..4 threw 20-27 flat boxes (a plate 5 cm thick
+// and 1-2 m across, drums standing on end) that read as sheets of card from low down (main, 24 Nov 13:38). Now a few
+// solid pieces a wreck, each modelled here at its own size in metres: a run of track and loose links, a stowage bin,
+// a jerrycan, a road wheel, a hatch, a torn plate or a crumpled mudguard, an ammunition case with its brass, a bedroll.
+// `k` is the drawing's allowance over life size (so a bin still reads at 46 u); `n` pieces a wreck = n[0] + up to
+// n[1]; `cap` vertices for the whole field (one geometry, one draw; ~22 wrecks at ~6,000 each); `shadow`: they cast one.
+const LITTER120 = { k: 1.3, n: [10, 6], cap: 131072, shadow: true };
+/** The pieces, built once (pure geometry: plain arrays, its own seeded dice, no three.js objects): kind -> list of
+ *  { p, n, c, m, nv, rest, near, spin }. `c` is a colour, or where `m` is 1 a shade the wreck's paint is multiplied
+ *  by; `rest` the poses it can lie in ([euler x, z, weight, sink as a share of its depth]); `near` the share dropped
+ *  beside the hull (the rest are thrown); `spin` its tumble in the air (rad/s). Origin at the piece's middle. */
+function litterKit120() {
+  let seed = 9127;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const STEEL = [0.085, 0.08, 0.074], RUBBER = [0.03, 0.029, 0.028], PINE = [0.30, 0.205, 0.105], BATTEN = [0.21, 0.14, 0.07],
+    BRASS = [0.40, 0.27, 0.075], CANVAS = [0.21, 0.185, 0.12], LEATHER = [0.07, 0.045, 0.025], RUST = [0.17, 0.075, 0.032],
+    TORN = [0.15, 0.125, 0.105], PRIMER = [0.24, 0.22, 0.17], SH = s => [s, s, s];
+  let P, N, C, M;
+  const put = (p, n, c, m) => { P.push(p[0], p[1], p[2]); N.push(n[0], n[1], n[2]); C.push(c[0], c[1], c[2]); M.push(m); };
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const crs = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const nrm = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  /** a triangle wound to face `out`, flat unless `ns` gives its normals */
+  const tri = (a, b, c, col, m, out, ns) => {
+    let n = nrm(crs(sub(b, a), sub(c, a)));
+    if (out && dot(n, out) < 0) { const t = b; b = c; c = t; n = [-n[0], -n[1], -n[2]]; if (ns) ns = [ns[0], ns[2], ns[1]]; }
+    put(a, ns ? ns[0] : n, col, m); put(b, ns ? ns[1] : n, col, m); put(c, ns ? ns[2] : n, col, m);
+  };
+  /** a placement: roll about z, pitch about x, yaw about y, then the shift (the props kit's `K.at`) */
+  const at = (cx, cy, cz, yaw, pitch, roll) => {
+    const cw = Math.cos(yaw || 0), sw = Math.sin(yaw || 0), cp = Math.cos(pitch || 0), sp = Math.sin(pitch || 0), cr = Math.cos(roll || 0), sr = Math.sin(roll || 0);
+    return (x, y, z) => { const x1 = x * cr - y * sr, y1 = x * sr + y * cr, y2 = y1 * cp - z * sp, z2 = y1 * sp + z * cp; return [cx + x1 * cw + z2 * sw, cy + y2, cz - x1 * sw + z2 * cw]; };
+  };
+  /** a box of half-extents (hx, hy, hz); `top` a colour (or shade) for the face that looks up */
+  const box = (T, hx, hy, hz, col, m, top) => {
+    const V = [T(-hx, -hy, -hz), T(hx, -hy, -hz), T(hx, hy, -hz), T(-hx, hy, -hz), T(-hx, -hy, hz), T(hx, -hy, hz), T(hx, hy, hz), T(-hx, hy, hz)], O = T(0, 0, 0);
+    for (const f of [[0, 3, 2, 1], [4, 5, 6, 7], [0, 4, 7, 3], [1, 2, 6, 5], [3, 7, 6, 2], [0, 1, 5, 4]]) {
+      const a = V[f[0]], b = V[f[1]], c = V[f[2]], d = V[f[3]], out = sub([(a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2], O);
+      const cc = top && f[0] === 3 ? top : col;
+      tri(a, b, c, cc, m, out); tri(a, c, d, cc, m, out);
+    }
+  };
+  /** a cylinder along local x from -h/2 to h/2, smooth sides; `cap` the colour of its ends or null */
+  const cylX = (T, r, h, sides, col, m, cap, capM) => {
+    const ring = (x, j) => { const t = 2 * Math.PI * j / sides; return { p: T(x, Math.cos(t) * r, Math.sin(t) * r), n: nrm(sub(T(x, Math.cos(t), Math.sin(t)), T(x, 0, 0))) }; };
+    for (let j = 0; j < sides; j++) {
+      const A = ring(-h / 2, j), B = ring(-h / 2, j + 1), Cc = ring(h / 2, j + 1), D = ring(h / 2, j), out = [A.n[0] + B.n[0], A.n[1] + B.n[1], A.n[2] + B.n[2]];
+      tri(A.p, B.p, Cc.p, col, m, out, [A.n, B.n, Cc.n]); tri(A.p, Cc.p, D.p, col, m, out, [A.n, Cc.n, D.n]);
+    }
+    if (cap) for (const s of [-1, 1]) { const o = T(s * h / 2, 0, 0), n = nrm(sub(T(s, 0, 0), T(0, 0, 0)));
+      for (let j = 0; j < sides; j++) tri(o, ring(s * h / 2, j).p, ring(s * h / 2, j + 1).p, cap, capM == null ? m : capM, n, [n, n, n]); }
+  };
+  /** a lathe about local y: `prof` [radius, y] from the axis out and round; `colAt(k)` / `mAt(k)` per segment */
+  const lathe = (T, prof, sides, colAt, mAt) => {
+    const Pn = prof.map(([r, y], k) => { const a = prof[Math.max(0, k - 1)], b = prof[Math.min(prof.length - 1, k + 1)], dr = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dr, dy) || 1; return { r, y, nr: dy / l, ny: -dr / l }; });
+    for (let k = 0; k < Pn.length - 1; k++) for (let j = 0; j < sides; j++) {
+      const pt = (q, jj) => { const t = 2 * Math.PI * jj / sides; return { p: T(Math.cos(t) * q.r, q.y, Math.sin(t) * q.r), n: nrm(sub(T(Math.cos(t) * q.nr, q.ny, Math.sin(t) * q.nr), T(0, 0, 0))) }; };
+      const A = pt(Pn[k], j), B = pt(Pn[k], j + 1), Cc = pt(Pn[k + 1], j + 1), D = pt(Pn[k + 1], j);
+      const out = [A.n[0] + Cc.n[0], A.n[1] + Cc.n[1], A.n[2] + Cc.n[2]], col = colAt(k), m = mAt(k);
+      tri(A.p, B.p, Cc.p, col, m, out, [A.n, B.n, Cc.n]); tri(A.p, Cc.p, D.p, col, m, out, [A.n, Cc.n, D.n]);
+    }
+  };
+  /** a SLAB: the polygon `poly` ([x, z] about its middle) `th` thick, bent by `bend(x, z)` (y), top / bottom / torn edge */
+  const slab = (T, poly, th, top, topM, bot, botM, edge, edgeM, bend) => {
+    const by = (x, z) => bend ? bend(x, z) : 0, n = poly.length;
+    const U = poly.map(([x, z]) => T(x, by(x, z) + th / 2, z)), D = poly.map(([x, z]) => T(x, by(x, z) - th / 2, z));
+    const cu = T(0, by(0, 0) + th / 2, 0), cd = T(0, by(0, 0) - th / 2, 0), up = nrm(sub(cu, cd)), dn = [-up[0], -up[1], -up[2]];
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n;
+      tri(cu, U[i], U[j], top, topM, up); tri(cd, D[i], D[j], bot, botM, dn);
+      const mid = sub([(U[i][0] + U[j][0]) / 2, (U[i][1] + U[j][1]) / 2, (U[i][2] + U[j][2]) / 2], [(cu[0] + cd[0]) / 2, (cu[1] + cd[1]) / 2, (cu[2] + cd[2]) / 2]);
+      tri(U[i], D[i], D[j], edge, edgeM, mid); tri(U[i], D[j], U[j], edge, edgeM, mid); }
+  };
+  const K = {};
+  /** close the piece: centre it on its box, keep it under `kind` */
+  const end = (kind, rest, near, spin) => {
+    let lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+    for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], P[i + a]); hi[a] = Math.max(hi[a], P[i + a]); }
+    const c = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+    for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) P[i + a] -= c[a];
+    (K[kind] = K[kind] || []).push({ kind, p: new Float32Array(P), n: new Float32Array(N), c: new Float32Array(C), m: new Float32Array(M), nv: P.length / 3,
+      size: [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]], rest, near, spin });
+    P = []; N = []; C = []; M = [];
+  };
+  P = []; N = []; C = []; M = [];
+  // TRACK: links 0.152 m long, 0.42 m across (a Sherman's), the run's shoes, a grouser bar under each, the guide horn on
+  // the inner face, the pins at both ends; a run lies grousers down or horns down, a little off straight
+  const link = (Tl, rust) => {
+    const s = rust ? [STEEL[0] * 0.6 + RUST[0] * 0.4, STEEL[1] * 0.6 + RUST[1] * 0.4, STEEL[2] * 0.6 + RUST[2] * 0.4] : STEEL;
+    const o = (ox, oy, oz) => (x, y, z) => Tl(x + ox, y + oy, z + oz);
+    box(o(0, 0, 0), 0.21, 0.0165, 0.064, s, 0, [s[0] * 1.45, s[1] * 1.45, s[2] * 1.45]);
+    box(o(0, -0.026, 0), 0.19, 0.0095, 0.013, s, 0);
+    box(o(0, 0.048, 0), 0.016, 0.032, 0.03, s, 0);
+    for (const z of [-0.07, 0.07]) cylX(o(0, 0, z), 0.017, 0.4, 6, s, 0, null);
+  };
+  const run = (nl, curve, wave, twistAt) => {
+    let x = 0, z = 0, yaw = 0;
+    for (let i = 0; i < nl; i++) {
+      const tw = i === twistAt ? 0.9 : 0, pitch = wave * Math.sin(i * 1.7 + 0.4);
+      link(at(x, i === twistAt ? 0.03 : 0, z, yaw + (rnd() - 0.5) * 0.06, pitch, tw), rnd() < 0.3);
+      yaw += curve; x += Math.sin(yaw) * 0.152; z += Math.cos(yaw) * 0.152;
+    }
+  };
+  const TRACK_REST = [[0, 0, 0.7, 0], [Math.PI, 0, 0.3, 0]];
+  run(6, 0.0, 0.05, -1); end('track', TRACK_REST, 0.65, 3);
+  run(5, 0.13, 0.04, -1); end('track', TRACK_REST, 0.65, 3);
+  run(4, -0.06, 0.03, 3); end('track', TRACK_REST, 0.6, 3);
+  run(1, 0, 0, -1); end('link', TRACK_REST, 0.4, 7);
+  run(2, 0.25, 0, -1); end('link', TRACK_REST, 0.4, 6);
+  // A STOWAGE BIN: the hull's paint (m 1), the lid's seam, two hinges, a hasp, a handle at each end; and a long tool box
+  const bin = (L, Hh, D, tool) => {
+    box(at(0, 0, 0), L / 2, Hh / 2, D / 2, SH(1), 1, SH(1.08));
+    box(at(0, Hh / 2 - 0.035, 0), L / 2 + 0.006, 0.011, D / 2 + 0.006, SH(0.72), 1);
+    for (const x of [-L * 0.3, L * 0.3]) cylX(at(x, Hh / 2 - 0.01, -D / 2 - 0.004), 0.014, 0.08, 6, SH(0.6), 1, SH(0.6));
+    box(at(0, Hh / 2 - 0.07, D / 2 + 0.008), 0.03, 0.04, 0.008, STEEL, 0);
+    for (const s of [-1, 1]) box(at(s * (L / 2 + 0.012), 0.02, 0), 0.012, 0.014, tool ? 0.05 : 0.07, STEEL, 0);
+    if (tool) for (const x of [-L * 0.22, L * 0.22]) box(at(x, 0, 0), 0.02, Hh / 2 + 0.004, D / 2 + 0.004, LEATHER, 0);
+  };
+  const BOX_REST = [[0, 0, 0.6, 0], [0, Math.PI / 2, 0.05, 0], [Math.PI / 2, 0, 0.25, 0], [Math.PI, 0, 0.1, 0]];
+  bin(1.0, 0.36, 0.4, false); end('bin', BOX_REST, 0.35, 4);
+  bin(1.1, 0.22, 0.3, true); end('bin', BOX_REST, 0.35, 4);
+  // A JERRYCAN: 47 x 34.5 x 16.5 cm, the X pressed into both sides, three handles, the spout
+  const jerry = () => {
+    box(at(0, 0, 0), 0.1725, 0.235, 0.0825, SH(1), 1, SH(1.06));
+    const da = Math.atan2(0.36, 0.27), dl = Math.hypot(0.36, 0.27) / 2;
+    for (const s of [-1, 1]) for (const r of [da, -da]) box(at(0, 0, s * 0.0845, 0, 0, r), dl, 0.012, 0.004, SH(1.12), 1);
+    for (const x of [-0.06, 0, 0.06]) box(at(x, 0.255, 0), 0.011, 0.02, 0.045, SH(0.85), 1);
+    cylX(at(0.115, 0.262, 0, 0, 0, Math.PI / 2), 0.022, 0.05, 6, SH(0.85), 1, SH(0.6));
+  };
+  const CAN_REST = [[0, 0, 0.25, 0], [Math.PI / 2, 0, 0.3, 0], [-Math.PI / 2, 0, 0.3, 0], [0, Math.PI / 2, 0.15, 0]];
+  jerry(); end('jerry', CAN_REST, 0.3, 6);
+  // A ROAD WHEEL 0.6 m across (scaled to the hull when thrown): the rubber tyre, the dished steel disc, the hub and its cap
+  const WPROF = [[0.0, -0.05], [0.235, -0.05], [0.255, -0.064], [0.296, -0.056], [0.305, 0], [0.296, 0.056], [0.255, 0.064], [0.238, 0.05],
+    [0.15, 0.032], [0.098, 0.04], [0.085, 0.072], [0.05, 0.082], [0.0, 0.084]];
+  lathe(at(0, 0, 0), WPROF, 14, k => (k >= 2 && k <= 5) ? RUBBER : SH(k >= 9 ? 0.8 : 1), k => (k >= 2 && k <= 5) ? 0 : 1);
+  for (let j = 0; j < 6; j++) { const t = j / 6 * 2 * Math.PI; box(at(Math.cos(t) * 0.12, 0.04, Math.sin(t) * 0.12, t), 0.012, 0.01, 0.012, SH(0.7), 1); }
+  end('wheel', [[0, 0, 0.55, 0], [Math.PI, 0, 0.35, 0], [0.22, 0, 0.1, 0.25]], 0.55, 3.5);
+  // A HATCH: the commander's round one (hinge lug, handle) and the driver's (periscope housing, hinge bar); the inside
+  // primer (ivory) or the paint
+  const circ = (r, n2, j) => { const o = []; for (let i = 0; i < n2; i++) { const t = i / n2 * 2 * Math.PI; o.push([Math.cos(t) * r * (1 + (rnd() - 0.5) * j), Math.sin(t) * r * (1 + (rnd() - 0.5) * j)]); } return o; };
+  for (const inside of [PRIMER, null]) {
+    slab(at(0, 0, 0), circ(0.27, 14, 0), 0.035, SH(1), 1, inside || SH(0.85), inside ? 0 : 1, SH(0.75), 1);
+    box(at(0.285, 0.0, 0), 0.04, 0.03, 0.06, SH(0.7), 1);
+    for (const z of [-0.07, 0.07]) box(at(-0.05, -0.04, z), 0.012, 0.025, 0.012, STEEL, 0);
+    box(at(-0.05, -0.062, 0), 0.012, 0.01, 0.085, STEEL, 0);
+    end('hatch', [[0, 0, 0.5, 0], [Math.PI, 0, 0.5, 0]], 0.3, 5);
+  }
+  slab(at(0, 0, 0), [[-0.31, -0.21], [0.31, -0.21], [0.31, 0.21], [-0.31, 0.21]], 0.04, SH(1), 1, PRIMER, 0, SH(0.75), 1);
+  box(at(0, 0.055, 0.09), 0.1, 0.035, 0.05, SH(0.9), 1, SH(0.95));
+  box(at(0.02, 0.055, 0.141), 0.08, 0.02, 0.003, [0.02, 0.025, 0.03], 0);
+  cylX(at(0, 0, -0.225), 0.02, 0.5, 6, SH(0.7), 1, SH(0.7));
+  end('hatch', [[0, 0, 0.5, 0], [Math.PI, 0, 0.5, 0]], 0.3, 5);
+  // A TORN PLATE: armour, paint on one face, rust on the other, the torn edge bright; bent. And a MUDGUARD, crumpled in
+  // two along its length with the lip down one side.
+  const torn = (rx, rz, th, nn, curl) => { const o = []; let a = rnd() * 6.28;
+    for (let i = 0; i < nn; i++) { a += 2 * Math.PI / nn * (0.7 + rnd() * 0.6); const r = 0.62 + rnd() * 0.5; o.push([Math.cos(a) * rx * r, Math.sin(a) * rz * r]); }
+    o.sort((p, q) => Math.atan2(p[1], p[0]) - Math.atan2(q[1], q[0]));
+    slab(at(0, 0, 0), o, th, SH(0.95), 1, RUST, 0, TORN, 0, (x, z) => curl * (x / rx) * (x / rx) + curl * 0.4 * z / rz); };
+  const PLATE_REST = [[0, 0, 0.45, 0], [Math.PI, 0, 0.35, 0], [0.42, 0, 0.2, 0.32]];
+  torn(0.46, 0.32, 0.03, 9, 0.05); end('plate', PLATE_REST, 0.55, 3);
+  torn(0.3, 0.22, 0.025, 8, 0.035); end('plate', PLATE_REST, 0.45, 4);
+  torn(0.38, 0.18, 0.04, 7, 0.02); end('plate', PLATE_REST, 0.5, 3);
+  { const bend = (x) => -0.09 * Math.max(0, Math.abs(x + 0.08) - 0.05) * 3.2;
+    slab(at(0, 0, 0), [[-0.56, -0.18], [-0.08, -0.2], [0.55, -0.17], [0.56, 0.18], [-0.05, 0.19], [-0.55, 0.17]], 0.012, SH(1), 1, RUST, 0, TORN, 0, (x) => bend(x));
+    for (let i = 0; i < 6; i++) { const x0 = -0.56 + i * 0.187, x1 = x0 + 0.187;
+      box(at((x0 + x1) / 2, bend((x0 + x1) / 2) - 0.035, 0.18), 0.0935, 0.035, 0.006, SH(0.85), 1); }
+    end('plate', PLATE_REST, 0.5, 3); }
+  // AN AMMUNITION CASE (pine, battens, the yellow band) and its rounds' brass: three cases lying together
+  const crate = () => {
+    box(at(0, 0, 0), 0.36, 0.12, 0.18, PINE, 0, [PINE[0] * 1.08, PINE[1] * 1.08, PINE[2] * 1.08]);
+    for (const s of [-1, 1]) box(at(s * 0.33, 0, 0), 0.03, 0.128, 0.188, BATTEN, 0);
+    box(at(0, 0, 0), 0.06, 0.124, 0.184, [0.42, 0.33, 0.06], 0);
+    for (const s of [-1, 1]) box(at(s * 0.2, 0.135, 0), 0.025, 0.012, 0.012, [0.12, 0.09, 0.05], 0);
+  };
+  crate(); end('crate', BOX_REST, 0.3, 5);
+  for (let i = 0; i < 3; i++) { const T = at(i === 1 ? 0.1 : 0, 0.0375, (i - 1) * 0.085, (rnd() - 0.5) * 0.5);
+    cylX(T, 0.0375, 0.36, 8, BRASS, 0, [0.03, 0.025, 0.02]);
+    cylX((x, y, z) => T(x - 0.18, y, z), 0.042, 0.012, 8, BRASS, 0, BRASS); }
+  end('brass', [[0, 0, 1, 0]], 0.25, 8);
+  // A BEDROLL: canvas rolled, two straps
+  cylX(at(0, 0, 0), 0.1, 0.78, 10, CANVAS, 0, [CANVAS[0] * 0.8, CANVAS[1] * 0.8, CANVAS[2] * 0.8]);
+  for (const x of [-0.22, 0.22]) cylX(at(x, 0, 0), 0.104, 0.035, 10, LEATHER, 0, LEATHER);
+  end('roll', [[0, 0, 1, 0]], 0.3, 6);
+  return K;
+}
+/** (round 120, EFFECTS-5) vertices [a, b) of `at` changed: grow its upload range (three resets it to -1 once sent). */
+function litterMark120(at, a, b) {
+  const r = at.updateRange;
+  if (r.count < 0) { r.offset = a * 3; r.count = (b - a) * 3; }
+  else { const lo = Math.min(r.offset, a * 3), hi = Math.max(r.offset + r.count, b * 3); r.offset = lo; r.count = hi - lo; }
+  at.needsUpdate = true;
+}
+/** (round 120, EFFECTS-5) Write piece `f` of the field's litter at `t` s into its flight: along its arc (g = 9.8 m/s/s at
+ *  0.25 u/m) and turned about its tumble axis `f.a*` by what is left of its tumble `f.w`, so that at `f.tf` it lies
+ *  exactly in its rest pose (`f.qr` at `f.cx/cy/cz`). True once it has landed. Pictures only. */
+function litterPose120(K, f, t) {
+  const land = t >= f.tf, h = land ? 0 : 0.5 * f.w * (1 - t / f.tf), sh = Math.sin(h), ch = Math.cos(h);
+  const ax = f.ax * sh, ay = f.ay * sh, az = f.az * sh, aw = ch, bx = f.qr[0], by = f.qr[1], bz = f.qr[2], bw = f.qr[3];
+  const qx = aw * bx + ax * bw + ay * bz - az * by, qy = aw * by - ax * bz + ay * bw + az * bx, qz = aw * bz + ax * by - ay * bx + az * bw, qw = aw * bw - ax * bx - ay * by - az * bz;
+  const px = land ? f.cx : f.x0 + f.vx * t, py = land ? f.cy : f.y0 + f.vy * t - 1.225 * t * t, pz = land ? f.cz : f.z0 + f.vz * t;
+  const tp = f.tp, P = tp.p, N = tp.n, s = f.s, A = K.litter.geometry.attributes, pa = A.position.array, na = A.normal.array;
+  for (let j = 0, o = f.i0 * 3; j < P.length; j += 3, o += 3) {
+    for (let w = 0; w < 2; w++) {
+      const src = w ? N : P, x = src[j], y = src[j + 1], z = src[j + 2];
+      const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z;
+      const rx = ix * qw - iw * qx - iy * qz + iz * qy, ry = iy * qw - iw * qy - iz * qx + ix * qz, rz = iz * qw - iw * qz - ix * qy + iy * qx;
+      if (w) { na[o] = rx; na[o + 1] = ry; na[o + 2] = rz; } else { pa[o] = px + rx * s; pa[o + 1] = py + ry * s; pa[o + 2] = pz + rz * s; }
+    }
+  }
+  litterMark120(A.position, f.i0, f.i0 + tp.nv); litterMark120(A.normal, f.i0, f.i0 + tp.nv);
+  return land;
+}
 // (round 120, EFFECTS-4, `game.hulkFar120`) where a hulk's rust-and-ash mottle starts to fade toward its mean tone (u;
 // gone by 1.6x): from far off the mottle read as camouflage (main, 08:39). assets/unitshade.js `uUsLt.w`.
 const HULK_FAR120 = 50;
@@ -37435,6 +37667,14 @@ class Unit {
       }
       gF.pathfinder.fire = gF._burnGrid118();
     }
+    // (round 120, `game.bridgeWet120`, BRIDGES-6) AN ABANDONED HULK TAKES NO ROUTE. A vehicle its crew has bailed out of is
+    // inert (`update` returns into `_updateBailedWreck`) and never runs `_updateMove` again, so a route given to it was kept
+    // for the rest of the battle: a halftrack knocked out on Arnhem's deck (seed 7, t 417, crew out) was handed one by its
+    // section's rout at t 448 and 'moved' for 25 minutes without moving (cen6.js). Maps with a bridge only, like the switch.
+    if (this.def.vehicle && this.crewBailed && this.game.bridgeWet120 === true && window.Bridges120 && window.Bridges120.any) {
+      this.path = []; this.pathIdx = 0; this._pathPartial = false; this._hulk120 = (this._hulk120 || 0) + 1;
+      return;
+    }
     // (round 120, `game.bridges120`, BRIDGES-2) THE COMPUTER DOES NOT SEND A VEHICLE INTO THE RIVER. With a deck where the
     // map's dam was, the AI's advance points beside it (Arnhem: armoured cars 'advancing' to cells 10 east of the deck,
     // mid-river) are water, and a route that ENDS in water is honoured as an order into it (`_wetStep120`): they drove
@@ -43419,6 +43659,17 @@ class Unit {
     if (!this.def.vehicle && arrive < 0.6) {
       const wgx = worldToCell(wp.x), wgz = worldToCell(wp.z), O = this.game.obstacles;
       if (inGrid(wgx, wgz) && O.occupied[wgz * GRID + wgx] === 2) { const o = O.at(wgx, wgz); if (o && o.footR) arrive = Math.max(arrive, o.footR + 0.08); }
+    }
+    // (round 120, `game.bridgeWet120`, BRIDGES-6) A HULL IS THERE WHEN ITS LAST WAYPOINT IS INSIDE ITS OWN LENGTH, TO ITS SIDE.
+    // The 0.3 u arrival radius is inside a vehicle's turning circle: an armoured car at Arnhem's south ramp (seed 7) routed to a
+    // point 0.65-0.87 u off its flank (its own cell's centre, then the next cell's) turned toward it, the armour arc flipped it
+    // between forward and reverse every half second, and it rocked in place for two minutes (cen6.js). A last waypoint within
+    // VEH_NEAR120 that lies more than a radian off the hull's axis both ways is reached. The computer's vehicles on a map with a
+    // bridge, like the rest of the switch (the player's own order is driven as before).
+    if (this.def.vehicle && d >= arrive && d < VEH_NEAR120 && this.pathIdx === this.path.length - 1 && this.game.bridgeWet120 === true
+      && window.Bridges120 && window.Bridges120.any && !(this.team === this.game.playerTeam && !this._underAI())) {
+      const a120 = Math.atan2(dx, dz);
+      if (Math.abs(angDiff(a120, this.face)) > 1 && Math.abs(angDiff(a120 + Math.PI, this.face)) > 1) { arrive = d + 1e-6; this._nearHere120 = (this._nearHere120 || 0) + 1; }
     }
     if (d < arrive) {
       // Reaching a waypoint on another storey is what commits the climb — the
@@ -68709,17 +68960,17 @@ class Game {
     const scorch = new THREE.Mesh(geo, smat);
     scorch.userData.seg = SEG; scorch.userData.cap = CAPD;
     scorch.count = 0; scorch.frustumCulled = false; scorch.receiveShadow = true; scorch.castShadow = false; scorch.renderOrder = 1;
-    const lmat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    const litter = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), lmat, 1200);
-    litter.count = 0; litter.frustumCulled = false; litter.receiveShadow = true; litter.castShadow = false;
-    litter.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(1200 * 3), 3);
-    const wgeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12); wgeo.rotateZ(Math.PI / 2);
-    const wheels = new THREE.InstancedMesh(wgeo, lmat, 240);
-    wheels.count = 0; wheels.frustumCulled = false; wheels.receiveShadow = true; wheels.castShadow = false;
-    wheels.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(240 * 3), 3);
-    this.scene.add(scorch); this.scene.add(litter); this.scene.add(wheels);
-    return (this._kit120 = { scorch, litter, wheels, ns: 0, nl: 0, nw: 0, fly: [], m: new THREE.Matrix4(),
-      q: new THREE.Quaternion(), e: new THREE.Euler(), p: new THREE.Vector3(), s: new THREE.Vector3(), c: new THREE.Color() });
+    // (round 120, EFFECTS-5) THE LITTER: every piece of every wreck in ONE world-space geometry (`litterKit120`'s solids,
+    // written where they lie by `_wreckLitter120` and along their flight by `_debris120Tick`), drawn to the last piece
+    // laid: one draw, and one in the shadow pass. The flat boxes and standing drums it replaces read as card.
+    const CAPV = LITTER120.cap, lgeo = new THREE.BufferGeometry();
+    for (const nm of ['position', 'normal', 'color']) lgeo.setAttribute(nm, new THREE.BufferAttribute(new Float32Array(CAPV * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    lgeo.setDrawRange(0, 0);
+    const litter = new THREE.Mesh(lgeo, new PaintedMaterial({ vertexColors: true }));
+    litter.frustumCulled = false; litter.receiveShadow = true; litter.castShadow = LITTER120.shadow; litter.visible = false;
+    this.scene.add(scorch); this.scene.add(litter);
+    return (this._kit120 = { scorch, litter, ns: 0, lv: 0, np: 0, fly: [], pcs: litterKit120(), q: new THREE.Quaternion(), q2: new THREE.Quaternion(),
+      e: new THREE.Euler(), v: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) });
   }
   /** (round 120, `game.debris120`) WHAT A BREW-UP THROWS: a char under the hull and a ring of burnt grass round it,
    *  and a dozen pieces — plates, lengths of track, stowage, a road wheel — thrown out over the next seconds and
@@ -68727,7 +68978,7 @@ class Game {
   _wreckLitter120(u) {
     const K = this._fxKit120(), T = this.terrain, b = vehBody(u.def);
     const gy = T.heightAt(u.pos.x, u.pos.z);
-    K.scorch.visible = K.litter.visible = K.wheels.visible = true;
+    K.scorch.visible = true;
     // the char: about twice the hull's length across, turned at random
     const SEG = K.scorch.userData.seg, CAPD = K.scorch.userData.cap, VP = (SEG + 1) * (SEG + 1);
     const i = K.ns % CAPD; K.ns++;
@@ -68758,53 +69009,75 @@ class Game {
     K.scorch.count = Math.min(CAPD, K.ns); K.scorch.geometry.setDrawRange(0, K.scorch.count * SEG * SEG * 6);
     // (round 120, EFFECTS-3) the char decal as dark as the field takes it: on sand a soot stain (the key's share, >= 0.5)
     { const gk = (T && T.groundKey) || GROUND_KEY_REF; K.scorch.material.opacity = Math.min(1, Math.max(0.5, Math.pow(GROUND_KEY_REF / Math.max(GROUND_KEY_REF, gk), 0.9))); }
-    // the litter: thrown from the hull, landing out to about two hull lengths
-    const n = SCORCH120.n[0] + Math.floor(Math.random() * SCORCH120.n[1]), roof = b.roof || b.H, big = SCORCH120.big;   // (EFFECTS-2) read at 46 u; (EFFECTS-4) more, bigger
-    const paint = u.flashMats && u.flashMats[0] && u.flashMats[0].userData && u.flashMats[0].userData._paint;
-    for (let k = 0; k < n; k++) {
-      const kind = Math.random(), a = Math.random() * 6.283, sp = (0.7 + Math.random() * 2.2) * b.L / 1.6;
-      let w, h, l, col;
-      if (kind < 0.34) { w = 0.12 + Math.random() * 0.14; h = 0.012; l = 0.1 + Math.random() * 0.16;                              // a plate, burnt
-        const pc = Math.random(); col = pc < 0.45 ? 0x0e0d0c : pc < 0.75 ? 0x2e140a : 0x3e3c38; }                                 // (EFFECTS-4) black, rust, ash (linear)
-      else if (kind < 0.58) { w = 0.1; h = 0.016; l = 0.3 + Math.random() * 0.35; col = 0x0b0b0a; }                               // a length of track
-      else if (kind < 0.82) { w = 0.08 + Math.random() * 0.05; h = 0.06 + Math.random() * 0.04; l = 0.12 + Math.random() * 0.1;   // stowage: a box, a can
-        col = Math.random() < 0.5 ? 0x1c2412 : 0x2c2416; }                                                                       // (EFFECTS-4) olive, tan (linear)
-      else { w = 0.2; h = 0.07; l = 0.2; col = 0x0f0e0d; }                                                                       // a road wheel
-      const bk = kind >= 0.82 ? 1.55 : kind >= 0.34 && kind < 0.58 ? 1.3 : big;   // (EFFECTS-4) a road wheel keeps its size; a track length x1.3 (x2 read as planks, c2)
-      w *= bk; l *= bk; h *= Math.sqrt(bk);
-      const wheel = kind >= 0.82;
-      const fl = { wheel, i: -1, x: u.pos.x, y: gy + roof, z: u.pos.z, vx: Math.cos(a) * sp, vy: 1.2 + Math.random() * 2.2, vz: Math.sin(a) * sp,
-        w, h, l, yaw: Math.random() * 6.283, spin: (Math.random() - 0.5) * 9, rx: 0, rz: 0, t: 0 };
-      if (paint && !wheel && (kind < 0.34 || kind >= 0.58) && Math.random() < 0.3) col = new THREE.Color().copy(paint).multiplyScalar(0.7).getHex();   // a piece of its own paint (EFFECTS-4: never a track length)
-      const M = wheel ? K.wheels : K.litter, cap = wheel ? 240 : 1200;
-      fl.i = (wheel ? K.nw++ : K.nl++) % cap;
-      M.count = Math.min(cap, wheel ? K.nw : K.nl);
-      M.setColorAt(fl.i, K.c.setHex(col)); M.instanceColor.needsUpdate = true;
-      K.fly.push(fl);
+    // (round 120, EFFECTS-5) THE LITTER: a few SOLID pieces (`litterKit120`), some dropped beside the hull (a run of
+    // track where it broke, a plate blown off), the rest thrown out to ~2 hull lengths; each lands in a pose it can lie
+    // in, on the ground's slope, never inside the hull, on water or in a building. Its arc and tumble are fixed here and
+    // end exactly in that pose (`litterPose120`). A wheeled hull throws no track and no road wheel.
+    const PK = K.pcs, roof = b.roof || b.H, Wd = b.W || b.L * 0.5, LT = LITTER120, S = this.structures, Q = K.q, V = K.v;
+    // the hull's paint from its def's colour, as linear albedo (a textured model's material colour is WHITE: the
+    // flat litter's 'paint' pieces drew pale grey, and the first solid bins white)
+    const dc = new THREE.Color(u.def.color != null ? u.def.color : 0x4a5238), P0 = [Math.pow(dc.r, 2.2), Math.pow(dc.g, 2.2), Math.pow(dc.b, 2.2)];
+    const fx = Math.sin(u.face || 0), fz = Math.cos(u.face || 0), hs = clamp(b.L / 1.5, 0.8, 1.35), wheeled = !!u.def.wheeled;
+    const menu = wheeled ? ['plate', 'plate', 'bin', 'jerry', 'jerry', 'crate'] : ['track', 'link', 'link', 'plate', 'plate', 'bin', 'jerry'];
+    const extra = wheeled ? ['jerry', 'hatch', 'crate', 'brass', 'roll', 'plate', 'bin', 'roll', 'plate', 'brass'] : ['jerry', 'wheel', 'hatch', 'crate', 'brass', 'roll', 'plate', 'link', 'link', 'bin', 'track', 'jerry'];
+    const n = LT.n[0] + Math.floor(Math.random() * (LT.n[1] + 1));
+    while (menu.length < n && extra.length) menu.push(extra.splice(Math.floor(Math.random() * extra.length), 1)[0]);
+    const CA = K.litter.geometry.attributes.color, col = CA.array, i00 = K.lv;
+    for (const kind of menu) {
+      const L0 = PK[kind];
+      if (!L0) continue;
+      const tp = L0[Math.floor(Math.random() * L0.length)];
+      if (K.lv + tp.nv > LT.cap) break;                                // the field's litter is full: chars only from here
+      const s = 0.25 * LT.k * (kind === 'wheel' || kind === 'track' || kind === 'link' ? hs : 1);
+      const near = Math.random() < tp.near, a = Math.random() * 6.283, d = (near ? 0.55 + Math.random() * 0.35 : 0.9 + Math.random() * 1.1) * b.L;
+      let xl = u.pos.x + Math.cos(a) * d, zl = u.pos.z + Math.sin(a) * d;
+      { const al = (xl - u.pos.x) * fx + (zl - u.pos.z) * fz, sd = (xl - u.pos.x) * fz - (zl - u.pos.z) * fx;   // along and across the hull
+        if (Math.abs(al) < b.L * 0.6 && Math.abs(sd) < Wd * 0.7) { const s2 = (sd < 0 ? -1 : 1) * Wd * (0.75 + Math.random() * 0.3);
+          xl = u.pos.x + al * fx + s2 * fz; zl = u.pos.z + al * fz - s2 * fx; } }
+      const cx = worldToCell(xl), cz = worldToCell(zl);
+      if (!inGrid(cx, cz) || TYPES[T.typeAt(cx, cz)] === 'water' || (S && S.any && S.has(cx, cz))) continue;
+      // the pose it lies in: one of its rests (by weight), turned at random, on the ground's slope
+      let r = Math.random() * tp.rest.reduce((t, q) => t + q[2], 0), rs = tp.rest[0];
+      for (const q of tp.rest) { r -= q[2]; if (r <= 0) { rs = q; break; } }
+      const e = 0.3, gy0 = T.heightAt(xl, zl);
+      V.set(-(T.heightAt(xl + e, zl) - T.heightAt(xl - e, zl)) / (2 * e), 1, -(T.heightAt(xl, zl + e) - T.heightAt(xl, zl - e)) / (2 * e)).normalize();
+      K.e.set(rs[0], 0, rs[1]); Q.setFromEuler(K.e);
+      K.q2.setFromAxisAngle(K.up, Math.random() * 6.283); Q.premultiply(K.q2);
+      K.q2.setFromUnitVectors(K.up, V); Q.premultiply(K.q2);
+      // its lowest point along the ground's normal touches the ground (or `rs[3]` of its depth is in it)
+      let lo = 1e9, hi = -1e9; const pp = tp.p, qx = Q.x, qy = Q.y, qz = Q.z, qw = Q.w;
+      for (let j = 0; j < pp.length; j += 3) { const x = pp[j], y = pp[j + 1], z = pp[j + 2];
+        const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z;
+        const h = (ix * qw - iw * qx - iy * qz + iz * qy) * V.x + (iy * qw - iw * qy - iz * qx + ix * qz) * V.y + (iz * qw - iw * qz - ix * qy + iy * qx) * V.z;
+        if (h < lo) lo = h; if (h > hi) hi = h; }
+      const lift = (-lo - rs[3] * (hi - lo)) * s - 0.003;
+      const tf = near ? 0.5 + Math.random() * 0.3 : 0.95 + Math.random() * 0.85;
+      const x0 = u.pos.x + (Math.random() - 0.5) * 0.5 * b.L * fx, z0 = u.pos.z + (Math.random() - 0.5) * 0.5 * b.L * fz, y0 = u.pos.y + roof * 0.9;
+      const f = { tp, s, i0: K.lv, t: 0, tf, x0, y0, z0, cx: xl + V.x * lift, cy: gy0 + V.y * lift, cz: zl + V.z * lift, qr: [Q.x, Q.y, Q.z, Q.w] };
+      f.vx = (f.cx - x0) / tf; f.vz = (f.cz - z0) / tf; f.vy = (f.cy - y0 + 1.225 * tf * tf) / tf;
+      V.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+      f.ax = V.x; f.ay = V.y; f.az = V.z; f.w = tp.spin * tf * (0.6 + Math.random() * 0.8);
+      // its colours, once: the paint (where the piece takes it) or its own, sooted unevenly across it
+      const ch = (kind === 'track' || kind === 'link' ? 0.1 + Math.random() * 0.25 : kind === 'brass' ? 0.05 + Math.random() * 0.3 : 0.15 + Math.random() * 0.45) * (near ? 1 : 0.6);
+      const sx = Math.random() - 0.5, sy = Math.random() - 0.5, sz = Math.random() - 0.5, cm = tp.c, mm = tp.m, sz0 = tp.size;
+      for (let j = 0, o = K.lv * 3; j < tp.nv; j++, o += 3) {
+        const w = ch * Math.min(1, Math.max(0, 0.6 + 1.6 * (pp[j * 3] / sz0[0] * sx + pp[j * 3 + 1] / sz0[1] * sy + pp[j * 3 + 2] / sz0[2] * sz)));
+        for (let c = 0; c < 3; c++) { const base = mm[j] > 0.5 ? P0[c] * cm[j * 3 + c] : cm[j * 3 + c]; col[o + c] = base * (1 - w) + 0.04 * w; }
+      }
+      K.lv += tp.nv; K.np++;
+      K.fly.push(f); litterPose120(K, f, 0);
     }
-    this._debris120Tick(0);
+    if (K.lv > i00) { litterMark120(CA, i00, K.lv); K.litter.geometry.setDrawRange(0, K.lv); K.litter.visible = true; }
   }
-  /** Fly the thrown pieces until they land (ballistic, at the picture's scale), then leave them lying flat. */
+  /** Fly the thrown pieces (`litterPose120`: their arcs and tumbles were fixed when thrown, and end in the pose each
+   *  lies in); a landed piece is never written again. */
   _debris120Tick(dt) {
     const K = this._kit120;
     if (!K || !K.fly.length) return;
-    const T = this.terrain, g = 9.8 * 0.25;          // a metre a second squared, in world units
     for (let j = K.fly.length - 1; j >= 0; j--) {
       const f = K.fly[j];
       f.t += dt;
-      f.vy -= g * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt;
-      const gy = T.heightAt(f.x, f.z);
-      let landed = false;
-      if (f.y <= gy + f.h * 0.5 || f.t > 6) { f.y = gy + f.h * 0.5; landed = true; }
-      if (landed) { f.rx = (Math.random() - 0.5) * 0.25; f.rz = f.wheel ? 0 : (Math.random() - 0.5) * 0.25; if (f.wheel) f.rx = Math.random() < 0.7 ? 1.5708 : 0; }
-      else { f.rx += f.spin * dt; f.rz += f.spin * 0.7 * dt; }
-      K.e.set(f.rx, f.yaw, f.rz); K.q.setFromEuler(K.e);
-      K.p.set(f.x, f.y, f.z);
-      if (f.wheel) K.s.set(f.h, f.w, f.l); else K.s.set(f.w, f.h, f.l);
-      K.m.compose(K.p, K.q, K.s);
-      const M = f.wheel ? K.wheels : K.litter;
-      M.setMatrixAt(f.i, K.m); M.instanceMatrix.needsUpdate = true;
-      if (landed) K.fly.splice(j, 1);
+      if (litterPose120(K, f, f.t)) K.fly.splice(j, 1);
     }
   }
   /** Advance smoke density/expansion and churn each cloud's billowing column. */
@@ -74939,8 +75212,8 @@ class Game {
     this.flyDebris = [];
     this._bloodReset();
     // (round 120) the wreck pictures: chars, litter, the burning list
-    if (this._kit120) { const K = this._kit120; K.scorch.count = K.litter.count = K.wheels.count = 0; K.ns = K.nl = K.nw = 0; K.fly.length = 0;
-      K.scorch.visible = K.litter.visible = K.wheels.visible = false; }   // an empty instanced mesh is still a draw
+    if (this._kit120) { const K = this._kit120; K.scorch.count = 0; K.ns = K.lv = K.np = 0; K.fly.length = 0; K.litter.geometry.setDrawRange(0, 0);
+      K.scorch.visible = K.litter.visible = false; }   // an empty mesh is still a draw
     this._wrk120 = null;
     if (this.terrain) this.terrain._wreck120 = null;   // (round 120, EFFECTS-4) the cells under a wreck's char decal
   }
@@ -78040,7 +78313,7 @@ cosmeticClass(Game, ['_treeFireFx120', '_treeGroundFx120']);   // (round 120, `t
 cosmeticClass(Game, ['_smokeColumn120', '_wreckFx120', '_fxKit120', '_wreckLitter120', '_debris120Tick']);
 Game.prototype.smokeCol120 = true;   // ON (main, 24 Nov 08:56 UTC, from .claude/wip120/effects/sheet10_column.jpg: a tall, leaning column; +0.27/+0.09/-0.74 ms at 1/5/15 wrecks). false = the round-119 column.
 Game.prototype.wreckFx120 = true;   // ON (main, 24 Nov 13:38 UTC, from .claude/wip120/effects/sheet11_scorch_*.jpg: the fire on a brewed-up hull and the burnt-out hulk; cost ~0; Det identical).
-Game.prototype.debris120 = false;
+Game.prototype.debris120 = true;   // ON (main, 24 Nov 15:35 UTC, from .claude/wip120/effects/sheet14_litter_*.jpg: solid 3D litter (track, wheels, bins, jerrycans, plates) and EFFECTS-4's char in place of the dark cone; cost inside the nulls; Det identical).
 // (round 120, EFFECTS-4) `hulkFar120`: a hulk's rust-and-ash mottle (`hulkChar120`) fades toward its mean tone past
 // HULK_FAR120 (50 u, gone by 80): from far off it read as camouflage. A uniform (unitshade `uUsLt.w`): no recompile.
 Game.prototype.hulkFar120 = true;   // ON (main, 24 Nov 13:38 UTC: the hulk's rust mottle fades out between 50 and 80 u, so it no longer reads as camouflage; no new programs).
@@ -78074,6 +78347,7 @@ Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 1
 // El Alamein, every outcome inside the floor; rounds into trees 629 -> 162 (Village), 667 -> 160 (Ardennes), against the
 // drawing's own 5-7% (.claude/wip120/obstacles/NOTES.md); ~2 shaped tests a frame. false is the whole-cell test.
 Game.prototype.bushHit120 = true;    // ON (main, 24 Nov 09:38 UTC: the seeded A/Bs, Village 6 seeds inside the floor with 5 of 6 identical, Kasserine Pass 6/6 identical; the owner asked that hitboxes be only as big as the drawn geometry). (round 120, OBSTACLES-4) obsHit120's bush/scrub clump as today's shrubs are drawn (BUSH_DRAWN120: bush 0.73, scrub 0.96 of the top, was the old mound's bounding box 0.94 / 1.18). OFF until the seeded A/B says no worse
+Game.prototype.rockHit120 = true;    // ON (main, 24 Nov 15:48 UTC: seeded A/Bs, Village 6 seeds and Peleliu 5, nulls clean, every outcome inside the floor; hits on these bodies 20.5 -> 11.0 a battle; the owner asked that hitboxes be only as big as the drawn geometry). (round 120, OBSTACLES-6) under obsHit120: rocks, haystacks, graves, woodpiles and wrecks stop rounds by the disc their DRAWING stops (ROCK_HIT120 by quarter of the top; a boulder by its variant, ROCK_VAR120), not PROP_BODY120's bounding-box chord (1.2-1.9x the drawing). OFF until main judges the seeded A/Bs
 Game.prototype.propHit120 = true;    // ON (main, 24 Nov 09:49 UTC: seeded A/Bs, Villers-Bocage 6/6 identical, Village 6 seeds every metric inside the floor (crates struck 4.0 -> 0.7 a battle); the owner asked that hitboxes be only as big as the drawn geometry). (round 120, OBSTACLES-5) under obsHit120: crates, carts, drums, wells, statues, the dead tree (PROP_HIT120's drawn disc), walls (the line laid) and hedge corners (their arms) stop rounds as drawn, not by the whole cell. OFF until the seeded A/B
 Game.prototype.obsHit120 = true;
 // (round 120) a burning tree flames for minutes, smoulders, then collapses into a charred stump and ash, not a log
@@ -78135,6 +78409,7 @@ Game.prototype.haze120 = true;       // ON (main, 24 Nov 04:09 UTC, from .claude
 Game.prototype.sky120 = true;        // ON (main, 24 Nov 13:38 UTC, from .claude/wip120/look/sheets/s16/s16_detail_Village.jpg: the sun shows in the dusk band, a warm aureole at noon; cost inside the nulls; Det identical). (round 120, LOOK-4) THE SUN IN THE HAZE (assets/look120.js; needs haze120): a halo round the sun in the haze's own sunward colour on the dome AND the far haze (no seam at the horizon), the disc and a tight glow drawn after the haze (a low sun shines through the band), cloud light by the sun's angle (lit rims, darker bases, a low sun under them); dusk and night by the same rules. Drawing only. OFF is the shipped sky exactly; OFF until main has seen the sheets (.claude/wip120/look)
 Game.prototype.grade120 = true;      // ON (main, 24 Nov 08:56 UTC, v3 from .claude/wip120/look/sheets/s10-s11: ~1 op a fragment, every view within the nulls). (round 120, LOOK / LOOK-2 / LOOK-3) a filmic split folded into the box-art grade, amber highlights and slate shadows (assets/look120.js: a copy of the installed curve with a stronger split; LOOK-3's v3 rewrites the copy exactly to ~1 op a fragment over OFF: Village quiet hold play -0.04 / fpv +0.04 ms, nulls -0.14/-0.09, where LOOK-2's copy read +0.27/+0.25). OFF is the old curve exactly; OFF until main judges it
 Game.prototype.bridgeLod120 = true;    // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/bridges/sheet14_lod_arnhem_remagen.jpg: the same picture; Arnhem play +0.22 -> -0.11, deck +0.47 -> +0.04). (round 120, BRIDGES-3): the truss by distance — far sections the kit's lo pieces in a Lambert, the road's surfaces Lambert near too (assets/bridges120.js `_build`, `_materialLo`; .claude/wip120/bridges/NOTES.md ## BRIDGES-3)
+const VEH_NEAR120 = 1.0;   // (round 120, BRIDGES-6) `bridgeWet120`: a vehicle's last waypoint this near (u; 4 m, inside its length) and side-on is reached (`_updateMove`)
 Game.prototype.bridgeWet120 = false;   // (round 120, BRIDGES-4) OFF until main has seen the A/B: the computer's vehicles do not wade on a map with a bridge — the search keeps out of the river and a step into it is refused (`_setPathTo`, `Pathfinder.find`, `Unit._wetStep120`; .claude/wip120/bridges/NOTES.md ## BRIDGES-4)
 Game.prototype.bridgeBank120 = true;   // ON (main, 24 Nov 13:54 UTC, from .claude/wip120/bridges/sheet17_bank_look_arnhem.jpg: a turfed embankment where OFF has a cobbled hillside; BRIDGES-5 made it a LOOK, so whole 1800 s battles on Arnhem, Remagen and Son keep identical fingerprints). (round 120, BRIDGES-3) OFF until main has seen the sheets: grass on the slopes `_embank` cut beside a bridge's ramp, setts only on the lane (assets/bridges120.js `_bankGrass`). Since BRIDGES-5 a DRAWN surface only (`Terrain._drawOv120`): the cells' sim type is unchanged
 Game.prototype.bridges120 = true;    // ON (main, 23 Nov 23:40, from .claude/wip120/bridges/sheet09-13_*_v2.jpg; the owner: 'turn bridges and water on when ready'): Arnhem's river bogging fixed (no sideways step off a deck, AI goals moved off the water, the dam's spurs gone), A/B 6 seeds: Pegasus inside the floor, Arnhem bogged/inWater better than OFF, the bridge a chokepoint where a 138 m dam was (crossings -11, German lost +19); lint 100%; maps without bridges identical; cost Arnhem play +0.33 ms, the other maps <= 0.    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
