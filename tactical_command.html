@@ -21750,9 +21750,30 @@ const BUSH_STOP120 = { light: 0.08, heavy: 0.15 };
  *  OBS_SHAPE120 as 3 must have one; the rest keep the cell test (crate, cart — drawn 0.9 m off centre —, well, statue:
  *  too few on Village to measure; pool over maps next). */
 const PROP_BODY120 = { rock: 0.228, haystack: 0.579, grave: 0.119, logstack: 0.241, wreckedcar: 0.47 };
+/** (round 120, OBSTACLES-5, `game.propHit120`, under obsHit120) THE OTHER PROPS AS DRAWN. They stopped every round in their
+ *  whole 6 m cell below the sim's top. A body is now the disc at its cell's centre that stops as many level lines across
+ *  the cell as the drawing's own triangles do (o5/census_props.js in the page: lines uniform in bearing and in offset over
+ *  +-B, B = 0.75 TILE, raycast onto the prop's drawn mesh; a disc of radius r stops r / B of them), by quarter of the sim's
+ *  top, lowest first, world units. A sparse drawing (a dead tree's bare limbs, a hedgehog's girders) is a small disc and
+ *  takes no `passthrough` roll: the census counted its holes. Table figures, never the mesh. Absent: the cell's test. */
+const PROP_HIT120 = { hay: [0.178, 0.121, 0.109, 0.091], rubble: [0.231, 0.219, 0.175, 0.069],
+  // (few on the measured maps: one radius from all their lines) a crate stack 0.62 m, a cart 0.65 m (spoked wheels, a bed
+  // on them: a fifth of its box), a well 0.20 m (a low curb, posts, a roof), a statue 0.23 m (census 24 Nov, 09:23)
+  crate: [0.155, 0.155, 0.155, 0.155], cart: [0.162, 0.162, 0.162, 0.162], well: [0.050, 0.050, 0.050, 0.050], statue: [0.056, 0.056, 0.056, 0.056] };
+/** …and the line kinds AS LAID (`_orientHedges`'s LINE kinds): a wall's or stone wall's run is its centre line on its
+ *  neighbours' axis (a corner the chord from the middle of one edge to the middle of the other, a T or a crossing the
+ *  majority axis, a piece turned by hand its `rot`; a lone ruined wall keeps the yaw it was built at: its cell); a hedge's
+ *  corner or junction is its arms, a half bank from the middle toward each neighbour (`_hedgeArms`; a straight run is
+ *  `hedgeBank120`'s). A round stops where it crosses one below the crest (a wall's top, a hedge's bank). */
+const PROP_ARMS120 = { wall: 8, stonewall: 6 };
+// (census, 09:23) NOT `hedge: 1`: under the bank a drawn junction stops 0.654 of the lines through its cell (Hedgerow Hell,
+// 30 junctions; Villers-Bocage 0.624 of 15), the cell 0.693, the arms (zero thickness, `propSeg120`'s kind 1) only 0.549:
+// the bank is 2 m wide at its foot, so the cell is the nearer to the drawing and corners and junctions keep it.
 /** `segHit120`'s candidates along a step (reused: no garbage on the round's path) and its answer. */
 const SEG120_T = new Float64Array(32), SEG120_P = new Float64Array(32), SEG120_K = new Uint8Array(32), SEG120_O = new Array(32);
 const SEG120_HIT = { t: 0, x: 0, y: 0, z: 0, o: null, part: 0 };
+/** (round 120, OBSTACLES-5) `propSeg120`'s laid lines (at most four arms, x0 z0 x1 z1 each). */
+const PROP_SEG120 = new Float64Array(16);
 const LINE_CROSS = {
   fence:    { code: 4, cost: 1.2, slow: 0.6,  thick: 0.1 / METERS_PER_UNIT },
   sandbags: { code: 5, cost: 2.5, slow: 0.45, thick: 0.3 / METERS_PER_UNIT },
@@ -26017,6 +26038,64 @@ class Obstacles {
     if (worldToCell(qx) !== gx || worldToCell(qz) !== gz) return -1;
     return ay + (by - ay) * t < this.floorAt(o, gx, gz, qx, qz) + o.bankH ? t : -1;
   }
+  /** (round 120, OBSTACLES-5, `game.propHit120`) WHERE THE STEP a -> b MEETS A PROP OUTSIDE `OBS_SHAPE120` AS DRAWN: its t
+   *  on the step, -1 when the step passes it (below the crest), -2 when the prop is not shaped here (its cell's test
+   *  stands). Bodies by PROP_HIT120's disc at the height the step passes the axis; the line kinds by PROP_ARMS120's laid
+   *  lines. From map data only (the cell, its neighbours, `rot`), no mesh, no dice. */
+  propSeg120(o, ax, ay, az, bx, by, bz) {
+    if (!o || o.hp <= 0 || o.off) return -2;
+    const gx = o.gx, gz = o.gz, cx = cellCenter(gx), cz = cellCenter(gz);
+    const ux = bx - ax, uy = by - ay, uz = bz - az, L2 = ux * ux + uz * uz;
+    const R = PROP_HIT120[o.type];
+    if (R) {
+      if (L2 <= 1e-12) return -2;
+      const y0 = this.floorAt(o, gx, gz, cx, cz), yt = y0 + o.height;
+      const tc = ((cx - ax) * ux + (cz - az) * uz) / L2, tcc = tc < 0 ? 0 : tc > 1 ? 1 : tc;
+      const qx = ax + ux * tc - cx, qz = az + uz * tc - cz, d2 = qx * qx + qz * qz;
+      const bd = Math.floor((ay + uy * tcc - y0) / o.height * R.length);
+      const r = R[bd < 0 ? 0 : bd >= R.length ? R.length - 1 : bd];
+      if (!(r > 0) || d2 >= r * r) return -1;
+      const hh = Math.sqrt((r * r - d2) / L2), lo = Math.max(0, tc - hh), hi = Math.min(1, tc + hh);
+      if (lo > hi) return -1;
+      if (ay + uy * lo <= yt) return lo;
+      if (uy < 0) { const tk = (yt - ay) / uy; if (tk >= lo && tk <= hi) return tk; }
+      return -1;
+    }
+    const kind = PROP_ARMS120[o.type];
+    if (!kind) return -2;
+    const same = (x, z) => { const q = inGrid(x, z) ? this._byCell.get(z * GRID + x) : null; return !!q && PROP_ARMS120[q.type] === kind; };
+    const W = same(gx - 1, gz), Ea = same(gx + 1, gz), N = same(gx, gz - 1), S = same(gx, gz + 1);
+    const nx = (W ? 1 : 0) + (Ea ? 1 : 0), nz = (N ? 1 : 0) + (S ? 1 : 0), H = TILE * 0.5;
+    const segs = PROP_SEG120; let k = 0;
+    const put = (px, pz, qx, qz) => { segs[k++] = px; segs[k++] = pz; segs[k++] = qx; segs[k++] = qz; };
+    if (kind === 1) {
+      // a hedge: its corners and junctions only (a straight run, an end, a hand-turned or lone piece: `hedgeBank120` / the cell)
+      if (o.rot != null || !nx || !nz) return -2;
+      if (W) put(cx, cz, cx - H, cz); if (Ea) put(cx, cz, cx + H, cz);
+      if (N) put(cx, cz, cx, cz - H); if (S) put(cx, cz, cx, cz + H);
+    } else if (o.rot != null) {
+      const dx = Math.cos(o.rot), dz = -Math.sin(o.rot), hf = H / Math.max(Math.abs(dx), Math.abs(dz), 1e-3);
+      put(cx - dx * hf, cz - dz * hf, cx + dx * hf, cz + dz * hf);
+    } else if (nx + nz === 0) {
+      if (kind === 8) return -2;                                   // a lone ruined wall: the yaw it was built at
+      put(cx - H, cz, cx + H, cz);
+    } else if (nx === 1 && nz === 1) {
+      put(W ? cx - H : cx + H, cz, cx, N ? cz - H : cz + H);       // the corner's chord
+    } else if (nz > nx) put(cx, cz - H, cx, cz + H);
+    else put(cx - H, cz, cx + H, cz);
+    const crest = o.bankH != null ? o.bankH : o.height;
+    let best = -1;
+    for (let i = 0; i < k; i += 4) {
+      const ex = segs[i + 2] - segs[i], ez = segs[i + 3] - segs[i + 1], den = ux * ez - uz * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const wx = segs[i] - ax, wz = segs[i + 1] - az;
+      const t = (wx * ez - wz * ex) / den, s = (wx * uz - wz * ux) / den;
+      if (t < 0 || t > 1 || s < 0 || s > 1 || (best >= 0 && t >= best)) continue;
+      const qx = ax + ux * t, qz = az + uz * t;
+      if (ay + uy * t < this.floorAt(o, gx, gz, qx, qz) + crest) best = t;
+    }
+    return best;
+  }
   /** (round 120) How many shaped props (`OBS_SHAPE120`) stand within 3 cells of each cell: `add` +1, `remove` -1,
    *  `clear` drops it. More than a step and a crown's reach (2 cells), so a step that asks none can meet none. */
   _sh120Touch(gx, gz, d, o) {
@@ -26337,7 +26416,8 @@ class Obstacles {
       if (ty) for (let q = 0; q < ty.length; q += 7) { n++; if (ty[q] === TYPE.snow || ty[q] === TYPE.ice) sn++; }
       this._t120Winter = n > 0 && sn / n >= THEATRE_SNOW;
     }
-    const pk = T.pick(this._t120Th, kind, gx, gz, this._t120Water(gx, gz), this._t120Winter);
+    const vary = this._v120On();   // (round 120, FOLIAGE-5, `game.variety120`) the theatre's extra species: the drawing's pick only
+    const pk = T.pick(this._t120Th, kind, gx, gz, this._t120Water(gx, gz), this._t120Winter, vary);
     const geo = pk && T.geometry(pk.sp, pk.vi, 0);
     if (!geo) return false;
     const og = old.geometry;
@@ -26347,9 +26427,31 @@ class Obstacles {
     m.castShadow = old.castShadow; m.receiveShadow = old.receiveShadow;
     m.position.copy(old.position);
     m.scale.set(k * gs.y / gs.x, k, k * gs.y / gs.z);
+    if (vary) this._v120Apply(m, group, pk.sp, gx, gz, false);
     group.remove(old); group.add(m);
     group.userData.t120 = pk.sp;
     return true;
+  }
+  /** (round 120, FOLIAGE-5, `game.variety120`) NO TWO TREES OF A STAND ALIKE. A species drawn by `_t120Swap` /
+   *  `_s120Swap` was its variant (three a species) at a uniform scale, bolt upright: in a stand of one species the same
+   *  silhouette stood side by side, only its size (the simulation's) and its yaw differing. Each now takes, from its cell
+   *  (assets/trees120.js `vary120`, a hash: cosmetic, never the battle's dice), a LEAN of up to a few degrees by species
+   *  (a broadleaf 5.5, a palm 16, a spruce 1.5, a shrub 8) on a bearing of its own, and a crown WIDTH x0.84-1.16 (a shrub
+   *  x0.90-1.10; x and z alike). The
+   *  height is scaled by 1/cos(lean), so the top stays at the simulation's height; the picture only. A group with an
+   *  unequal scale (round 98's conifer, 0.78 x 1.12) takes no lean (a turned child of an unequal parent shears). The
+   *  material adds a second tint axis (`uT120Var`, live) and the pick's `vary` the theatres' extra species — the DRAWING's
+   *  pick only: `_hitSp120` (the simulation's species for obsHit120) never passes it, so a seeded battle cannot see it. */
+  _v120On() { const g = window.game; return !!(g && g.variety120 === true && window.Trees120 && window.Trees120.vary120); }
+  _v120Apply(m, group, sp, gx, gz, shrub) {
+    const v = window.Trees120.vary120(sp, gx, gz, shrub), gs = group.scale;
+    m.scale.x *= v.wid; m.scale.z *= v.wid;
+    const even = Math.abs(gs.x - gs.y) <= 1e-6 * Math.abs(gs.y) && Math.abs(gs.z - gs.y) <= 1e-6 * Math.abs(gs.y);
+    if (even && v.lean > 0) {
+      m.rotation.set(v.lean * Math.cos(v.dir), 0, v.lean * Math.sin(v.dir));
+      m.scale.y /= Math.cos(v.lean);
+    }
+    m.userData.v120 = { lean: even ? v.lean : 0, dir: v.dir, wid: v.wid };
   }
   /** (round 120, `game.shrubs120`, FOLIAGE-3) A BUSH OR A SCRUB DRAWN AS A SHRUB OF ITS THEATRE — hawthorn, hazel,
    *  elder, juniper, gorse, maquis, saltbush, tropical undergrowth (assets/shrubs120.pack.js, grown in the trees'
@@ -26366,7 +26468,8 @@ class Obstacles {
     if (!T.has('gorse')) { this._s120Want(); if (this._s120Fetch === 'loading') { group.userData.s120Pend = kind; old.visible = false; } return false; }
     const md = window.game && window.game.mapDef;
     if (this._s120Md !== md) { this._s120Md = md; this._s120Th = T.theatreOf(md); }
-    const pk = T.pickShrub(this._s120Th, kind, gx, gz);
+    const vary = this._v120On();   // (round 120, FOLIAGE-5, `game.variety120`)
+    const pk = T.pickShrub(this._s120Th, kind, gx, gz, vary);
     const geo = pk && T.geometry(pk.sp, pk.vi, 0);
     if (!geo) return false;
     const og = old.geometry;
@@ -26376,6 +26479,7 @@ class Obstacles {
     m.castShadow = old.castShadow; m.receiveShadow = old.receiveShadow;
     m.position.copy(old.position);
     m.scale.set(k * gs.y / gs.x, k, k * gs.y / gs.z);
+    if (vary) this._v120Apply(m, group, pk.sp, gx, gz, true);
     group.remove(old); group.add(m);
     group.userData.s120 = pk.sp;
     return true;
@@ -32372,6 +32476,12 @@ class Projectiles {
           if (tH >= 0) { pos.set(ax + (sx - ax) * tH, ay + (sy - ay) * tH, az + (sz - az) * tH); p._oh120 = o; return 'obstacle'; }
           if (tH === -1 && sy < game.obstacles.floorAt(o, gx, gz, sx, sz) + o.bankH) o = null;
         }
+        // (round 120, OBSTACLES-5, `game.propHit120`) the other props as drawn (`propSeg120`), as the flight's sweep asks
+        if (o && game.propHit120 === true) {
+          const tP = game.obstacles.propSeg120(o, ax, ay, az, sx, sy, sz);
+          if (tP >= 0) { pos.set(ax + (sx - ax) * tP, ay + (sy - ay) * tP, az + (sz - az) * tP); p._oh120 = o; return 'obstacle'; }
+          if (tP === -1 && (o.bankH == null || sy < game.obstacles.floorAt(o, gx, gz, sx, sz) + o.bankH)) o = null;
+        }
         if (o && game.line116 !== false && game.obstacles.occupied[gz * GRID + gx] >= 4) {
           if (game.obstacles.lineBlocks(o, ax, ay, az, sx, sy, sz)) { pos.set(sx, sy, sz); return 'obstacle'; }
           o = null;
@@ -32538,6 +32648,16 @@ class Projectiles {
             const tH = tA >= 0 && (tB < 0 || tA <= tB) ? tA : tB >= 0 ? tB : -1;
             if (tH >= 0) { impact = 'obstacle'; pos.copy(s0).lerp(sp, tH); p._oh120 = tH === tA ? o : c0; break; }
             if (tA === -1 && sp.y < OBh.floorAt(o, gx, gz, sp.x, sp.z) + o.bankH) o = null;
+            // (round 120, OBSTACLES-5, `game.propHit120`) THE OTHER PROPS AS DRAWN (`propSeg120`): a crate, a cart, a well, a
+            // dead tree by its disc; a wall by the line it is laid along, a hedge's corner by its arms — this step's two
+            // ends' props asked, the nearer crossing first; a prop the step passes lets it on (a hedge's crown: as before)
+            if (game.propHit120 === true) {
+              const tP = o ? OBh.propSeg120(o, s0.x, s0.y, s0.z, sp.x, sp.y, sp.z) : -2;
+              const tQ = c0 && c0 !== o ? OBh.propSeg120(c0, s0.x, s0.y, s0.z, sp.x, sp.y, sp.z) : -2;
+              const tM = tP >= 0 && (tQ < 0 || tP <= tQ) ? tP : tQ >= 0 ? tQ : -1;
+              if (tM >= 0) { impact = 'obstacle'; pos.copy(s0).lerp(sp, tM); p._oh120 = tM === tP ? o : c0; break; }
+              if (tP === -1 && (o.bankH == null || sp.y < OBh.floorAt(o, gx, gz, sp.x, sp.z) + o.bankH)) o = null;
+            }
           }
           const ob = o ? game.obstacles.floorAt(o, gx, gz, sp.x, sp.z) : 0;
           if (o && (lineHit || sp.y < ob + o.height)) {
@@ -67862,6 +67982,12 @@ class Game {
         o = null;                                            // not a cell-sized wall
       }
       if (SH120 && o && OBS_SHAPE120[o.type]) o = null;     // (round 120) asked by its shape above
+      // (round 120, OBSTACLES-5, `propHit120`) …and the other props by their drawn shapes (`propSeg120`, the whole line)
+      if (SH120 && o && this.propHit120 === true) {
+        const OBq = this.obstacles, tP = OBq.propSeg120(o, fx, fy, fz, tx, ty, tz);
+        if (tP >= 0) return false;
+        if (tP === -1 && (o.bankH == null || y < OBq.floorAt(o, gx, gz, x, z) + o.bankH)) o = null;
+      }
       const needFloor = (o && !OBS_DEF[o.type].seethrough) || fol;
       const floorY = needFloor ? this.terrain.height(gx, gz) * HSCALE : 0;
       if (o && !OBS_DEF[o.type].seethrough && y < (o.floorLocal ? gy : floorY) + o.height) return false;
@@ -77717,6 +77843,7 @@ class Game {
         // THE GLOW IS BUILT BEFORE THE FRAME IS, and blended on after. The
         // order is the performance story — see assets/postfx.js. The scene
         // render between them is untouched and goes straight to the canvas.
+        if (this.wt120 && this.wt120.prepass) this.wt120.prepass(this);   // (round 120, WATER-6) the water's half-size pass, a target BEFORE the canvas (water120 ON only)
         const fx = this.postfx && this.postfx.ok ? this.postfx : null;
         if (fx) {
           // A map change rebuilds the VFX batches, so re-adopt when the ones
@@ -77809,7 +77936,8 @@ Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 1
 // ON (main, 24 Nov 00:00 UTC; the owner asked for it): seeded A/Bs, 30 seeds on Village, Hedgerow Hell, Ardennes (12) and
 // El Alamein, every outcome inside the floor; rounds into trees 629 -> 162 (Village), 667 -> 160 (Ardennes), against the
 // drawing's own 5-7% (.claude/wip120/obstacles/NOTES.md); ~2 shaped tests a frame. false is the whole-cell test.
-Game.prototype.bushHit120 = false;   // (round 120, OBSTACLES-4) obsHit120's bush/scrub clump as today's shrubs are drawn (BUSH_DRAWN120: bush 0.73, scrub 0.96 of the top, was the old mound's bounding box 0.94 / 1.18). OFF until the seeded A/B says no worse
+Game.prototype.bushHit120 = true;    // ON (main, 24 Nov 09:38 UTC: the seeded A/Bs, Village 6 seeds inside the floor with 5 of 6 identical, Kasserine Pass 6/6 identical; the owner asked that hitboxes be only as big as the drawn geometry). (round 120, OBSTACLES-4) obsHit120's bush/scrub clump as today's shrubs are drawn (BUSH_DRAWN120: bush 0.73, scrub 0.96 of the top, was the old mound's bounding box 0.94 / 1.18). OFF until the seeded A/B says no worse
+Game.prototype.propHit120 = false;   // (round 120, OBSTACLES-5) under obsHit120: crates, carts, drums, wells, statues, the dead tree (PROP_HIT120's drawn disc), walls (the line laid) and hedge corners (their arms) stop rounds as drawn, not by the whole cell. OFF until the seeded A/B
 Game.prototype.obsHit120 = true;
 // (round 120) a burning tree flames for minutes, smoulders, then collapses into a charred stump and ash, not a log
 // (`TREE_BURN120`, `_burnTree120`, `Obstacles._ash120`). ON (main, 24 Nov 01:00 UTC; the owner asked for it): A/B 6 seeds
@@ -77843,6 +77971,11 @@ Game.prototype.trees120 = true;
 // bushes that keep the old mounds' dark mass at 26-46 m and are plants in first person; play -0.45 ms, fpv +0.15 median;
 // the hit table matches the drawn clump within 4%; seeded battles identical; the pack loads lazily). false = the old mounds.
 Game.prototype.shrubs120 = true;
+// (round 120, FOLIAGE-5) NO TWO TREES OF A STAND ALIKE: every trees120 tree and shrubs120 shrub takes a lean (by species),
+// a crown width x0.84-1.16 and a second tint axis from its cell, and the north and the desert more species
+// (`Obstacles._v120Apply`, assets/trees120.js `vary120`, `THEATRE_V120`). The picture only: the top stays at the
+// simulation's height, the battle never reads it. Read at map load (the tint live). OFF: the trees as before.
+Game.prototype.variety120 = false;
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 // (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —
@@ -77861,7 +77994,10 @@ Game.prototype.bridgeLod120 = true;    // ON (main, 24 Nov 04:09 UTC, from .clau
 Game.prototype.bridgeWet120 = false;   // (round 120, BRIDGES-4) OFF until main has seen the A/B: the computer's vehicles do not wade on a map with a bridge — the search keeps out of the river and a step into it is refused (`_setPathTo`, `Pathfinder.find`, `Unit._wetStep120`; .claude/wip120/bridges/NOTES.md ## BRIDGES-4)
 Game.prototype.bridgeBank120 = false;  // (round 120, BRIDGES-3) OFF until main has seen the sheets and the A/B: grass on the slopes `_embank` cut beside a bridge's ramp, setts only on the lane (assets/bridges120.js `_bankGrass`; a surface change on those cells only)
 Game.prototype.bridges120 = true;    // ON (main, 23 Nov 23:40, from .claude/wip120/bridges/sheet09-13_*_v2.jpg; the owner: 'turn bridges and water on when ready'): Arnhem's river bogging fixed (no sideways step off a deck, AI goals moved off the water, the dam's spurs gone), A/B 6 seeds: Pegasus inside the floor, Arnhem bogged/inWater better than OFF, the bridge a chokepoint where a 138 m dam was (crossings -11, German lost +19); lint 100%; maps without bridges identical; cost Arnhem play +0.33 ms, the other maps <= 0.    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
-Game.prototype.water120 = false;      // (round 120) the water, drawn (assets/water120.js): the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks reflected, foam, wet banks, rain rings. OFF is today's program exactly; ON until main has seen the sheets (.claude/wip120/water)
+// ON (main, 24 Nov 09:37 UTC, from .claude/wip120/water/sheets/sheet18_half_{Waal,PHL,Vierville}_w6_s2.jpg: murky river water
+// with reflections and glints, the half-resolution pass CHEAPER than OFF on the Waal, Vierville and PHL; Det identical on four maps;
+// a map whose only water is fords (Village) keeps OFF's drawing: water120.js C.frame). false = the round-119 water everywhere.
+Game.prototype.water120 = true;      // (round 120) the water, drawn (assets/water120.js): the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks reflected, foam, wet banks, rain rings. OFF is today's program exactly; ON until main has seen the sheets (.claude/wip120/water)
 Game.prototype.foliage120 = true;   // ON (main, 23 Nov, from .claude/wip120/foliage/sheets/s5_brush.jpg, s5_arras.jpg, s5_sunflowers.jpg). (round 120) THE GROUND FOLIAGE (assets/foliage.js `on120`): Blender drawings by kind and theatre (broom, juniper, maquis, scrub, sunflowers facing one way), the far bands as round 119 (the carpet opt-in: `field.carpet120 = true`). Quiet-machine A/B (ab8/ab7): playing camera -0.35..+0.35 ms, first person -0.70..+0.45; draws and triangles <= OFF; seeded battles identical. false = round 119's field
 Game.prototype.crewSide120 = true;   // ON (main, 23 Nov, from .claude/wip120/crew/sheet1_crew_off_on.jpg). (round 120) GUN CREWS ON THE SIGHT'S SIDE: a towed gun in `CREW_SIGHT_LEFT120` has its detachment mirrored across the bore (`mirrorCrewFig120`), the layer at the telescope left of the breech. Drawing only (seeded battles identical); read when a gun's model is built. OFF until main has seen .claude/wip120/crew
 Game.prototype.water119 = true;       // (round 119) the water's swell in the vertex shader, not 2 sines a vertex on the CPU (Terrain.ambient). ON: Terrain.ambient 2.0-3.3 ms -> 0 (Argenta Gap, Purple Heart Lane, A/B with a null arm), the same picture (0 mean abs, 1-10 px differ by 0.33/255 vs a null's 0-12)

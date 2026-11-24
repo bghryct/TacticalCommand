@@ -510,6 +510,11 @@
     'float t120Cloud(vec3 w) { if (uCloud.w <= 0.001) return 1.0; vec2 p = w.xz * uCloud.z + uCloud.xy;',
     '  float n = t120CN(p) * 0.62 + t120CN(p * 2.17 + 11.3) * 0.38; return 1.0 - uCloud.w * smoothstep(uCloudBand.x, uCloudBand.y, n); }',
   ].join('\n');
+  // (round 120, FOLIAGE-5, `game.variety120`) A SECOND TINT AXIS: the first (`vT120PH`, dull blue-green -> light warm)
+  // ties value to warmth, so two trees of a stand differ only along one line. This adds an independent hue axis (olive
+  // -> blue-green at about the same luminance) and an independent value step (+-10%), from two more hashes of the same
+  // per-instance number. Leaves full, bark at 0.35 (as the first). The impostor multiplies the same.
+  var VAR_TINT = 'mix(vec3(1.08, 1.02, 0.82), vec3(0.92, 0.99, 1.12), fract(vT120PH * 53.17 + 0.31)) * (0.90 + 0.20 * fract(vT120PH * 97.73 + 0.67))';
   // shared, live: the wind's own weights (trunk bend, limb, leaf flutter, flutter rate), the eye, the sun
   T.U = {
     uT120Wind: { value: new THREE.Vector4(0.05, 0.035, 0.55, 6.5) },
@@ -519,6 +524,7 @@
     uT120Bake: { value: 0 },
     uT120Atlas: { value: null },
     uT120AtlasN: { value: new THREE.Vector4(AT.cols, AT.rows, AT.cell, 0) },
+    uT120Var: { value: 0 },   // (round 120, FOLIAGE-5, `game.variety120`) 1: the second tint axis (set per frame by `T.frame`)
   };
   var VHEAD = [
     'attribute vec3 hedge;', 'attribute vec3 hedgeRim;', 'attribute vec2 t120uv;', 'attribute vec2 t120w;',
@@ -578,7 +584,7 @@
       sh.vertexShader = rep(sh.vertexShader, '#include <project_vertex>', '#include <project_vertex>\nvT120W = (tM * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>', '#include <common>\n' + [
         'uniform sampler2D uT120Atlas;', 'uniform vec4 uT120AtlasN;', 'uniform float uT120Bake;', 'uniform vec3 uT120Eye;',
-        'uniform vec4 uT120Sun;', 'uniform vec3 uT120SunC;', 'uniform float uT120Dec;',
+        'uniform vec4 uT120Sun;', 'uniform vec3 uT120SunC;', 'uniform float uT120Dec;', 'uniform float uT120Var;',
         'uniform float uHgSnow;', 'uniform float uHgNear;', 'uniform vec4 uHgNearSky;', 'uniform float uHgNearSun;', 'uniform float uHgNearCap;', 'uniform vec4 uHgBark;',
         'varying vec4 vT120K;', 'varying vec2 vT120Uv;', 'varying vec3 vT120W;', 'varying vec3 vT120ON;', 'varying float vT120F;', 'varying float vT120PH;',
         NOISE].join('\n'));
@@ -630,6 +636,7 @@
         // a tree's own green, from where it stands (not baked: the impostor adds the same per instance)
         'if (uT120Bake < 0.5) {',
         '  vec3 tTi = mix(vec3(0.805, 0.9025, 0.766), vec3(1.156, 1.078, 0.9415), vT120PH);',
+        '  if (uT120Var > 0.5) tTi *= ' + VAR_TINT + ';',
         '  diffuseColor.rgb *= vT120K.x > 4.5 ? tTi : mix(vec3(1.0), tTi, 0.35);',
         '}',
         // snow on what faces the sky — the tops of the crown, the upper side of a limb
@@ -806,6 +813,7 @@
       'mat4 iM = modelMatrix * instanceMatrix;',
       'vec4 iV = uImpVar[int(t120v + 0.5)];',
       'float iS = length(iM[0].xyz);',
+      'float iSy = length(iM[1].xyz);',   // (FOLIAGE-5) the height's own scale: equal to iS unless `variety120` widened the crown
       'vec3 iC = (iM * vec4(0.0, iV.y, 0.0, 1.0)).xyz;',
       'vec3 iTo = ' + eye + ';',
       'vec3 iR = normalize(cross(vec3(0.0, 1.0, 0.0), iTo));',
@@ -813,7 +821,7 @@
       // the wind: the top of the quad leans with the gust, as the crown does
       'float iPh = dot(iM[3].xz, vec2(0.19, 0.23));',
       'float iG = sin(uTime * uWind.w + iPh) + 0.42 * sin(uTime * uWind.w * 2.3 + iPh * 1.7);',
-      'vec3 iWorld = iC + iR * position.x * iV.x * iS + iU * position.y * iV.x * iS;',
+      'vec3 iWorld = iC + iR * position.x * iV.x * iS + iU * position.y * iV.x * iSy;',
       'iWorld.xz += uWind.xy * uWind.z * iG * max(0.0, position.y + 0.3) * iV.y * iS * 0.035;',
       'vec3 transformed = iWorld;',
       'vec3 iL = normalize(inverse(mat3(iM)) * iTo);',
@@ -855,6 +863,7 @@
     m.onBeforeCompile = function (sh) {
       for (var k in IMP.U) sh.uniforms[k] = IMP.U[k];
       sh.uniforms.uT120Eye = T.U.uT120Eye; sh.uniforms.uT120Sun = T.U.uT120Sun; sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.uWind;
+      sh.uniforms.uT120Var = T.U.uT120Var;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + IMPV)
         .replace('#include <begin_vertex>', impVertex('normalize(uT120Eye - iC)'))
         .replace('#include <project_vertex>', 'vec4 mvPosition = viewMatrix * vec4(transformed, 1.0);\ngl_Position = projectionMatrix * mvPosition;')
@@ -862,7 +871,7 @@
         // sun-facing billboard (its shadow) cuts through the middle of it, and every pixel behind that plane was
         // in the tree's own shadow — half of every impostor black
         .replace('#include <worldpos_vertex>', 'vec4 worldPosition = vec4(transformed - uT120Sun.xyz * iV.x * iS, 1.0);');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + IMPF_HEAD)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uT120Var;\n' + IMPF_HEAD)
         .replace('#include <clipping_planes_fragment>', [
           '#include <clipping_planes_fragment>',
           'float tDi = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));',
@@ -884,6 +893,7 @@
           '#include <color_fragment>',
           'vec3 iAl = iAlb.rgb;',
           'diffuseColor.rgb = iAl * iAl * mix(vec3(0.805, 0.9025, 0.766), vec3(1.156, 1.078, 0.9415), vT120PH);',
+          'if (uT120Var > 0.5) diffuseColor.rgb *= ' + VAR_TINT + ';',
         ].join('\n'))
         .replace('#include <normal_fragment_begin>', 'vec3 normal = normalize((viewMatrix * vec4(iNw, 0.0)).xyz);\nvec3 geometryNormal = normal;');
       if (cloud) {
@@ -899,10 +909,11 @@
     dm.onBeforeCompile = function (sh) {
       for (var k in IMP.U) sh.uniforms[k] = IMP.U[k];
       sh.uniforms.uT120Eye = T.U.uT120Eye; sh.uniforms.uT120Sun = T.U.uT120Sun; sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.uWind;
+      sh.uniforms.uT120Var = T.U.uT120Var;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + IMPV)
         .replace('#include <begin_vertex>', impVertex('normalize(vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]))'))
         .replace('#include <project_vertex>', 'vec4 mvPosition = viewMatrix * vec4(transformed, 1.0);\ngl_Position = projectionMatrix * mvPosition;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + IMPF_HEAD)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uT120Var;\n' + IMPF_HEAD)
         .replace('#include <clipping_planes_fragment>', [
           '#include <clipping_planes_fragment>',
           'if (vT120F > 1.5) { if (vT120F - 2.0 < 0.5) discard; } else if (vT120F >= 0.5) discard;',
@@ -1071,6 +1082,36 @@
     pacific: { broad: W8({ coco: 1 }), poplar: W8({ coco: 1 }), apple: W8({ coco: 1 }), conifer: W8({ coco: 1 }), oak: W8({ coco: 1 }),
       pine: W8({ coco: 1 }), water: 'coco' },
   };
+  // (round 120, FOLIAGE-5, `game.variety120`) MORE SPECIES WHERE A THEATRE HAD TOO FEW (`vary`, the pick's last argument,
+  // passed by the DRAWING only — the simulation's own pick, `Obstacles._hitSp120`, never passes it): the north's broadleaves were birch and beech alone and its conifers spruce alone (the Ardennes is spruce
+  // plantation with beech-oak woods and Scots pine); the desert's were acacia and the date palm (Tunisia's olive groves).
+  // Each extra takes `share` of the kind's trees in stands of its own (`extra120`), the others keeping their proportions:
+  // the weight tables' stand value is a bilinear noise, peaked in the middle, so a species added to a table would take
+  // far more or less than its weight and shift the old ones (the desert's palms 1/3 -> 1/20).
+  T.EXTRA120 = {
+    // (a winter map's pines and conifers take the north's: a few bare birches stand in the snow-laden pinewood)
+    north: { broad: [['oak', 0.22], ['ash', 0.10]], apple: [['beech', 0.35]], conifer: [['pine', 0.22], ['birch', 0.08]], pine: [['birch', 0.08]],
+      oak: [['beech', 0.3]] },
+    desert: { broad: [['olive', 0.28]], apple: [['olive', 0.4]], oak: [['olive', 0.35]] },
+  };
+  T.SHRUB_EXTRA120 = { desert: { scrub: [['maquis', 0.3]] }, north: { scrub: [['hazel', 0.25]] } };
+  // a stand of its own: a uniform hash per ~7-cell block, the block's edges ragged by the cell's own hash
+  T.extra120 = function (ex, gx, gz) {
+    if (!ex) return null;
+    var bx = Math.floor((gx + hash2(gx * 0.71 + 9.1, gz * 0.29 + 2.6) * 4) / 7), bz = Math.floor((gz + hash2(gx * 0.43 + 4.4, gz * 0.87 + 6.2) * 4) / 7);
+    var e = hash2(bx + 51.3, bz + 17.9), acc = 0;
+    for (var i = 0; i < ex.length; i++) { acc += ex[i][1]; if (e < acc) return T.has(ex[i][0]) ? ex[i][0] : null; }
+    return null;
+  };
+  // per instance, from the cell (cosmetic, never the battle's dice): a LEAN (degrees at most, by species; most stand near
+  // straight, `h^1.6`), its bearing, and a crown WIDTH factor (x and z alike: the top stays at the simulation's height)
+  T.VARY = { lean: { def: 5.5, coco: 16, datepalm: 9, birch: 7.5, willow: 9, acacia: 7, olive: 7, apple: 6, stonepine: 5,
+    spruce: 1.5, pine: 3, poplar: 1.5, cypress: 1, shrub: 8 }, wid: 0.16, shrubWid: 0.10 };
+  T.vary120 = function (sp, gx, gz, shrub) {
+    var V = T.VARY, h1 = hash2(gx * 0.913 + 17.1, gz * 1.071 + 3.3), h2 = hash2(gx * 1.37 + 5.9, gz * 0.77 + 41.2), h3 = hash2(gx * 0.53 + 29.4, gz * 1.29 + 11.8);
+    var deg = shrub ? V.lean.shrub : (V.lean[sp] != null ? V.lean[sp] : V.lean.def);
+    return { lean: deg * Math.PI / 180 * Math.pow(h1, 1.6), dir: h2 * Math.PI * 2, wid: 1 + (h3 * 2 - 1) * (shrub ? V.shrubWid : V.wid) };
+  };
   T.FLORA = { normandy: 'west', france40: 'west', ardennes: 'north', germany45: 'north', lowlands: 'lowlands', east: 'east',
     italy: 'italy', desert: 'desert', pacific: 'pacific' };
   /** The theatre's species list for the map (from Foliage.floraFor: the era, then the name). */
@@ -1080,14 +1121,14 @@
   };
   /** Which species and variant draws a placed tree. `kind` is broad/poplar/apple/conifer/oak/pine; species group
    *  in stands (a slow noise over the cells), the variant from the cell's own hash. */
-  T.pick = function (theatre, kind, gx, gz, nearWater, winter) {
+  T.pick = function (theatre, kind, gx, gz, nearWater, winter, vary) {
     var th = T.THEATRE[theatre] || T.THEATRE.west;
     var list = th[kind] || th.broad;
     // WINTER: what was placed as a pine or a conifer stands as a snow-laden spruce or pine (the north's), the
     // broadleaves bare round them — not a field of bare trees where the map drew a pinewood
     if (winter && (kind === 'pine' || kind === 'conifer') && theatre !== 'desert' && theatre !== 'pacific') list = T.THEATRE.north[kind];
-    var sp;
-    if (nearWater && th.water && kind !== 'pine' && hash2(gx * 0.37, gz * 0.53) < 0.75) sp = th.water;
+    var sp, wet = false;
+    if (nearWater && th.water && kind !== 'pine' && hash2(gx * 0.37, gz * 0.53) < 0.75) { sp = th.water; wet = true; }
     else {
       // stands: the weight table walked by a value that drifts over ~8 cells, plus a little of the cell's own
       var sx = gx / 8, sz = gz / 8, ix = Math.floor(sx), iz = Math.floor(sz), fx = sx - ix, fz = sz - iz;
@@ -1098,6 +1139,9 @@
       for (i = 0; i < list.length; i++) { acc += list[i][1] / tot; if (v <= acc) { sp = list[i][0]; break; } }
     }
     if (!T.has(sp)) { sp = null; for (var j = 0; j < list.length; j++) if (T.has(list[j][0])) { sp = list[j][0]; break; } }
+    // (FOLIAGE-5, `game.variety120`) the theatre's extra species, in stands of their own (not by the water: the willow stays)
+    if (vary === true && !wet) { var xt = (winter && (kind === 'pine' || kind === 'conifer') && theatre !== 'desert' && theatre !== 'pacific') ? 'north' : theatre;
+      var xs = T.extra120(T.EXTRA120[xt] && T.EXTRA120[xt][kind], gx, gz); if (xs) sp = xs; }
     if (!sp) return null;
     var nv = T.pack().species[sp].length;
     return { sp: sp, vi: Math.floor(hash2(gx * 1.7 + 3.1, gz * 2.3 + 7.9) * nv) % nv };
@@ -1116,7 +1160,7 @@
   };
   /** Which shrub species and variant draws a placed bush or scrub (`kind`): a slow noise over the cells (stands of a
    *  species), a little of the cell's own hash; the variant from the cell's hash. Cosmetic: never the battle's dice. */
-  T.pickShrub = function (theatre, kind, gx, gz) {
+  T.pickShrub = function (theatre, kind, gx, gz, vary) {
     var th = T.SHRUB[theatre] || T.SHRUB.west, list = th[kind] || th.bush;
     var sx = gx / 6, sz = gz / 6, ix = Math.floor(sx), iz = Math.floor(sz), fx = sx - ix, fz = sz - iz;
     var v = (hash2(ix + 31.7, iz) * (1 - fx) + hash2(ix + 32.7, iz) * fx) * (1 - fz) + (hash2(ix + 31.7, iz + 1) * (1 - fx) + hash2(ix + 32.7, iz + 1) * fx) * fz;
@@ -1125,6 +1169,7 @@
     var acc = 0, sp = list[list.length - 1][0];
     for (i = 0; i < list.length; i++) { acc += list[i][1] / tot; if (v <= acc) { sp = list[i][0]; break; } }
     if (!T.has(sp)) { sp = null; for (var j = 0; j < list.length; j++) if (T.has(list[j][0])) { sp = list[j][0]; break; } }
+    if (vary === true) { var xs = T.extra120(T.SHRUB_EXTRA120[theatre] && T.SHRUB_EXTRA120[theatre][kind], gx + 101, gz + 37); if (xs) sp = xs; }   // (FOLIAGE-5)
     if (!sp) return null;
     var nv = T.pack().species[sp].length;
     return { sp: sp, vi: Math.floor(hash2(gx * 2.1 + 1.3, gz * 1.9 + 4.7) * nv) % nv };
@@ -1133,6 +1178,7 @@
   /** Per frame, from PropBatcher.cull: the eye, the sun. */
   T.frame = function (camera, sun) {
     T.U.uT120Eye.value.setFromMatrixPosition(camera.matrixWorld);
+    T.U.uT120Var.value = (root.game && root.game.variety120 === true) ? 1 : 0;   // (FOLIAGE-5)
     if (sun) {
       var d = T._sd || (T._sd = new THREE.Vector3());
       d.copy(sun.target ? sun.target.position : d.set(0, 0, 0)).sub(sun.position).normalize();

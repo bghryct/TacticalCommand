@@ -66,7 +66,10 @@
   const W = { ver: 1, on: false, dirty: true, fails: 0, groundOn: false, groundV2: true, groundLod: false, marchLod: false, fordOwn: true,
     // (WATER-3) the tier: 'auto' = the LITE program unless the water is seen up close (first person, a camera low over it);
     // true / false force it (probe arms). The wet band is drawn by the overlay (the ground's own program stays OFF's).
-    lite: 'auto', liteNow: false, liteHi: 9.0, liteLo: 7.0, groundOverlay: true };
+    lite: 'auto', liteNow: false, liteHi: 9.0, liteLo: 7.0, groundOverlay: true,
+    // (WATER-6) THE HALF-RESOLUTION PASS (while ON): the water's own shader at 1/halfScale^2 of the pixels, upsampled by the
+    // water mask at full resolution. `half = false` = the full-resolution ON shader (WATER-5's program; a probe arm).
+    half: true, halfScale: 2 };
 
   // ---------------------------------------------------------------- knobs
   W.K = {
@@ -112,6 +115,10 @@
   const v4 = (a, b, c, d) => new THREE.Vector4(a || 0, b || 0, c || 0, d || 0);
   const col = (r, g, b) => new THREE.Color(r, g, b);
   const U = W.U = {
+    uW120Half: { value: null },                         // (WATER-6) the half-size water picture
+    uW120HalfPx: { value: v4(0.5, 0.5, 1, 1) },
+    uW120PxK: { value: 1 },                              // (WATER-6) see the half pass: the full-res footprint
+          // (WATER-6) canvas px -> half texels (x, y), the target's size (z, w)
     uW120Ripple: { value: null },
     uW120Map: { value: null },
     uW120Shore: { value: null },
@@ -225,6 +232,7 @@ uniform float uW120T;
 uniform vec4 uW120Dbg;
 uniform vec4 uW120March;
 uniform vec4 uW120Fix;
+uniform float uW120PxK;   // (WATER-6) 1, or 1 / halfScale in the half pass: px is the full-resolution pixel's
 vec3 w120Alb;
 vec3 w120Lin;
 float w120Hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -425,6 +433,7 @@ vec2 w120Slope(vec2 pm, float px, out float rough) {
   return s;
 }
 void w120Composite() {
+  if (uW120PxK < 0.99 && vWaterW.y < uW120Grid.z - 6.0) { gl_FragColor = vec4(0.0); return; }   // (WATER-6) the half pass: the dry floor
   vec3 wp = vWaterW;
   // (WATER-4) THE SKIRT. A dry vertex of the plane is parked 40 u down, so a triangle between the water's edge and the land
   // is a near-vertical sheet. Where the land in front of it lies under the level (a flood's field, a beach a pace from the sea)
@@ -452,7 +461,7 @@ void w120Composite() {
   float dEye = length(dv);
   vec3 v = dv / max(dEye, 1e-4);
   vec2 pm = wp.xz * 4.0;
-  vec2 fw = fwidth(pm);
+  vec2 fw = fwidth(pm) * uW120PxK;
   float px = max(fw.x, fw.y);
   float rough;
   vec2 s = w120Slope(pm, px, rough);
@@ -584,6 +593,43 @@ void w120Composite() {
     if (W.nearN > 0) sh.fragmentShader = sh.fragmentShader   // (WATER-5 probe) the ON shader only near the eye, OFF's surface beyond
       .replace('w120Lin = gl_FragColor.rgb;', 'bool w120Far = distance(vWaterW, uWaterEye) > W120_NEAR;\n  if (w120Far) ' + OFF_SURF + ' else { w120Lin = gl_FragColor.rgb; }')
       .replace('\n  w120Composite();', '\n  if (!w120Far) w120Composite();');
+    return true;
+  };
+  // ---------------------------------------------------------------- (WATER-6) the composite: the half-size picture at full resolution
+  // The full-resolution draw is the same mesh, the same vertex program (the swell, the ford lift), depth-tested by the real
+  // depth buffer: the shoreline against the bank, men, houses and bridges is exact (and MSAA's). Its fragment only fetches.
+  // THE WATER MASK: the half pass clears to alpha 0 and draws with no blending, so a texel with alpha 0 had no water (a
+  // dropped skirt, the dry floor 40 u down); a bilinear fetch would blend that clear in (a dark rim that crawls as the camera
+  // moves). Four texels, bilinear weights times the mask, renormalised: only water is ever upsampled into water.
+  const H_FS = `
+uniform sampler2D uW120Half;
+uniform vec4 uW120HalfPx;
+void main() {
+  vec3 hN = cross(dFdx(vWaterW), dFdy(vWaterW));
+  // ON's own skirt rule (w120Composite), at full resolution: a ford's sheet, or a sheet seen from under the level, is dropped
+  bool hDrop = uW120Fix.x > 0.5 && abs(hN.y) < 0.5 * length(hN)
+    && (vW120Fd > 0.001 || uWaterEye.y < uW120Grid.z + 0.003 || uWaterEye.y - vWaterW.y < 1e-4);
+  if (hDrop) discard;
+  vec2 hp = gl_FragCoord.xy * uW120HalfPx.xy - 0.5;
+  vec2 f = fract(hp);
+  ivec2 i0 = ivec2(floor(hp)), mx = ivec2(uW120HalfPx.zw) - 1;
+  vec4 ta = texelFetch(uW120Half, clamp(i0, ivec2(0), mx), 0);
+  vec4 tb = texelFetch(uW120Half, clamp(i0 + ivec2(1, 0), ivec2(0), mx), 0);
+  vec4 tc = texelFetch(uW120Half, clamp(i0 + ivec2(0, 1), ivec2(0), mx), 0);
+  vec4 td = texelFetch(uW120Half, clamp(i0 + ivec2(1, 1), ivec2(0), mx), 0);
+  vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y)
+         * step(vec4(0.5 / 255.0), vec4(ta.a, tb.a, tc.a, td.a));
+  float sw = w.x + w.y + w.z + w.w;
+  if (sw < 1e-4) discard;
+  gl_FragColor = (ta * w.x + tb * w.y + tc * w.z + td * w.w) / sw;
+}
+`;
+  /** (WATER-6) the composite program from the ON program: ON's main is kept as a dead function (the compiler drops it), the
+   *  composite's main is appended. Only when ON's code is in (else the program stays what it is: the full ON shader). */
+  W.halfShader = function (sh) {
+    const fs = sh.fragmentShader;
+    if (fs.indexOf('w120Composite();') < 0 || fs.indexOf('void main() {') < 0) { W.halfFails = (W.halfFails || 0) + 1; return false; }
+    sh.fragmentShader = fs.replace('void main() {', 'void w120FullMain() {') + H_FS;
     return true;
   };
   /** The material's program key: `|w120` only while ON (OFF keeps today's program). */
@@ -1451,6 +1497,7 @@ void main() {
     try { for (const lt of [!keep, keep]) { W.liteNow = lt; m.needsUpdate = true; r.compile(g.scene, g.camera); } }
     catch (e) { W.warmFails = (W.warmFails || 0) + 1; W.warmErr = String(e && e.message || e); }
     finally { W.liteNow = keep; m.needsUpdate = true; }
+    try { this._warmHalf(g); } catch (e) { W.warmFails = (W.warmFails || 0) + 1; W.warmErr = String(e && e.message || e); }   // (WATER-6)
     this.warmMs = +(performance.now() - t0).toFixed(1);
     this.warmHeld = ((r.info && r.info.programs) || []).filter(p => p && p.cacheKey && p.cacheKey.indexOf('|w120:') >= 0).length;
   };
@@ -1566,7 +1613,11 @@ void main() {
     }
   };
   C.frame = function (g, dt) {
-    const on = g.water120 === true;
+    // (main, 24 Nov) A MAP WHOSE ONLY WATER IS FORDS (Village's stream: OFF draws no water there) keeps OFF's drawing: the pass
+    // replaces nothing there, so it is pure addition (WATER-6: Village +0.38..0.98 ms against a +0.5 bar), while on the river
+    // and sea maps the half-resolution pass is cheaper than OFF. `Water120.fordMaps = true` draws the fords too.
+    const on = g.water120 === true && !(g.terrain && !g.terrain._hasWater && W.fordMaps !== true);
+    { const T0 = g.terrain; if (this._hcm && T0 && T0.water && T0.water.material === this._hcm) T0.water.material = this._hon; }   // (WATER-6)
     if (on !== this._on) this._switch(g, on);
     if (!on) return;
     dt = Math.max(0, Math.min(0.25, dt || 0));
@@ -1615,14 +1666,105 @@ void main() {
     this._uniforms(g, dt);
     this._wade(g, dt);
   };
+  /** (WATER-6) the composite material: a clone of the water's own (the same base: vertex colours, fog, lights) whose program
+   *  is the water's own chain plus `W.halfShader`; one program for both tiers (the vertex stage is the same in both). */
+  C._halfMat = function (onM) {
+    if (this._hcm && this._hon === onM) return this._hcm;
+    if (this._hcm) { try { this._hcm.dispose(); } catch (e) { /* gone with its context */ } }
+    const cm = onM.clone(), ob = onM.onBeforeCompile, kf = onM.customProgramCacheKey;
+    cm.name = 'water120-half-composite';
+    cm.extensions = Object.assign({}, onM.extensions || {});
+    cm.onBeforeCompile = function (sh, r) { ob.call(this, sh, r); W.halfShader(sh); };
+    cm.customProgramCacheKey = function () { return String(kf.call(this)).replace('lite', '') + '|w120h'; };
+    cm.needsUpdate = true;
+    this._hcm = cm; this._hon = onM;
+    return cm;
+  };
+  /** (WATER-6) THE HALF-RESOLUTION PASS, called from `Game._loop` right before the scene is drawn (and before the glow's
+   *  targets): a render target is entered while the canvas is still untouched this frame, so a tile GPU never flushes the
+   *  canvas out and back (memory: normandy-glow-not-bloom). The water mesh alone, with its ON material, into a target of
+   *  1/halfScale the drawing buffer each way: every other root of the scene is passed over (an invisible node stops the
+   *  walk), the lights stay (the same program: the same lights, fog and shadow state; the shadow map is not redrawn), no
+   *  matrix walk (the scene's own render follows), no background, no blending (the texel is exactly what ON computes).
+   *  Then the mesh carries the composite for the scene's draw; its onAfterRender (and the next frame) gives it back. */
+  C.prepass = function (g) {
+    const T = g.terrain, mesh = T && T.water;
+    if (!mesh) return;
+    if (this._hcm && mesh.material === this._hcm) mesh.material = this._hon;
+    this.halfOn = false;
+    if (!this._on || !W.on || W.half === false || (W.halfFails || 0) > 3 || !this._wetAny || !mesh.visible) return;
+    // (WATER-6, t1/t2) a map whose only water is fords (Village's stream: OFF draws no water there, so the pass has no OFF water
+    // to replace and its fixed costs are pure addition) seen from the LITE tier (a narrow band of water) is cheaper drawn once at
+    // full resolution: Village play full-res +0.61 / +0.38 ms against half +1.04 / +0.74 (t1 / t2). `halfFords = true`: always half.
+    if (!T._hasWater && W.liteNow && W.halfFords !== true) return;
+    const r = g.renderer, sc = g.scene, cam = g.camera;
+    if (!r || !sc || !cam || !r.capabilities || !r.capabilities.isWebGL2 || typeof r.getDrawingBufferSize !== 'function') return;
+    const onM = mesh.material;
+    if (!onM || onM.visible === false || !onM.onBeforeCompile) return;
+    let top = mesh; while (top.parent && top.parent !== sc) top = top.parent;   // the root that carries the water (today: itself)
+    if (top.parent !== sc) return;
+    try {
+      const cm = this._halfMat(onM);
+      const v = this._hv || (this._hv = new THREE.Vector2());
+      r.getDrawingBufferSize(v);
+      const s = Math.max(1, W.halfScale || 2), fw = Math.max(1, v.x), fh = Math.max(1, v.y);
+      const hw = Math.max(1, Math.ceil(fw / s)), hh = Math.max(1, Math.ceil(fh / s));
+      let rt = this._hrt;
+      if (!rt) {
+        rt = this._hrt = new THREE.WebGLRenderTarget(hw, hh, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+          format: THREE.RGBAFormat, type: THREE.UnsignedByteType, depthBuffer: true, stencilBuffer: false });
+        rt.texture.generateMipmaps = false; rt.texture.name = 'water120-half';
+      } else if (rt.width !== hw || rt.height !== hh) rt.setSize(hw, hh);
+      rt.texture.encoding = r.outputEncoding;   // ON writes display space after the encode: the same program as the canvas's
+      U.uW120Half.value = rt.texture; U.uW120HalfPx.value.set(hw / fw, hh / fh, hw, hh);
+      if (!mesh._w120HalfAfter) {
+        const self = this, aft = mesh.onAfterRender;
+        mesh.onAfterRender = function () { const res = aft.apply(this, arguments); if (self._hcm && this.material === self._hcm && self._hon) this.material = self._hon; return res; };
+        mesh._w120HalfAfter = true;
+      }
+      const kids = sc.children, n = kids.length, vis = this._hvis || (this._hvis = []);
+      vis.length = n;
+      for (let i = 0; i < n; i++) { const k = kids[i]; vis[i] = k.visible; if (k !== top && !k.isLight) k.visible = false; }
+      const au = sc.autoUpdate, bg = sc.background, ac = r.autoClear, SM = r.shadowMap, sau = SM.autoUpdate, snu = SM.needsUpdate;
+      const cc = r.getClearColor(this._hcc || (this._hcc = new THREE.Color())), ca = r.getClearAlpha(), bl = onM.blending, prevRT = r.getRenderTarget();
+      try {
+        sc.autoUpdate = false; sc.background = null; SM.autoUpdate = false; SM.needsUpdate = false;
+        mesh.updateMatrixWorld();
+        onM.blending = THREE.NoBlending;
+        r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.autoClear = true;
+        U.uW120PxK.value = 1 / s;   // ON's band limits as at full resolution (the glint's facets); the mips still filter for the half
+        r.render(sc, cam);
+      } finally {
+        U.uW120PxK.value = 1;
+        onM.blending = bl;
+        for (let i = 0; i < n; i++) kids[i].visible = vis[i];
+        sc.autoUpdate = au; sc.background = bg; SM.autoUpdate = sau; SM.needsUpdate = snu; r.autoClear = ac;
+        r.setClearColor(cc, ca); r.setRenderTarget(prevRT);
+      }
+      mesh.material = cm; this.halfOn = true; this.halfW = hw; this.halfH = hh;
+    } catch (e) {
+      W.halfFails = (W.halfFails || 0) + 1; W.halfErr = String(e && e.message || e);
+      if (this._hcm && mesh.material === this._hcm) mesh.material = this._hon;
+    }
+  };
+  /** (WATER-6) the composite's program at map load (both tiers share it), so the first frame does not compile it */
+  C._warmHalf = function (g) {
+    const T = g.terrain, r = g.renderer, mesh = T && T.water;
+    if (!mesh || W.half === false || !r || !r.capabilities || !r.capabilities.isWebGL2) return;
+    const onM = this._hcm && mesh.material === this._hcm ? this._hon : mesh.material;
+    if (!onM || !onM.onBeforeCompile) return;
+    const cm = this._halfMat(onM);
+    mesh.material = cm;
+    try { r.compile(g.scene, g.camera); } finally { mesh.material = onM; }
+  };
   C.stats = function () {
     return { on: this._on, N: this._N, bodies: this.bodies.slice(0, 8), hs: +this.hs.toFixed(2), buildMs: this.buildMs, skyMs: this.skyMs, fords: this.fords || 0,
       fails: W.fails, groundFails: W.groundFails, ground: !!this._ground, rings: this.rings.length, lite: W.liteNow, skipMean: this.skipMean || 0, rebeds: this.rebeds || 0, rebedMs: this.rebedMs || 0, liveQuads: this.liveQuads || 0, cullFails: W.cullFails || 0, skipDirMean: this.skipDirMean || 0,
-      overlay: !!W.groundOverlay, ovTris: this._ovTris || 0, warmMs: this.warmMs || 0, warmHeld: this.warmHeld || 0, warmFails: W.warmFails || 0 };
+      overlay: !!W.groundOverlay, ovTris: this._ovTris || 0, half: !!this.halfOn, halfSize: [this.halfW || 0, this.halfH || 0], halfFails: W.halfFails || 0, warmMs: this.warmMs || 0, warmHeld: this.warmHeld || 0, warmFails: W.warmFails || 0 };
   };
 
   // every entry from the loop runs on the cosmetic stream (the wade test draws; three.js objects draw UUIDs)
-  ['frame', 'splash'].forEach(function (k) {
+  ['frame', 'splash', 'prepass'].forEach(function (k) {
     const f = C[k];
     C[k] = function () { const a = arguments, s = this; return cosmetic(function () { return f.apply(s, a); }, s); };
   });
