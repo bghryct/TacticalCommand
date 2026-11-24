@@ -21598,6 +21598,24 @@ const TREE_BURN120 = {
  *  (the crown's spread; a reach of `max(3, height)` was 12-17 m round a single tree), world units at least 1.2. */
 const TREE_BURN_TOP120 = { deadtree: 8.7, tree: 16.5, pine: 20.3, oak: 15.9, bush: 1.6, scrub: 1.0 };
 const TREE_BURN_REACH120 = 0.35;
+/** (round 120, `treeBurn120`) THE PICTURE OF A BURNING WOOD, thinned (`Game._treeFireFx120`; `game.burnFx120 = false`
+ *  draws every tree, unthinned). A staged wood fire had 139-363 trees alight at once, each calling effects.fire and
+ *  effects.smoke every 0.4 s for minutes, and each keeping a ground fire whose `_fireFx` emits 5-12 times a second:
+ *  the particle pool sat full of what, from the playing camera, is one fire.
+ *  - `blk`: a block of blk x blk cells (18 m) draws as ONE emitter a tick: a tree in a block where n burned last tick
+ *    draws with chance per / n, its flames `count` 2 x sqrt(n / per) (at most `cntMax`), so a block's picture costs
+ *    about one tree's and still reads as a bigger fire;
+ *  - `near`/`far`, world units from the camera in plan: full inside near, down to `farK` at far, then only a thin
+ *    smoke (`cullSmoke`) out to `cull`, and nothing beyond;
+ *  - `cap`: emitters a tick over the whole field, shared out by chance so every block is alike;
+ *  - a burning tree's ground fire (`f.tree120`) emits as one a block, at the far rate (`gnd` s) over the LOD.
+ *  The tick's own sim draws (`Math.random() < 0.6`, 0.35, 0.15) are drawn exactly as before, every tick, whatever is
+ *  drawn; the thinning reads only the camera and its own counters, on the cosmetic stream, and writes nothing the
+ *  simulation reads. */
+const TREE_FX120 = { blk: 3, per: 1, cntMax: 5, near: 70, far: 220, farK: 0.3, cull: 400, cullSmoke: 0.15, cap: 48, gnd: 0.18 };
+/** …a burning tree's ground fire is drawn as a TINTED glow (vfx.fire's tinted path, the additive batch): vfx draws at most
+ *  256 tongues of flame (its lick batch), and with 300 trees alight 427 were live — the crowns need every one. */
+const TREE_GND_TINT120 = { r: 1, g: 0.55, b: 0.18 };
 /** …and a bullet goes on through a trunk whose chord along its line is under this (m): a sapling, or the bark's edge. */
 const TRUNK_PEN_M120 = 0.15;
 /** The species a kind falls back on when the drawing's pack is not loaded. */
@@ -27028,15 +27046,56 @@ class Obstacles {
       K.cyl([0, -0.02, 0], [0, 1.0, 0], 0.46, 0.34, 8, CH, K.WOOD, CUT);
       this._ashKitG = K.geo();
     }
-    const m = new THREE.Mesh(this._ashKitG, this.mat.hedge);
+    // (round 120, OBSTACLES-2) EVERY STUMP IN ONE INSTANCED MESH: a burnt wood leaves hundreds, and a mesh each was a
+    // draw call and a shadow draw each. It doubles when full; `clear()` takes it off the scene and a new one starts.
+    let S = this._ashInst120;
+    if (!S || S.parent !== this.scene || S.count >= S.userData.cap) {
+      const cap = S && S.parent === this.scene ? S.userData.cap * 2 : 256;
+      const N = new THREE.InstancedMesh(this._ashKitG, this.mat.hedge, cap);
+      N.userData.cap = cap; N.castShadow = true; N.receiveShadow = true; N.frustumCulled = false;   // (r128: no instanced bound)
+      N.count = 0;
+      if (S && S.parent === this.scene) {
+        const M = new THREE.Matrix4();
+        for (let i = 0; i < S.count; i++) { S.getMatrixAt(i, M); N.setMatrixAt(i, M); }
+        N.count = S.count; S.parent.remove(S);
+        const j = this._ashMeshes120 ? this._ashMeshes120.indexOf(S) : -1; if (j >= 0) this._ashMeshes120.splice(j, 1);
+      }
+      this.scene.add(N);
+      (this._ashMeshes120 || (this._ashMeshes120 = [])).push(N);
+      S = this._ashInst120 = N;
+    }
+    const m = this._ashObj120 || (this._ashObj120 = new THREE.Object3D());
     // a stump to the tree's own girth: the trunk's radius at its foot is ~3-4% of its top (TREE_HIT120)
     const s = clamp(top * 0.035 / (0.46 * K_PROP), 0.4, 2.4) * K_PROP;
     m.scale.set(s, K_PROP * clamp(top * METERS_PER_UNIT / 16, 0.6, 1.4), s);
-    m.position.set(wx, y, wz); m.rotation.y = (gx * 0.618 + gz * 0.382) % 1 * Math.PI * 2;
-    m.castShadow = true; m.receiveShadow = true;
-    m.updateMatrix(); m.matrixAutoUpdate = false;
-    this.scene.add(m);
-    (this._ashMeshes120 || (this._ashMeshes120 = [])).push(m);
+    m.position.set(wx, y, wz); m.rotation.set(0, (gx * 0.618 + gz * 0.382) % 1 * Math.PI * 2, 0);
+    m.updateMatrix();
+    S.setMatrixAt(S.count, m.matrix); S.count++; S.instanceMatrix.needsUpdate = true;
+  }
+  /** (round 120, `treeBurn120`) THE CHARRED SKELETON. A tree that has done flaming stands bare and black, smouldering,
+   *  until it falls to ash: its crown is burnt off. The drawing only (cosmeticClass): its green mesh is swapped for a
+   *  dead tree's limbs (`_deadTreeVariant`, the Blender kit), to its own top, on one charcoal material — so charred
+   *  trees batch together at the next rebake (`_rebakeDebt`), a few draws for a burnt wood. The record, its height
+   *  and its hit table are unchanged; nothing here is read by the simulation. */
+  _char120(o) {
+    if (!o || !(o.type === 'tree' || o.type === 'oak' || o.type === 'pine')) return;
+    const grp = o.mesh, old = grp && grp.children.find(c => c.isMesh);
+    if (!old || old.userData.char120) return;
+    if (o._batch) { this.batcher.release(o); this._rebakeDebt = (this._rebakeDebt || 0) + 1; }
+    const og = old.geometry;
+    if (!og.boundingBox) og.computeBoundingBox();
+    const geo = this._deadTreeVariant(((o.gx * 7 + o.gz * 13) % 6 + 6) % 6);
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const k = og.boundingBox.max.y * old.scale.y / Math.max(1e-3, geo.boundingBox.max.y);
+    if (!this._charMat120) this._charMat120 = new THREE.MeshLambertMaterial({ color: 0x221e1a });
+    const m = new THREE.Mesh(geo, this._charMat120);
+    m.castShadow = old.castShadow; m.receiveShadow = old.receiveShadow;
+    m.position.copy(old.position); m.rotation.copy(old.rotation);
+    m.scale.set(k * old.scale.x / old.scale.y, k, k * old.scale.z / old.scale.y);
+    m.userData.char120 = true;
+    m.updateMatrix(); m.matrixAutoUpdate = old.matrixAutoUpdate;
+    grp.remove(old); grp.add(m);
+    grp.updateMatrixWorld(true);
   }
   /** (round 118, `game.treeFall118`) A TREE THAT IS HIT FALLS. It goes down away from what hit it — the burst,
    *  or the tank that pushed it over — pivoting at its base, and leaves a stump and a LOG lying along its
@@ -73556,6 +73615,8 @@ class Game {
   _fireFx(f, camD) {
     const near = camD < 70 ? 1 : 0.45;
     f.emitT = 0.08 / near;
+    // (round 120, `treeBurn120`) a burning tree's ground fire is drawn as the wood's: one a block (`TREE_FX120`)
+    if (f.tree120 && this.treeBurn120 === true && this.burnFx120 !== false) { this._treeGroundFx120(f); return; }
     const n = Math.max(2, Math.min(7, Math.round(f.r * 0.9 * near)));
     this.effects.fire(f.x + rand(-f.r * 0.3, f.r * 0.3), f.y + 0.2 * K_FX, f.z + rand(-f.r * 0.3, f.r * 0.3), n,
       f.wp ? WP_TINT : undefined);
@@ -73759,21 +73820,82 @@ class Game {
     const wx = cellCenter(o.gx), wz = cellCenter(o.gz), oy = this.terrain.height(o.gx, o.gz) * HSCALE;
     const top = o.height / (PROP_CROWN.has(o.type) ? HEDGE_LOS_OF_TOP : 1);
     if (o.burnPh === 1) {
-      this.effects.fire(wx, oy + top * 0.55, wz, 2);
-      if (Math.random() < 0.6) this.effects.smoke(wx, oy + top + 0.4 * K_FX, wz, 1);
-      this.igniteFire(wx, wz, Math.max(1.2, top * TREE_BURN_REACH120), rand(20, 35), 12, 'ambient');   // the blaze hurts nearby troops
+      // the picture (`_treeFireFx120`, thinned on the cosmetic stream); the smoke's roll is the sim's, drawn every tick
+      const sm = Math.random() < 0.6;
+      this._treeFireFx120(o, 1, sm, true, wx, oy, wz, top);
+      const gf = this.igniteFire(wx, wz, Math.max(1.2, top * TREE_BURN_REACH120), rand(20, 35), 12, 'ambient');   // the blaze hurts nearby troops
+      if (gf) gf.tree120 = true;   // its flames are drawn as the wood's (`_fireFx`); read by no simulation
       // it chars, it does not fall: never below a third of its hp from the fire (a shell can still bring it down)
       o.hp = Math.max(o.maxHp * 0.33, o.hp - o.maxHp * 0.004);
-      if (o.burnT <= 0) { o.burnPh = 2; o.burnT = o.smoulderT || 300; o.charred = true; }
+      if (o.burnT <= 0) { o.burnPh = 2; o.burnT = o.smoulderT || 300; o.charred = true; this.obstacles._char120(o); }   // drawn bare and black
       return;
     }
     // smouldering: a thin smoke from the charred top, embers at the foot now and then — nothing that burns a man
-    if (Math.random() < 0.35) this.effects.smoke(wx, oy + top * 0.6, wz, 1);
-    if (Math.random() < 0.15) this.effects.fire(wx, oy + 0.3 * K_FX, wz, 1);
+    const sm = Math.random() < 0.35, em = Math.random() < 0.15;   // the sim's two rolls, drawn every tick as before
+    this._treeFireFx120(o, 2, sm, em, wx, oy, wz, top);
     if (o.burnT <= 0) {
       o.burning = false;
       this.obstacles._ash120(o);
     }
+  }
+  /** (round 120, `treeBurn120`) THE PICTURE OF ONE TREE'S TICK, thinned by `TREE_FX120` (see there): `ph` 1 flaming,
+   *  2 smouldering; `sm`/`em` are the tick's own rolls (smoke; embers). Cosmetic (cosmeticClass): it counts the trees
+   *  alight in each block for the next tick and draws with `vrandom`, never the sim's stream. */
+  _treeFireFx120(o, ph, sm, em, wx, oy, wz, top) {
+    const E = this.effects;
+    if (this.burnFx120 === false) {   // unthinned: every tree, every tick (the 3-7 s burn's picture, for minutes)
+      if (ph === 1) { E.fire(wx, oy + top * 0.55, wz, 2); if (sm) E.smoke(wx, oy + top + 0.4 * K_FX, wz, 1); }
+      else { if (sm) E.smoke(wx, oy + top * 0.6, wz, 1); if (em) E.fire(wx, oy + 0.3 * K_FX, wz, 1); }
+      return;
+    }
+    const F = TREE_FX120;
+    let T = this._tfx120;
+    if (!T) T = this._tfx120 = { t: null, last: new Map(), cur: new Map(), blocks: 1 };
+    if (T.t !== this.time) { const x = T.last; T.last = T.cur; T.cur = x; x.clear(); T.blocks = Math.max(1, T.last.size); T.t = this.time; }
+    const k = Math.floor(o.gx / F.blk) * 4096 + Math.floor(o.gz / F.blk);
+    T.cur.set(k, (T.cur.get(k) || 0) + 1);
+    if (!sm && !em) return;
+    const n = T.last.get(k) || 1, lod = this._treeFxLod120(wx, wz);
+    if (lod <= 0) return;
+    const p = Math.min(1, F.per / n) * Math.min(1, F.cap / T.blocks);
+    if (lod < F.farK) {   // past `far`: a thin smoke over the wood, no flames
+      if (ph === 1 && sm && vrandom() < p * lod * 2) E.smoke(wx, oy + top + 0.4 * K_FX, wz, 1);
+      return;
+    }
+    if (vrandom() >= p * lod) return;
+    if (ph === 1) {
+      // the CROWN alight: flames licking out of the top of the crown (drawn inside it, at 55% of the top, its own leaves
+      // hid them from every camera: a wood alight read as orange specks), anywhere across it, sized to the tree
+      // (vfx's own `scale`, its top / 10 m), and the smoke off the top as big
+      const a = vrandom() * 6.2832, r = top * 0.22 * Math.sqrt(vrandom()), V = E.vfx;
+      // ONE tongue an emission (count 2), bigger for a fuller block: vfx draws at most 256 tongues (its lick batch)
+      const s = clamp(top * METERS_PER_UNIT / 10, 0.8, 2.4), c = 2;
+      const fs = clamp(top * METERS_PER_UNIT / 6, 1.2, 3.2) * (n >= 4 ? 1.25 : 1);   // a crown fire's tongues (~10-17 m on a 16 m tree)
+      const fx = wx + Math.cos(a) * r, fy = oy + top * (0.78 + 0.2 * vrandom()), fz = wz + Math.sin(a) * r;
+      if (V) V.fire(fx, fy, fz, c, fs); else E.fire(fx, fy, fz, c);
+      if (sm) { if (V) V.smoke(wx, oy + top * 1.02, wz, n >= 6 ? 2 : 1, { scale: s }); else E.smoke(wx, oy + top + 0.4 * K_FX, wz, 1); }
+    } else {
+      if (sm) E.smoke(wx, oy + top * 0.6, wz, 1);
+      if (em) E.fire(wx, oy + 0.3 * K_FX, wz, 1);
+    }
+  }
+  /** …its level of detail, from the camera's plan distance: 1 inside `near`, `farK` at `far`, then cullSmoke out to
+   *  `cull` (smoke only), 0 beyond. */
+  _treeFxLod120(wx, wz) {
+    const F = TREE_FX120, c = this.camera.position, d = hyp(wx - c.x, wz - c.z);
+    if (d <= F.near) return 1;
+    if (d <= F.far) return 1 - (1 - F.farK) * (d - F.near) / (F.far - F.near);
+    return d <= F.cull ? F.cullSmoke : 0;
+  }
+  /** …and a burning tree's ground fire (`f.tree120`): the litter burning at its foot, drawn here instead of by
+   *  `_fireFx` — low flames only (the wood's smoke is the trees' own), one fire a block, at the far rate over the LOD. */
+  _treeGroundFx120(f) {
+    const F = TREE_FX120, T = this._tfx120;
+    const n = T ? (T.last.get(Math.floor(worldToCell(f.x) / F.blk) * 4096 + Math.floor(worldToCell(f.z) / F.blk)) || 1) : 1;
+    const lod = this._treeFxLod120(f.x, f.z);
+    if (lod < F.farK) { f.emitT = 1; return; }
+    f.emitT = F.gnd * Math.max(1, n / F.per) / lod;
+    this.effects.fire(f.x + vrand(-f.r * 0.3, f.r * 0.3), f.y + 0.2 * K_FX, f.z + vrand(-f.r * 0.3, f.r * 0.3), 2, TREE_GND_TINT120);
   }
   _updateFires(dt) {
     const cam = this.camera;
@@ -77241,7 +77363,8 @@ cosmeticClass(Game, ['_spawnStrikePlane', '_craterLip', '_mineMesh', '_makeSmoke
   // (round 113) the three kinds of cloud the emitter now draws
   '_smokeBank', '_smokeColumn', '_smokeDust']);
 cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);
-cosmeticClass(Obstacles, ['_ashFx120']);   // (round 120, `treeBurn120`) the charred stump and the ash: the picture only   // (round 118) a felled tree's leaves and dust
+cosmeticClass(Obstacles, ['_ashFx120']); cosmeticClass(Obstacles, ['_char120']);
+cosmeticClass(Game, ['_treeFireFx120', '_treeGroundFx120']);   // (round 120, `treeBurn120`) the burning wood's picture, thinned   // (round 120, `treeBurn120`) the charred stump and the ash: the picture only   // (round 118) a felled tree's leaves and dust
 // (round 120) EFFECTS: a burning wreck's column (`smokeCol120`), the fire on its hull and the burnt-out hulk
 // (`wreckFx120`), what a brew-up throws and the char under it (`debris120`). Pictures only, on the cosmetic stream;
 // OFF = round 119 exactly. Read each step by `_updateSmokeInstanced`; `wreckFx120` also by `_updateCorpse`/`_becomeHulk`.
@@ -77267,8 +77390,11 @@ Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 1
 // drawing's own 5-7% (.claude/wip120/obstacles/NOTES.md); ~2 shaped tests a frame. false is the whole-cell test.
 Game.prototype.obsHit120 = true;
 // (round 120) a burning tree flames for minutes, smoulders, then collapses into a charred stump and ash, not a log
-// (`TREE_BURN120`, `_burnTree120`, `Obstacles._ash120`): OFF until measured. OFF is the 3-7 s burn.
-Game.prototype.treeBurn120 = false;
+// (`TREE_BURN120`, `_burnTree120`, `Obstacles._ash120`). ON (main, 24 Nov 01:00 UTC; the owner asked for it): A/B 6 seeds
+// Village staged + 6 Ardennes natural inside the floor; a 300-tree fire 16 ms CHEAPER at the playing camera than the old
+// burn (logs drawn singly), the picture thinned (burnFx120) and proven cosmetic. false is the 3-7 s burn.
+Game.prototype.treeBurn120 = true;
+Game.prototype.burnFx120 = true;   // (round 120) under treeBurn120: the burning wood's picture thinned (TREE_FX120); false = every tree drawn
 Game.prototype.treeTough120 = true;   // (round 120) trees take bullets as chips and blast by its charge (TREE_FELL_KG120): the owner asked, 23 Nov. false = round 118's trees
 // (round 118) CARRIED STATE: what a battle builds once per PAGE must not move the next battle's sim stream. ON: the
 // felled tree's log kit and still crown are built on the cosmetic stream; `Obstacles.clear` drops the last map's falls.
