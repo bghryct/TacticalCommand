@@ -10619,6 +10619,13 @@ float wBand(float lambda, float px) { return 1.0 - smoothstep(0.15 * lambda, 0.4
 vec3 waterSurface(vec3 col, inout float alpha) {
   vec2 pm = vWaterW.xz * 4.0;                       // world units to metres
   vec2 fw = fwidth(pm);
+  // THE SKIRT (round 120, WATERFIX). A dry vertex of the plane is parked 40 u under the level (_maskWater), so a
+  // triangle between the water's edge and the land is a near-vertical sheet. Where the land in front lies under the
+  // level (Purple Heart Lane's flooded fields, Vierville's sand a pace from the sea) it stood in view: a curtain of
+  // streaks, a grey smear at a man's feet. No face of the water is steeper than its waves (a few degrees), so a face
+  // steeper than 60 degrees is a skirt and is dropped (after the derivatives above). ON (water120) draws its own.
+  vec3 wFn = cross(dFdx(vWaterW), dFdy(vWaterW));
+  if (wFn.y * wFn.y < 0.25 * dot(wFn, wFn)) discard;
   float px = max(fw.x, fw.y);                       // metres a pixel spans here
   vec4 w = vec4(wBand(3.23, px), wBand(1.20, px), wBand(0.585, px), wBand(0.256, px));
   float e = 0.05, h0 = wHeight(pm, w);
@@ -20414,7 +20421,12 @@ class Terrain {
    *  would be a sheet of water over the entire map. A vertex is WET if any of
    *  the four cells that meet at it is water — exactly the quads that need a
    *  surface, and no more — and every other vertex goes below the backdrop.
-   *  `ambient` waves about these values rather than about zero. */
+   *  `ambient` waves about these values rather than about zero.
+   *  (round 120) A triangle between a wet and a dry vertex is a near-vertical
+   *  SKIRT. It is buried where the bank stands over the level, but where the
+   *  land in front lies under it (a flood's fields, a beach) it stood in view as
+   *  a sheet; the water's shader drops any face steeper than 60 degrees
+   *  (`waterSurface`), so the plane ends at its last wet triangle. */
   _maskWater() {
     const B = this._waterBase;
     B.fill(WATER_DRY_Y);

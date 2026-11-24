@@ -1232,7 +1232,11 @@ void main() {
     if (want && (!ov || this._ovDirty || ov.parent !== T.mesh)) {
       const self = this;
       cosmetic(function () {
-        if (ov) { if (ov.parent) ov.parent.remove(ov); ov.geometry.dispose(); }
+        // (WATERFIX) THE POSITION IS THE GROUND'S. three's dispose deletes the GL buffer of every attribute the geometry holds,
+        // so disposing the old overlay deleted the TERRAIN's position buffer under the terrain's cached vertex array: the ground
+        // then drew from the dead buffer (Vierville after Purple Heart Lane: pieces of ground in the sky) until a light or a
+        // program change made it a new one. Let go of the shared attribute first; only the overlay's own index goes.
+        if (ov) { if (ov.parent) ov.parent.remove(ov); ov.geometry.deleteAttribute('position'); ov.geometry.dispose(); }
         const N = self._N, idx = overlayIndex(T, N, self._shorePx || new Uint8Array(N * N * 4), hscale(), T.waterY, U.uW120Bank.value.w || 0.2);
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', T.mesh.geometry.attributes.position);
