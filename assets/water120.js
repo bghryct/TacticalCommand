@@ -144,6 +144,7 @@
     uW120Calm: { value: v4(0.3, 1, 1, 0.45) },             // (WATER-2) x the banks' ray tilt, y the shore line by waves/current + bank softened by roughness, z sheltered + finer ripples, w the flow's stretch (1, 0, 0, 1 = the 18:18 look)
     uW120SkyMean: { value: new THREE.Vector3(0.3, 0.15, 0.3) },  // (WATER-2) the clouds' mean cover, thickness, high cloud: the sky where the Fresnel is under uW120Look.z              // (WATER-2) x a ford's absorption x this (a clear stream), y the banks' sun from above in their reflection
     uW120Dbg: { value: v4(1, 1, 1, 1) },                   // (cost probes) x the bank march, y the dome's sky, z the glint, w the flow
+    uW120Fix: { value: v4(1, 2.5, 0, 0.4) },                 // (WATER-4) x the skirt drawn as the level it hangs from (0 = as before), y the ripples' facets on the body (0 = none), z the sky's fog early-out (1 = on; OFF by default: w4 t1 measured no saving), w the surf's strength (WATER-3: 0.75)
     uW120Skip: { value: v4(1, 0, 0.12, 0.72) },               // (WATER-3) x the march's empty-space skip on, y a ford's march steps, z the river's shelf from a ford (m a m), w a ford's wet bed (its light through the water)
     // the ground
     uW120Bank: { value: v4(0, -13.5, 0.085, 0.20) },      // on, the water level, the wet band (u), the band on a beach
@@ -223,6 +224,7 @@ uniform float uW120RingN;
 uniform float uW120T;
 uniform vec4 uW120Dbg;
 uniform vec4 uW120March;
+uniform vec4 uW120Fix;
 vec3 w120Alb;
 vec3 w120Lin;
 float w120Hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -242,18 +244,24 @@ vec3 w120Disp(vec3 c) {
 vec3 w120Sky(vec3 d, float b, float fr) {
   float y = max(d.y, 0.0);
   if (uW120Rain.w < 0.5 || uW120Dbg.y < 0.5) return mix(uW120Fog, uW120Fog * vec3(0.55, 0.68, 0.92), pow(y, 0.6));
+  vec2 pp = d.xz / (y + 0.09);
+#ifndef W120_LITE
+  float gb = exp2(b);
+  vec2 ppx = dFdx(pp) * gb, ppy = dFdy(pp) * gb;
+#endif
+  // (WATER-4) A GRAZING RAY (the far water) sees the haze and nothing else: the dome's own fog weight is ~1 there, so the
+  // LUT, the clouds and the tone are skipped (the same colour to 0.5%). The derivatives above are taken before this branch.
+  float fogW = max(uW120Haze.y, 1.0 - smoothstep(0.0, uW120Haze.x, y));
+  if (uW120Fix.z > 0.5 && fogW > 0.995) return clamp(uW120Fog, 0.0, 1.0);
   vec2 hd = d.xz * inversesqrt(max(dot(d.xz, d.xz), 1e-6));
   vec2 luv = vec2(0.5 - 0.5 * dot(hd, uW120SunH), sqrt(y)) * (31.0 / 32.0) + 0.5 / 32.0;
-  vec3 tab = texture2D(uW120Lut, luv).rgb;
+  vec3 tab = textureLod(uW120Lut, luv, 0.0).rgb;
   vec3 sc = tab * tab * (uW120Haze.z * uW120Tone.x);
-  vec2 pp = d.xz / (y + 0.09);
   // (WATER-2) where the Fresnel is under uW120Look.z the sky is a few per cent of what the eye gets back: the clouds' MEAN
   // (uW120SkyMean, from the dome's own noise histogram) stands in for their pattern and the two noise reads are skipped.
   // The reads take explicit gradients (taken before the branch), so the compiler has no reason to hoist them out of it.
   float cia, ca, thick;
 #ifndef W120_LITE
-  float gb = exp2(b);
-  vec2 ppx = dFdx(pp) * gb, ppy = dFdy(pp) * gb;
   if (fr >= uW120Look.z) {
     float ci = textureGrad(uW120Noise, pp * 0.021 + uW120Drift.zw, ppx * 0.021, ppy * 0.021).b;
     cia = smoothstep(0.42, 0.88, ci) * uW120Cloud.w * smoothstep(0.03, 0.3, y);
@@ -274,7 +282,7 @@ vec3 w120Sky(vec3 d, float b, float fr) {
   c = mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, 1.18) * uW120Tone.y;
   c += uW120Tone.z * vec3(0.045, 0.070, 0.140) * (1.0 - ca * 0.55);
   c += uW120Tone.w * vec3(0.55, 0.6, 0.75) * (0.35 + 0.65 * ca);
-  c = mix(c, uW120Fog, max(uW120Haze.y, 1.0 - smoothstep(0.0, uW120Haze.x, y)));
+  c = mix(c, uW120Fog, fogW);
   return clamp(c, 0.0, 1.0);
 }
 // is the point at height y (over the water level) at q inside something? m = the skyline texel x its scale
@@ -403,6 +411,28 @@ vec2 w120Slope(vec2 pm, float px, out float rough) {
 }
 void w120Composite() {
   vec3 wp = vWaterW;
+  // (WATER-4) THE SKIRT. A dry vertex of the plane is parked 40 u down, so a triangle between the water's edge and the land
+  // is a near-vertical sheet. Where the land in front of it lies under the level (a flood's field, a beach a pace from the sea)
+  // the eye sees it: OFF's faint streaks; ON's curtain (the ripples, the reflection and the foam are functions of x and z, so
+  // constant down a vertical face) and, as its depth goes negative down the sheet, a white smear of foam. It is drawn as what
+  // the eye's ray meets first, the level it hangs from (a shallow edge); a ford's sheet, or one seen from under the level, is
+  // dropped (at the end: after every derivative).
+  vec3 gN = cross(dFdx(vWaterW), dFdy(vWaterW));
+  float skirt = (uW120Fix.x > 0.5 && abs(gN.y) < 0.5 * length(gN)) ? 1.0 : 0.0;
+  float drop = 0.0;
+  vec4 wv = vW120;
+  float wS = vW120S;
+  if (skirt > 0.5) {
+    float lv = uW120Grid.z, de = uWaterEye.y - wp.y;
+    if (vW120Fd > 0.001 || uWaterEye.y < lv + 0.003 || de < 1e-4) drop = 1.0;
+    // the water at the sheet's own top edge: its varyings run linearly down to the dry vertex (40 u under the level), so
+    // the edge's depth and shore distance come back from the fraction w of the drop (the same on all its triangles)
+    else {
+      float w = clamp((lv - wp.y) / 40.0, 0.0, 0.5);
+      wv.x = clamp((vW120.x + (lv - wp.y)) / (1.0 - w), 0.06, 4.0); wS = vW120S / (1.0 - w);
+      wp = uWaterEye + (wp - uWaterEye) * ((uWaterEye.y - lv) / de);
+    }
+  }
   vec3 dv = uWaterEye - wp;
   float dEye = length(dv);
   vec3 v = dv / max(dEye, 1e-4);
@@ -425,7 +455,7 @@ void w120Composite() {
     if (age < 0.0 || abs(wv) > 3.0) continue;
     s += d / max(length(d), 1e-4) * sin(wv * 3.14159) * exp(-wv * wv * 0.4) * rg.w * exp(-age * 0.9) / (1.0 + rm * 0.25);
   }
-  s *= mix(0.35, 1.0, smoothstep(0.03, 0.30, vW120.x));   // shallow water carries small waves
+  s *= mix(0.35, 1.0, smoothstep(0.03, 0.30, wv.x));   // shallow water carries small waves
   vec3 n = normalize(vec3(-s.x, 1.0, -s.y));
   float nv = max(dot(n, v), 0.0);
   float fres = 0.03 + 0.97 * pow(1.0 - nv, 5.0);
@@ -453,7 +483,7 @@ void w120Composite() {
   // a map's bed steps straight down at the bank; what is SEEN of the bed shelves as a beach, a lake's or a pond's edge would
   // (a river keeps its banks: embankments and walls)
   float shelf = length(vW120.yz) > 0.012 ? 1e3 : mix(mix(0.25, 0.12, smoothstep(0.30, 0.44, ex)), 0.05, sea);
-  float dM = min(max(vW120.x, 0.0) * 4.0, vW120S * shelf);
+  float dM = min(max(wv.x, 0.0) * 4.0, wS * shelf);
   // (WATER-3) beside a ford the river's bed shelves (1 in 3) down from the ford's 36 cm: no ruled line where a ford strip
   // meets the deep river
   dM = min(dM, 0.36 + vW120X.y * uW120Skip.z);
@@ -462,9 +492,9 @@ void w120Composite() {
   float tr = exp(-mix(uW120Abs.x, uW120Abs.y, sea) * mix(1.0, uW120Look.x, vW120Fd) * dM * (1.0 + 1.0 / max(muR, 0.2)));
   // WATER MUST READ AS WATER (it stops a man on foot): a few metres out from the bank at least 40% of what is seen is the
   // water's own body, however shallow or clear (a reef flat, a ford, a pond in a marsh vanished into their beds)
-  tr = min(tr, 1.0 - (0.25 + 0.15 * smoothstep(0.10, 0.35, vW120.x)) * smoothstep(0.5, 4.0, vW120S + 3.0 * vW120Fd));
+  tr = min(tr, 1.0 - (0.25 + 0.15 * smoothstep(0.10, 0.35, wv.x)) * smoothstep(0.5, 4.0, wS + 3.0 * vW120Fd));
   // foam: a broken line where the water meets the land, lapping; the surf rolling in on a beach
-  float dU = vW120.x;
+  float dU = wv.x;
   float lap = 0.010 * sin(uW120T * 1.25 + pm.x * 0.13 + pm.y * 0.17) * (0.5 + ex);
   float fwU = max(0.010, px * 0.25);
   float fn = 0.5;
@@ -473,11 +503,11 @@ void w120Composite() {
 #else
   if (dU < fwU * 3.0 + 0.03 || (sea > 0.0 && dM < 2.6)) fn = w120VN(pm * 0.9 + vec2(uW120T * 0.05, 0.0)) * 0.65 + w120VN(pm * 3.1 - vec2(0.0, uW120T * 0.08)) * 0.35;
 #endif
-  float shore = (1.0 - smoothstep(0.0, fwU, dU + lap)) * (1.0 - smoothstep(1.0, 5.0, vW120S)) * smoothstep(0.30, 0.62, fn + 0.18) * mix(0.35, 1.0, ex);
+  float shore = (1.0 - smoothstep(0.0, fwU, dU + lap)) * (1.0 - smoothstep(1.0, 5.0, wS)) * smoothstep(0.30, 0.62, fn + 0.18) * mix(0.35, 1.0, ex);
   // (WATER-2) a white line along every bank was a hard ruled stroke at 26 m: foam only where waves (open water) or a current
   // break on the bank, in patches, with a soft edge (uW120Calm.y: 0 = the 18:18 line)
   float shoreK = max(smoothstep(0.45, 0.9, ex), 0.6 * smoothstep(0.15, 0.7, length(vW120.yz)));
-  float shore2 = (1.0 - smoothstep(-fwU * 0.5, fwU * 2.5, dU + lap)) * (1.0 - smoothstep(1.0, 5.0, vW120S)) * smoothstep(0.42, 0.72, fn) * shoreK * 0.8;
+  float shore2 = (1.0 - smoothstep(-fwU * 0.5, fwU * 2.5, dU + lap)) * (1.0 - smoothstep(1.0, 5.0, wS)) * smoothstep(0.42, 0.72, fn) * shoreK * 0.8;
   shore = mix(shore, shore2, uW120Calm.y);
   float surf = 0.0;
   if (sea > 0.0 && dM < 2.6) {   // (WATER-2) surf is 0 past 2.6 m of depth: skip its noise there (the open sea)
@@ -489,10 +519,14 @@ void w120Composite() {
 #endif
     surf = smoothstep(0.90, 0.985, ph) * (1.0 - smoothstep(0.3, 2.6, dM)) * sea * smoothstep(0.40, 0.70, lace) * smoothstep(0.25, 0.6, fn);
   }
-  float phi = clamp(shore * 0.85 + surf * 0.75, 0.0, 1.0) * uW120Abs.z;
+  float phi = clamp(shore * 0.85 + surf * uW120Fix.w, 0.0, 1.0) * uW120Abs.z;
   vec3 foam = phi > 0.002 ? w120Disp(w120Lin / max(w120Alb, vec3(1e-4)) * 0.72) : vec3(0.0);
   // over the bed: foam, the reflection by Fresnel, the body where the bed is lost, and the glint
   vec3 body = gl_FragColor.rgb;
+  // (WATER-4) THE RIPPLES' FACETS on the body, as OFF draws them (faces toward the sun lighter): looking down on deep water
+  // the Fresnel is 3%, so without them the body is one flat colour (the Waal at 26 m). At a grazing view the reflection
+  // draws the ripples already: there they fade out; capped at +-30%.
+  body *= 1.0 + clamp(uW120Fix.y * smoothstep(0.25, 0.6, nv) * dot(n.xz, sunL.xz), -0.3, 0.3);
   vec3 pc = phi * foam + (1.0 - phi) * (fres * refl + (1.0 - fres) * (1.0 - tr) * body) + glint;
   // (WATER-3) the bed seen through a ford is wet stone, darker than the dry gravel on its banks
   float wetB = max(vW120Fd, 1.0 - smoothstep(0.0, 8.0, vW120X.y));   // a ford, and the river's shelf beside it
@@ -501,6 +535,11 @@ void w120Composite() {
   gl_FragColor = vec4(pc / max(a, 1e-3), a);
   // (WATER-3) a ford's water feathers in over the first 3 m from its dry edge (no ruled cell-edged strip)
   gl_FragColor.a *= mix(1.0, smoothstep(0.0, 3.0, vW120S), vW120Fd);
+#ifdef W120_DROP_ALPHA
+  if (drop > 0.5) gl_FragColor = vec4(0.0);
+#else
+  if (drop > 0.5) discard;
+#endif
 }
 `;
   const F_ALB = `
@@ -521,7 +560,7 @@ void w120Composite() {
     sh.vertexShader = vs.replace('void main() {', V_PARS + 'void main() {')
       .replace('waterWave119(transformed);', 'waterWave119(transformed);' + V_SWELL)
       .replace('#include <project_vertex>', V_MAIN + '\n#include <project_vertex>');
-    const mapF = (W.marchLod ? '#define W120_MAP(p) textureLod(uW120Map, p, 0.0)\n' : '#define W120_MAP(p) texture2D(uW120Map, p)\n') + (W.liteNow ? '#define W120_LITE\n' : '');
+    const mapF = (W.marchLod ? '#define W120_MAP(p) textureLod(uW120Map, p, 0.0)\n' : '#define W120_MAP(p) texture2D(uW120Map, p)\n') + (W.liteNow ? '#define W120_LITE\n' : '') + (W.dropAlpha ? '#define W120_DROP_ALPHA\n' : '');
     sh.fragmentShader = fs.replace('void main() {', mapF + F_PARS + 'void main() {')
       .replace('#include <color_fragment>', '#include <color_fragment>' + F_ALB)
       .replace(OFF_SURF, 'w120Lin = gl_FragColor.rgb;')
@@ -529,7 +568,7 @@ void w120Composite() {
     return true;
   };
   /** The material's program key: `|w120` only while ON (OFF keeps today's program). */
-  W.key = function () { return W.on ? '|w120:' + W.ver + (W.marchLod ? 'L' : '') + (W.liteNow ? 'lite' : '') : ''; };
+  W.key = function () { return W.on ? '|w120:' + W.ver + (W.marchLod ? 'L' : '') + (W.liteNow ? 'lite' : '') + (W.dropAlpha ? 'A' : '') : ''; };
 
   // ---------------------------------------------------------------- GLSL: the ground (wet banks, the bed)
   const G_PARS = `
@@ -1378,6 +1417,19 @@ void main() {
     this._skyT = K.skyDelay; this._skyAgain = K.skyAgain;
     this.buildMs = +(performance.now() - t0).toFixed(1);
   };
+  /** (WATER-4) PREWARM. The material keeps a program per key, so a tier swap is a cache hit once both exist; but the FIRST
+   *  use of a tier compiled it mid-game (the first entry into first person). Once a map's water is built, both tiers are
+   *  compiled here (`renderer.compile`: the scene's own lights, so the water's own keys). `W.prewarm = false`: off. */
+  C._prewarm = function (g) {
+    const T = g.terrain, r = g.renderer, m = T && T.water && T.water.material;
+    if (W.prewarm === false || !W.on || !r || !r.properties || typeof r.compile !== 'function' || !m || !g.scene || !g.camera) return;
+    const keep = W.liteNow, t0 = performance.now();
+    try { for (const lt of [!keep, keep]) { W.liteNow = lt; m.needsUpdate = true; r.compile(g.scene, g.camera); } }
+    catch (e) { W.warmFails = (W.warmFails || 0) + 1; W.warmErr = String(e && e.message || e); }
+    finally { W.liteNow = keep; m.needsUpdate = true; }
+    this.warmMs = +(performance.now() - t0).toFixed(1);
+    this.warmHeld = ((r.info && r.info.programs) || []).filter(p => p && p.cacheKey && p.cacheKey.indexOf('|w120:') >= 0).length;
+  };
   C._sky = function (g) {
     const T = g.terrain, N = this._N; if (!T || !N) return;
     const t0 = performance.now();
@@ -1534,7 +1586,7 @@ void main() {
     try { this._overlay(g, T); } catch (e) { W.ovFails = (W.ovFails || 0) + 1; W.ovErr = String(e && e.message || e); }
     if (this.fords) { T.water.visible = true; if (this._boxMine && T._waterBox !== this._boxMine) { this._boxOrig = T._waterBox; T._waterBox = this._boxMine; } }
     this._t = ((this._t || 0) + dt) % 3600; U.uW120T.value = this._t;
-    if (this._skyT >= 0) { this._skyT -= dt; if (this._skyT < 0) this._sky(g); }
+    if (this._skyT >= 0) { this._skyT -= dt; if (this._skyT < 0) { this._sky(g); this._prewarm(g); } }
     else if (this._skyAgain >= 0) { this._skyAgain -= dt; if (this._skyAgain < 0) this._sky(g); }
     this._uniforms(g, dt);
     this._wade(g, dt);
@@ -1542,7 +1594,7 @@ void main() {
   C.stats = function () {
     return { on: this._on, N: this._N, bodies: this.bodies.slice(0, 8), hs: +this.hs.toFixed(2), buildMs: this.buildMs, skyMs: this.skyMs, fords: this.fords || 0,
       fails: W.fails, groundFails: W.groundFails, ground: !!this._ground, rings: this.rings.length, lite: W.liteNow, skipMean: this.skipMean || 0, rebeds: this.rebeds || 0, rebedMs: this.rebedMs || 0, liveQuads: this.liveQuads || 0, cullFails: W.cullFails || 0, skipDirMean: this.skipDirMean || 0,
-      overlay: !!W.groundOverlay, ovTris: this._ovTris || 0 };
+      overlay: !!W.groundOverlay, ovTris: this._ovTris || 0, warmMs: this.warmMs || 0, warmHeld: this.warmHeld || 0, warmFails: W.warmFails || 0 };
   };
 
   // every entry from the loop runs on the cosmetic stream (the wade test draws; three.js objects draw UUIDs)

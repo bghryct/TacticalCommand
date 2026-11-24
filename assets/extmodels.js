@@ -95,8 +95,13 @@
   E.stats = function () {
     var c = { idle: 0, loading: 0, ready: 0, failed: 0 };
     for (var k in cache) c[cache[k].state] = (c[cache[k].state] || 0) + 1;
+    for (var s in side) c.loading++;   // (round 120) a pack the page fetches itself, while it downloads
     return c;
   };
+  /** (round 120, FOLIAGE-4) Count a pack the page fetches for itself (assets/shrubs120.pack.js, `Obstacles._s120Want`)
+   *  as loading while it downloads, so `settle()` and the "models arriving" pill wait for it as for a model. */
+  var side = {};
+  E.sideLoad = function (key, on) { if (on) side[key] = 1; else delete side[key]; };
   // ---- (round 119) THE PACKS DOWNLOAD WHEN ASKED FOR, TOO --------------------------
   // Round 117 made the DECODE lazy, but every one of the 254 pack scripts was still
   // fetched and run at boot: ~370 MB of base64 (184 MB over the wire from GitHub

@@ -1523,8 +1523,10 @@ body.fpv #tacMap { display: none !important; }
      Optional: without them (or with the switch off) the trees are round 113's. -->
 <script src="assets/trees120.pack.js"></script>
 <!-- (round 120, `game.shrubs120`) the bushes and the scrub as shrub species (tools/blender/trees120.py SHRUBS), joined to
-     the trees' pack as it loads. Optional: without it (or with the switch off) they are round 98's clumps. -->
-<script src="assets/shrubs120.pack.js"></script>
+     the trees' pack as it loads. Optional: without it (or with the switch off) they are round 98's clumps. LAZY (FOLIAGE-4):
+     the tag sits inert in this template and `Obstacles._s120Want` injects it the first time a bush or scrub is built with
+     the switch on, so a page with shrubs120 off never fetches or parses its 331 kB. -->
+<template id="shrubs120Pack"><script src="assets/shrubs120.pack.js"></script></template>
 <script src="assets/trees120.js"></script>
 <script src="assets/soldier.pack.js"></script>
 <script src="assets/gaits.js"></script>
@@ -22118,6 +22120,7 @@ class PropBatcher {
   _batchable(o) {
     if (!o || !o.mesh || o._noBatch) return false;
     if (o.garrison && o.garrison.length) return false;      // men inside: it is about to change
+    if (o.mesh.userData && o.mesh.userData.s120Pend) return false;   // (round 120, FOLIAGE-4) a shrub waiting for its pack: hidden
     if (this.burning && this.burning.has(o)) return false;   // alight: it flickers and it has a light
     if (o.mesh.userData && o.mesh.userData.fireLight) return false;                    // it flickers
     let ok = true, leaves = 0;
@@ -26263,10 +26266,13 @@ class Obstacles {
    *  bands) — in place of round 98's clump of balls (`_shrubVariant`). The variant drawn in `add` stays the
    *  simulation's (its height, `_simV`); the shrub's TOP goes where that variant's top was, at a uniform scale. Rides
    *  on `trees120` (its material, batcher, impostors). Built inside `add` (the cosmetic stream); it draws nothing from the cell's seed. */
-  _s120On() { const g = window.game, T = window.Trees120; return !!(g && g.shrubs120 === true && this._t120On() && T.pickShrub && T.has('gorse')); }
+  _s120On() { const g = window.game, T = window.Trees120; return !!(g && g.shrubs120 === true && this._t120On() && T.pickShrub); }
   _s120Swap(group, kind, gx, gz) {
     const T = window.Trees120, old = group.children.find(c => c.isMesh);
     if (!T || !old) return false;
+    // (FOLIAGE-4) the pack is not here yet: fetch it, and keep this bush HIDDEN and out of the batch until it lands
+    // (`_s120Land` swaps it then): a map load waits for the shrubs, it does not draw mounds
+    if (!T.has('gorse')) { this._s120Want(); if (this._s120Fetch === 'loading') { group.userData.s120Pend = kind; old.visible = false; } return false; }
     const md = window.game && window.game.mapDef;
     if (this._s120Md !== md) { this._s120Md = md; this._s120Th = T.theatreOf(md); }
     const pk = T.pickShrub(this._s120Th, kind, gx, gz);
@@ -26282,6 +26288,42 @@ class Obstacles {
     group.remove(old); group.add(m);
     group.userData.s120 = pk.sp;
     return true;
+  }
+  /** (round 120, FOLIAGE-4) THE SHRUB PACK DOWNLOADS WHEN IT IS WANTED. assets/shrubs120.pack.js (331 kB) sits inert in
+   *  `<template id="shrubs120Pack">` and is fetched the first time a bush or scrub is built with `shrubs120` on — a
+   *  <script> tag, as round 119's model packs (`ExtModels._fetchPack`), so it works from file:// too. Counted by
+   *  `ExtModels.sideLoad` while it downloads, so `ExtModels.settle()` and the "models arriving" pill wait for it. */
+  _s120Want() {
+    if (this._s120Fetch) return;
+    const doc = window.document, tpl = doc && doc.getElementById && doc.getElementById('shrubs120Pack');
+    const frag = tpl && (tpl.content || tpl), tag = frag && frag.querySelector && frag.querySelector('script[src]');
+    if (!tag) { this._s120Fetch = 'none'; return; }
+    const E = window.ExtModels, s = doc.createElement('script');
+    this._s120Fetch = 'loading';
+    if (E && E.sideLoad) E.sideLoad('shrubs120', true);
+    const fin = ok => { this._s120Fetch = ok ? 'done' : 'failed'; try { this._s120Land(ok); } finally { if (E && E.sideLoad) E.sideLoad('shrubs120', false); } };
+    s.src = tag.getAttribute('src'); s.async = true;
+    s.onload = () => fin(true);
+    s.onerror = () => { console.warn('[shrubs120] assets/shrubs120.pack.js did not load: the bushes stay round 98\'s'); fin(false); };
+    (doc.head || doc.documentElement).appendChild(s);
+  }
+  /** (FOLIAGE-4) The pack has landed (`ok`) or failed: every bush and scrub of the map that waited for it is shown and
+   *  swapped (or shown as it was), then the scenery is re-batched. In the cosmetic stream (`cosmeticClass` below). */
+  _s120Land(ok) {
+    const pend = this.list.filter(o => o.mesh && o.mesh.userData && o.mesh.userData.s120Pend);
+    if (!pend.length) return 0;
+    const was = !!(this.batcher && this.batcher.active);
+    if (was) this.unbakeProps();
+    let n = 0;
+    for (const o of pend) {
+      const grp = o.mesh, kind = grp.userData.s120Pend;
+      delete grp.userData.s120Pend;
+      const old = grp.children.find(c => c.isMesh);
+      if (old) old.visible = true;
+      if (ok && this._s120On() && this._s120Swap(grp, kind, o.gx, o.gz)) n++;
+    }
+    if (was) this.bakeProps();
+    return n;
   }
   /** What the simulation sees of a prop drawn as variant `v` (`PROP_VARIANT_H`),
    *  times any height scale of its own `k` (`sub`: the variant set, where the
@@ -77523,6 +77565,7 @@ cosmeticClass(Game, ['_spawnStrikePlane', '_craterLip', '_mineMesh', '_makeSmoke
   '_smokeBank', '_smokeColumn', '_smokeDust']);
 cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);
 cosmeticClass(Obstacles, ['_ashFx120']); cosmeticClass(Obstacles, ['_char120']);
+cosmeticClass(Obstacles, ['_s120Land']);   // (round 120, FOLIAGE-4) the shrubs swapped in when their pack lands
 cosmeticClass(Game, ['_treeLookFx120', '_treeLookEmit120']);   // (round 120, OBSTACLES-3, `burnLook120`) the burning crown's glow, flame mass and pall
 cosmeticClass(Game, ['_treeFireFx120', '_treeGroundFx120']);   // (round 120, `treeBurn120`) the burning wood's picture, thinned   // (round 120, `treeBurn120`) the charred stump and the ash: the picture only   // (round 118) a felled tree's leaves and dust
 // (round 120) EFFECTS: a burning wreck's column (`smokeCol120`), the fire on its hull and the burnt-out hulk
@@ -77580,7 +77623,10 @@ Game.prototype.shadowSet119 = true;    // ON: no worse at any camera on Village 
 Game.prototype.trees120 = true;
 // (round 120, FOLIAGE-3) THE BUSHES AND THE SCRUB AS SHRUB SPECIES by theatre, in the trees' pipeline and bands
 // (`Obstacles._s120Swap`, assets/shrubs120.pack.js); needs trees120. OFF: round 98's clumps exactly. Read at map load.
-Game.prototype.shrubs120 = false;
+// ON (main, 24 Nov 04:49 UTC, from .claude/wip120/foliage/sheets/s14_core_village.jpg, s13_core_monte.jpg, s13_core_kasserine.jpg:
+// bushes that keep the old mounds' dark mass at 26-46 m and are plants in first person; play -0.45 ms, fpv +0.15 median;
+// the hit table matches the drawn clump within 4%; seeded battles identical; the pack loads lazily). false = the old mounds.
+Game.prototype.shrubs120 = true;
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 // (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —

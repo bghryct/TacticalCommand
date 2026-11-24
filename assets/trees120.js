@@ -41,6 +41,17 @@
     juniper: 1, gorse: 1, maquis: 1, saltbush: 1, tropic: 1 };   // (round 120, FOLIAGE-3) the evergreen shrubs
   // bark styles (hedge.z on kind 3): 0 grain, 1 birch, 2 palm rings, 3 plane-smooth (beech)
   T.BARK = { birch: 1, datepalm: 2, coco: 2, beech: 3 };
+  // (round 120, FOLIAGE-4, `game.shrubs120`) the shrub species (assets/shrubs120.pack.js) and A SHRUB'S MASS AT RANGE:
+  // at LOD1 (26-46 m, 120-560 px) a shrub's merged cards left gaps through which the bright ground showed, so it read
+  // THINNER and LIGHTER than round 98's dark mound (main, 03:42 UTC 24 Nov) — and a bush is cover, so it must read as
+  // cover. Its LOD1 gets a dark inner CORE (a low ellipsoid standing on the ground inside the leaf, `r` of the cards'
+  // spread across and up to `top` of their height, in the species' darkest green x `dark`, drawn as bark: opaque, no
+  // cut, darker underneath) and its cards a darker green toward the heart (x `inner` at the centre, x1 at the rim, all
+  // x `card`). LOD0 (first person) and the impostor (baked from LOD0) are untouched; the trees never take it.
+  T.SHRUBS = { hawthorn: 1, hazel: 1, elder: 1, juniper: 1, gorse: 1, maquis: 1, saltbush: 1, tropic: 1 };
+  // `first`: the core's triangles BEFORE the cards', so depth rejects the alpha-tested cards behind it (the same picture: all
+  // depth-tested, nothing blends). Village first person, quiet hold (f4 abs5): ON +1.2 ms core last, +1.3 no core, +0.5 first.
+  T.CORE = { on: true, r: 0.70, top: 0.78, dark: 0.48, inner: 0.62, card: 0.88, seg: 10, ring: 6, first: true };
 
   function mulberry(seed) {
     return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
@@ -406,6 +417,18 @@
     }
     // ---- leaf cards -------------------------------------------------------------------------------------------
     var CD = lod ? U.c1 : U.c0, green = e.green, Rn = mulberry(4400 + vi * 17 + spName.length * 131);
+    // (FOLIAGE-4) a shrub's LOD1: the cards' spread, for the dark core and the darker heart (see T.CORE)
+    var K5 = lod === 1 && T.SHRUBS[spName] && T.CORE.on && CD.n > 0 ? T.CORE : null, X5 = null;
+    if (K5) {
+      var bx0 = 1e9, bx1 = -1e9, by0 = 1e9, by1 = -1e9, bz0 = 1e9, bz1 = -1e9;
+      for (var i5 = 0; i5 < CD.n; i5++) {
+        var qx = CD.P[i5 * 3], qy = CD.P[i5 * 3 + 1], qz = CD.P[i5 * 3 + 2];
+        if (qx < bx0) bx0 = qx; if (qx > bx1) bx1 = qx; if (qy < by0) by0 = qy; if (qy > by1) by1 = qy; if (qz < bz0) bz0 = qz; if (qz > bz1) bz1 = qz;
+      }
+      var yb5 = Math.max(0.02 * top, by0 * 0.35), yt5 = Math.max(yb5 + 0.1 * top, by0 + (by1 - by0) * K5.top);
+      X5 = { cx: (bx0 + bx1) / 2, cz: (bz0 + bz1) / 2, hx: Math.max(0.05, (bx1 - bx0) / 2), hz: Math.max(0.05, (bz1 - bz0) / 2),
+             hy: Math.max(0.05, (by1 - by0) / 2), my: (by0 + by1) / 2, yb: yb5, yt: yt5 };
+    }
     for (var ci2 = 0; ci2 < CD.n; ci2++) {
       var c3 = [CD.P[ci2 * 3], CD.P[ci2 * 3 + 1], CD.P[ci2 * 3 + 2]];
       var n3 = norm([CD.NU[ci2 * 6] / 127, CD.NU[ci2 * 6 + 1] / 127, CD.NU[ci2 * 6 + 2] / 127]);
@@ -414,6 +437,10 @@
       var rt = norm(cross(u3, n3));
       var gk = green[Math.floor(Rn() * green.length)], jit = 0.9 + Rn() * 0.2;
       var lit = (0.60 + 0.40 * Math.pow(ao2, 0.8)) * jit;
+      if (X5) {   // (FOLIAGE-4) darker toward the heart of the shrub
+        var rr5 = Math.min(1, Math.hypot((c3[0] - X5.cx) / X5.hx, (c3[1] - X5.my) / X5.hy, (c3[2] - X5.cz) / X5.hz));
+        lit *= K5.card * (K5.inner + (1 - K5.inner) * rr5);
+      }
       var colr = [gk[0] * lit, gk[1] * lit, gk[2] * lit];
       var flip = Rn() < 0.5;
       var ph2 = (limb2 * 0.618034) % 1;
@@ -428,6 +455,27 @@
         V(pp, nb, colr, [5, Math.max(0.05, sway(pp[1])), cell], n3, [flip ? 1 - cr[2] : cr[2], cr[3]], [ph2, cr[3] ? 1 : 0.3]);
       }
       idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+    if (X5) {   // (FOLIAGE-4) the dark core: rings from the crown (v 0) to the ground (v 1), outward-facing (CCW outside)
+      var gd = green[0];
+      for (var gi = 1; gi < green.length; gi++) if (green[gi][0] + green[gi][1] + green[gi][2] < gd[0] + gd[1] + gd[2]) gd = green[gi];
+      var SG = K5.seg, RG = K5.ring, cb = pos.length / 3, rx5 = X5.hx * K5.r, rz5 = X5.hz * K5.r;
+      var cy5 = (X5.yb + X5.yt) / 2, ry5 = (X5.yt - X5.yb) / 2;
+      for (var r5 = 0; r5 <= RG; r5++) {
+        var th5 = Math.PI * r5 / RG, sy5 = Math.cos(th5), sr5 = Math.sin(th5);
+        for (var s5 = 0; s5 < SG; s5++) {
+          var ph5 = s5 / SG * Math.PI * 2, ux = sr5 * Math.cos(ph5), uz = sr5 * Math.sin(ph5);
+          var p5 = [X5.cx + rx5 * ux, cy5 + ry5 * sy5, X5.cz + rz5 * uz], n5 = norm([ux / rx5, sy5 / ry5, uz / rz5]);
+          var d5 = K5.dark * (0.70 + 0.30 * (sy5 * 0.5 + 0.5));   // in the shade of its own leaf, darkest underneath
+          V(p5, n5, [gd[0] * d5, gd[1] * d5, gd[2] * d5], [3, sway(p5[1]) * 0.6, 3], n5, [0, 0], [0, 0]);
+        }
+      }
+      var ci5 = [];
+      for (var r6 = 0; r6 < RG; r6++) for (var s6 = 0; s6 < SG; s6++) {
+        var qa = cb + r6 * SG + s6, qb = cb + r6 * SG + (s6 + 1) % SG, qc = qa + SG, qd = qb + SG;
+        ci5.push(qa, qb, qc, qb, qd, qc);
+      }
+      idx = K5.first ? ci5.concat(idx) : idx.concat(ci5);
     }
     var g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
