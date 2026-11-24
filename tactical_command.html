@@ -61606,6 +61606,21 @@ class Game {
     // and a bearer the pair joined a rifle section, tube and all. A section
     // with a live tube neither gives nor takes men.
     const tubed = sq => this.mortarTeam113 !== false && sq.members.some(u => u.alive && !u.downed && (u.def.kind === 'mortar' || u.def.kind === 'artillery'));
+    // (round 121, `game.teams121`) A TEAM IS ITS ESTABLISHMENT. The owner: bazooka teams, Panzerfaust teams and
+    // snipers "on all sides not showing up when added to force on the map". They were spawned, then folded into
+    // the nearest rifle section at the first pass of this function: a squad was exempt only when EVERY man in it
+    // was crew, and a template team is a weapon plus the man who carries for it (a bazooka and a rifleman, a
+    // Scharfschütze and the Grenadier on his binoculars). So every two-man team `spawnSquad` lays (the battle
+    // setup, the campaign, reinforcements) read as a remnant. Measured on Village: of nine two-man teams, none was
+    // left by t = 10 s; their men had joined rifle and recon squads. With this pass off, all nine were still teams.
+    // The stock squad layer never showed the fault: it cuts its teams from crew alone (SHAPES 'at', 'recon').
+    //   `whole`: a template squad at its paper strength is not a remnant, however small that strength is.
+    //   `armed`: a team that still has its weapon (any squad but a rifle section or an HQ) neither gives men nor
+    //            takes them. This is round 113's rule for tubes, applied to every crew weapon: a bazooka man who
+    //            has lost his loader stays a bazooka team, and a five-man MG team does not grow into fifteen riflemen.
+    const T121 = this.teams121 !== false && window.Squads && Squads.TEMPLATES ? Squads.TEMPLATES : null;
+    const armed = sq => !!T121 && sq.group !== 'rifle' && sq.group !== 'command' && sq.members.some(u => u.alive && !u.downed && crewish(u));
+    const whole = (sq, n) => !!T121 && !!sq.tmpl && !!T121[sq.tmpl] && n >= T121[sq.tmpl].men.length;
     const live = sq => sq.livingMembers().filter(u => u.alive && !u.downed && !u.def.vehicle);
     // Who has room. Built once: a remnant joining a section changes its count,
     // and the running total is what stops three remnants all piling into the
@@ -61614,7 +61629,7 @@ class Game {
     for (const sq of this.squads) {
       const m = live(sq);
       if (m.length < AMALG_MIN || m.length >= AMALG_CAP) continue;
-      if (m.every(crewish) || tubed(sq)) continue;
+      if (m.every(crewish) || tubed(sq) || armed(sq)) continue;
       let cx = 0, cz = 0;
       for (const u of m) { cx += u.pos.x; cz += u.pos.z; }
       recv.push({ sq, n: m.length, x: cx / m.length, z: cz / m.length, team: m[0].team });
@@ -61623,7 +61638,7 @@ class Game {
     for (const sq of this.squads.slice()) {
       const m = live(sq);
       if (!m.length || m.length >= AMALG_MIN) continue;
-      if (m.every(crewish) || tubed(sq)) continue;    // small is its establishment
+      if (m.every(crewish) || tubed(sq) || armed(sq) || whole(sq, m.length)) continue;    // small is its establishment
       if (sq._holdVp) continue;                       // a garrison is somebody else's decision
       let cx = 0, cz = 0;
       for (const u of m) { cx += u.pos.x; cz += u.pos.z; }
@@ -78335,6 +78350,10 @@ Game.prototype.flameCol120 = true;   // ON (main, 24 Nov 04:09 UTC, from .claude
 Game.prototype.snipers118 = true;     // (round 118) a sniper pair each side on Village and in the platoon/company presets
 Game.prototype.setupMem118 = true;
 Game.prototype.sniperKit118 = true;
+// (round 121) the owner: bazooka, Panzerfaust and sniper teams "not showing up when added to force". `_amalgamate` folded
+// every two-man template team into the nearest rifle section within four seconds. ON: a template squad at its paper
+// strength is not a remnant, and a team with its weapon neither gives nor takes men. false = as before.
+Game.prototype.teams121 = true;
 Game.prototype.scopeView118 = true;   // (round 118) on a scope's glass the held rifle is not drawn: its ocular blacked out the zoomed view   // (round 118) the generic (American) sniper on a German or Soviet side is that army's own    // (round 118) the battle setup forgets a force remembered for a map whose own forces changed
 Game.prototype.fxBlast118 = true;     // HE: flash, hot core and a dust skirt on the baked ground burst (ON: better in every capture, no frame cost)
 Game.prototype.fxFire118 = true;      // fires: taller tongues, a wider glow (ON: better in the captures, no extra particles)
