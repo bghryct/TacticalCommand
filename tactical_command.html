@@ -26010,7 +26010,13 @@ class Obstacles {
         if (ty) for (let q = 0; q < ty.length; q += 7) { n++; if (ty[q] === TYPE.snow || ty[q] === TYPE.ice) sn++; }
         this._h120Win = n > 0 && sn / n >= THEATRE_SNOW;
       }
-      const pk = T.pick(this._h120Th, kind, gx, gz, this._t120Water(gx, gz), this._h120Win);
+      // (round 120, FOLIAGE-6, `game.variety120`) HIT AS DRAWN: the theatre's extra species (an oak or an ash among the
+      // north's birches, a Scots pine or a bare birch in a winter spruce wood, an olive in the desert) are the drawing's
+      // pick from the cell's hash (`Trees120.extra120`: a TABLE choice, never the mesh). The same argument here, from the
+      // switch alone (not from `trees120` or the drawing's state), so a bare birch is hit as a birch (TREE_HIT120.birch),
+      // not as the spruce its cell's base pick names. The lean, the crown width and the tint stay the picture.
+      const vary = !!(window.game && window.game.variety120 === true && T.vary120);
+      const pk = T.pick(this._h120Th, kind, gx, gz, this._t120Water(gx, gz), this._h120Win, vary);
       if (pk && TREE_HIT120[pk.sp]) return pk.sp;
     }
     return TREE_KIND_SP120[kind] || 'beech';
@@ -26440,8 +26446,11 @@ class Obstacles {
    *  x0.90-1.10; x and z alike). The
    *  height is scaled by 1/cos(lean), so the top stays at the simulation's height; the picture only. A group with an
    *  unequal scale (round 98's conifer, 0.78 x 1.12) takes no lean (a turned child of an unequal parent shears). The
-   *  material adds a second tint axis (`uT120Var`, live) and the pick's `vary` the theatres' extra species — the DRAWING's
-   *  pick only: `_hitSp120` (the simulation's species for obsHit120) never passes it, so a seeded battle cannot see it. */
+   *  material adds a second tint axis (`uT120Var`, live) and the pick's `vary` the theatres' extra species. (FOLIAGE-6)
+   *  The extra species is the SIMULATION's too: `_hitSp120` passes the same `vary` (from the switch alone), so a round
+   *  meets an extra as drawn (TREE_HIT120 by its own species) and variety120 moves a seeded battle on the maps with
+   *  extras (the north, the desert, winter). The lean (at most 5.5 deg for a broadleaf: 0.16 m at 1.7 m), the width and
+   *  the tint stay the picture: the trunk is hit on its cell's centre at its species' radius. */
   _v120On() { const g = window.game; return !!(g && g.variety120 === true && window.Trees120 && window.Trees120.vary120); }
   _v120Apply(m, group, sp, gx, gz, shrub) {
     const v = window.Trees120.vary120(sp, gx, gz, shrub), gs = group.scale;
@@ -77937,7 +77946,7 @@ Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 1
 // El Alamein, every outcome inside the floor; rounds into trees 629 -> 162 (Village), 667 -> 160 (Ardennes), against the
 // drawing's own 5-7% (.claude/wip120/obstacles/NOTES.md); ~2 shaped tests a frame. false is the whole-cell test.
 Game.prototype.bushHit120 = true;    // ON (main, 24 Nov 09:38 UTC: the seeded A/Bs, Village 6 seeds inside the floor with 5 of 6 identical, Kasserine Pass 6/6 identical; the owner asked that hitboxes be only as big as the drawn geometry). (round 120, OBSTACLES-4) obsHit120's bush/scrub clump as today's shrubs are drawn (BUSH_DRAWN120: bush 0.73, scrub 0.96 of the top, was the old mound's bounding box 0.94 / 1.18). OFF until the seeded A/B says no worse
-Game.prototype.propHit120 = false;   // (round 120, OBSTACLES-5) under obsHit120: crates, carts, drums, wells, statues, the dead tree (PROP_HIT120's drawn disc), walls (the line laid) and hedge corners (their arms) stop rounds as drawn, not by the whole cell. OFF until the seeded A/B
+Game.prototype.propHit120 = true;    // ON (main, 24 Nov 09:49 UTC: seeded A/Bs, Villers-Bocage 6/6 identical, Village 6 seeds every metric inside the floor (crates struck 4.0 -> 0.7 a battle); the owner asked that hitboxes be only as big as the drawn geometry). (round 120, OBSTACLES-5) under obsHit120: crates, carts, drums, wells, statues, the dead tree (PROP_HIT120's drawn disc), walls (the line laid) and hedge corners (their arms) stop rounds as drawn, not by the whole cell. OFF until the seeded A/B
 Game.prototype.obsHit120 = true;
 // (round 120) a burning tree flames for minutes, smoulders, then collapses into a charred stump and ash, not a log
 // (`TREE_BURN120`, `_burnTree120`, `Obstacles._ash120`). ON (main, 24 Nov 01:00 UTC; the owner asked for it): A/B 6 seeds
@@ -77973,9 +77982,15 @@ Game.prototype.trees120 = true;
 Game.prototype.shrubs120 = true;
 // (round 120, FOLIAGE-5) NO TWO TREES OF A STAND ALIKE: every trees120 tree and shrubs120 shrub takes a lean (by species),
 // a crown width x0.84-1.16 and a second tint axis from its cell, and the north and the desert more species
-// (`Obstacles._v120Apply`, assets/trees120.js `vary120`, `THEATRE_V120`). The picture only: the top stays at the
-// simulation's height, the battle never reads it. Read at map load (the tint live). OFF: the trees as before.
-Game.prototype.variety120 = false;
+// (`Obstacles._v120Apply`, assets/trees120.js `vary120`, `THEATRE_V120`). The top stays at the simulation's height.
+// (FOLIAGE-6) The extra species are HIT as drawn (`_hitSp120` passes the same pick: a bare birch is a birch to a round,
+// not the spruce of its cell's base pick), so ON moves seeded battles on the north, desert and winter maps; the lean,
+// width and tint are the picture only. Read at map load (the tint live). OFF: the trees as before.
+// ON (main, 24 Nov 10:20 UTC, from .claude/wip120/foliage/sheets/s15_variety_*.jpg: leaning stands, crown widths, birch in the
+// winter spruce, olive groves in Tunisia; free; the sim hits each extra species as drawn (FOLIAGE-6). A/Bs: Ardennes 9 and Winter
+// Crossroads 10 seeds within the floor; Takrouna - the Climb 12 seeds, the attacker's losses +4.7 a battle (floor 3.4): the denser
+// olive groves shelter what they are drawn to). false = every tree upright, one tint axis, the base species.
+Game.prototype.variety120 = true;
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 // (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —

@@ -1083,7 +1083,8 @@
       pine: W8({ coco: 1 }), water: 'coco' },
   };
   // (round 120, FOLIAGE-5, `game.variety120`) MORE SPECIES WHERE A THEATRE HAD TOO FEW (`vary`, the pick's last argument,
-  // passed by the DRAWING only — the simulation's own pick, `Obstacles._hitSp120`, never passes it): the north's broadleaves were birch and beech alone and its conifers spruce alone (the Ardennes is spruce
+  // passed by the drawing AND, since FOLIAGE-6, by the simulation's own pick, `Obstacles._hitSp120`, from the switch alone:
+  // an extra is hit as the species it is drawn as): the north's broadleaves were birch and beech alone and its conifers spruce alone (the Ardennes is spruce
   // plantation with beech-oak woods and Scots pine); the desert's were acacia and the date palm (Tunisia's olive groves).
   // Each extra takes `share` of the kind's trees in stands of its own (`extra120`), the others keeping their proportions:
   // the weight tables' stand value is a bilinear noise, peaked in the middle, so a species added to a table would take
