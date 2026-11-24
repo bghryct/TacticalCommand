@@ -89,9 +89,26 @@
   var EDGE_N = 1, EDGE_E = 2, EDGE_S = 4, EDGE_W = 8;
   var EMBANK = 1.0;         // (BRIDGES-2) a ramp's fall to the river off the deck's lane: one height unit a 6 m cell (3 m in 6, 1:2)
   var STEP = 0.85;          // the most a ramp rises a cell (height units): wheels climb 1.0, a tank 1.15
+  /** (BRIDGES-3, `game.bridgeLod120`, default OFF) THE TRUSS BY DISTANCE. Measured in a quiet hold (cost3.js, nulls
+   *  <= 0.11 ms), what a bridge costs is two things: its triangles (every section forced to the kit's lo pieces: Arnhem
+   *  -0.40 ms at the playing camera, Remagen -0.53) and its shading (a plain Lambert for the normal-mapped Phong, which
+   *  lights per pixel from the sun, two fills, the sky and the pooled point lights: Arnhem -0.75 ms in first person on
+   *  the deck, Remagen -1.25); shadow casting ~0. So with the switch on: a section farther than LOD_NEAR (world units,
+   *  from its centre) is the lo pieces in a Lambert (`_materialLo`); nearer, the hi pieces, their steel and masonry
+   *  in the Phong and normal map as before, and the ROAD'S OWN SURFACES (DECK_BANDS: most of the bridge's pixels in
+   *  first person) in the Lambert at every distance. SHADE_LIFT: Lambert puts the sun's shadow over every direct light
+   *  (the fills too), so a face in shade is lifted back toward the Phong's (which keeps its unshadowed fills). */
+  var LOD_NEAR = 20;
+  var SHADE_LIFT = 1.35;
+  var DECK_BANDS = ['asphalt', 'concrete', 'setts', 'planks'];
 
   var B = window.Bridges120 = {
     KINDS: KINDS, TONS: TONS, SITES: SITES, CLASS_NAME: CLASS_NAME,
+    LOD_NEAR: LOD_NEAR, SHADE_LIFT: SHADE_LIFT, DECK_BANDS: DECK_BANDS,
+    /** (BRIDGES-3) `game.bridgeLod120`: the truss by distance (`_build`); `game.bridgeBank120`: grass on the slopes
+     *  `_embank` cut (`_bankGrass`). Both default OFF (the prototype carries them); each is read at the map's load. */
+    lodOn: function (g) { return !!(g && g.bridgeLod120 === true); },
+    bankOn: function (g) { return !!(g && g.bridgeBank120 === true); },
     /** THE DEFAULT: `game.bridges120` set either way wins (the prototype carries it). */
     ON: false,
     list: [], any: false, minCls: 9,
@@ -165,7 +182,25 @@
     afterWater: function (g) {
       if (!this.list.length) return;
       for (var i = 0; i < this.list.length; i++) this._bedOf(g, this.list[i]);
+      this.stats.banked = this.bankOn(g) ? this._bankGrass(g) : 0;   // (BRIDGES-3)
       if (this._drawn) this._applyDrawn(g);
+    },
+    /** (BRIDGES-3, `game.bridgeBank120`, default OFF) GRASS ON THE EMBANKMENT, COBBLES ON THE LANE. `_embank` cuts the
+     *  raised strip beside the lane down to the river at 1:2, and the road grader then grows the cut cells beside the
+     *  shoulder back into a side slope (they are still cobble, a route): at Arnhem's bank a hillside of setts 20 m high,
+     *  which reads as a huge paved slope (main, 23:40). Every cell `_embank` lowered that is still a road surface
+     *  (road, cobble, gravel) is grass: the lane and its shoulders keep their setts, the retaining walls stand where
+     *  the drop is (`_walls`, unchanged), and the slope is turf (the foliage is sown from the surfaces after this).
+     *  The heights are the shipped game's (this runs after the grader); a simulation change in the surfaces only
+     *  (grass 1.00 speed / 0.05 cover against cobble 1.15 / 0), on the cells `rec.emb` names. Returns cells changed. */
+    _bankGrass: function (g) {
+      var T = g.terrain, n = 0, RT = [TYPE.road, TYPE.cobble, TYPE.gravel];
+      for (var r = 0; r < this.list.length; r++) {
+        var E = this.list[r].emb;
+        if (!E) continue;
+        for (var k = 0; k < E.length; k++) { var i = E[k]; if (RT.indexOf(T.type[i]) >= 0) { T.type[i] = TYPE.grass; n++; } }
+      }
+      return n;
     },
 
     _cellIdx: function (rec, a, c) { return rec.ax === 'x' ? c * GRID + a : a * GRID + c; },
@@ -366,6 +401,7 @@
             var p = xz(a, c);
             if ((S && S.has && S.has(p[0], p[1])) || (O && O.at && O.at(p[0], p[1]))) break;   // a building or a prop stops it
             T.h[i] = want; n++;
+            (rec.emb || (rec.emb = [])).push(i);   // (BRIDGES-3) `_bankGrass` reads them
           }
         }
       }
@@ -530,6 +566,7 @@
       if (!this._pack()) return;
       var run = function () {
         var t0 = performance.now(), tris = 0, draws = 0;
+        self.stats.trisLo = 0;   // (BRIDGES-3)
         for (var i = 0; i < self.list.length; i++) { var r = self._build(g, self.list[i]); tris += r.tris; draws += r.draws; }
         self.stats.drawn = self.list.length; self.stats.tris = tris; self.stats.draws = draws; self.stats.buildMs = performance.now() - t0;
         self._drawn = true;
@@ -685,6 +722,39 @@
       this._mat = M;
       return M;
     },
+    /** (BRIDGES-3, `game.bridgeLod120`) The far sections and the road's surfaces: the same sheet in a Lambert (lit per
+     *  vertex, as the rest of the world), no normal map. In shade it is lifted by SHADE_LIFT (Lambert's shadow takes the
+     *  fills the Phong keeps) and, near the eye in first person, by the same sky as the hi material (`Canopy.near`). */
+    _matLo: null,
+    _materialLo: function () {
+      if (this._matLo) return this._matLo;
+      var hi = this._material(), T = THREE;
+      var M = new T.MeshLambertMaterial({ map: hi.map, vertexColors: true });
+      M.name = 'bridges120lo';
+      var u = { uSnowB: (window.Canopy && Canopy.snow) || { value: 0 }, uNearB: (window.Canopy && Canopy.near) || { value: 0 },
+        uNearSunB: (window.Canopy && Canopy.nearSun) || { value: 1 }, uNearSkyB: (window.Canopy && Canopy.nearSky) || { value: [3.6, 5.0, 12.0, 36.0] },
+        uLiftB: this._liftU || (this._liftU = { value: SHADE_LIFT }) };
+      var DL = 'reflectedLight.directDiffuse *= BRDF_Diffuse_Lambert( diffuseColor.rgb ) * getShadowMask();';
+      M.onBeforeCompile = function (sh) {
+        Object.assign(sh.uniforms, u);
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vUpB;')
+          .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n  vUpB = objectNormal.y;');
+        var fs = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vUpB;\nuniform float uSnowB; uniform float uNearB; uniform float uNearSunB; uniform vec4 uNearSkyB; uniform float uLiftB;')
+          .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.58, 0.60, 0.64), smoothstep(0.55, 0.9, vUpB) * uSnowB * 0.8);');
+        if (fs.indexOf(DL) >= 0) fs = fs.replace(DL, DL + '\n' +
+          '  {\n' +
+          '    vec3 lwB = vec3(0.2126, 0.7152, 0.0722);\n' +
+          '    float sunRB = dot(reflectedLight.directDiffuse, lwB) / max(dot(diffuseColor.rgb * RECIPROCAL_PI, lwB) * PI * uNearSunB, 1e-5);\n' +
+          '    float shdB = 1.0 - smoothstep(0.06, 0.30, sunRB);\n' +
+          '    float nrB = uNearB > 0.0 ? (1.0 - smoothstep(uNearSkyB.z, uNearSkyB.w, 1.0 / gl_FragCoord.w)) * uNearB : 0.0;\n' +
+          '    reflectedLight.indirectDiffuse *= 1.0 + (uLiftB - 1.0) * shdB + (uNearSkyB.x - 1.0) * shdB * nrB;\n' +
+          '  }');
+        sh.fragmentShader = fs;
+      };
+      M.customProgramCacheKey = function () { return 'bridges120lo-v1'; };
+      this._matLo = M;
+      return M;
+    },
 
     /** The pieces a record is laid from: [{ p: piece name, x0 (m along), mir, sx }]. */
     layout: function (rec) {
@@ -741,6 +811,8 @@
       var a0w = cellCenter(rec.s0) - TILE / 2, cw = (cellCenter(rec.c0) + cellCenter(rec.c1)) / 2;
       var Ox = ax === 'x' ? a0w : cw, Oz = ax === 'x' ? cw : a0w;
       var L = this.layout(rec), mat = this._material();
+      var lod120 = this.lodOn(g), matLo = lod120 ? this._materialLo() : null;   // (BRIDGES-3)
+      var deckB = lod120 ? DECK_BANDS.map(function (n) { return P.bands.indexOf(n); }) : [];
       // the road surface along the centre line: the sim's deck (Terrain.heightAt, deck-aware), sampled every 0.5 m
       var deckY = function (xm) { var w = xm * U; return T.heightAt(Ox + dx * w, Oz + dz * w); };
       var wl = T.waterY;
@@ -755,7 +827,7 @@
       }
       var tris = 0, draws = 0, built = [];
       for (var s2 = 0; s2 < nsec; s2++) {
-        var lod = new TH.LOD(), centre = null, geos = [];
+        var lod = new TH.LOD(), centre = null, geos = [], geoM = [];
         for (var lv = 0; lv < 2; lv++) {
           var lst = sec[s2].lists[lv];
           if (!lst.length) continue;
@@ -763,6 +835,7 @@
           for (var a = 0; a < lst.length; a++) { var pc = KD.pieces[lst[a].p][lv]; nv += pc.band.length; ni += pc.idx.length; }
           var pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3);
           var ind = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni), vb = 0, ib = 0;
+          var vband = lod120 && lv === 0 ? new Uint8Array(nv) : null;   // (BRIDGES-3)
           for (var b = 0; b < lst.length; b++) {
             var it = lst[b], pz = KD.pieces[it.p][lv], n = pz.band.length;
             for (var v = 0; v < n; v++) {
@@ -776,6 +849,7 @@
               var nx = pz.nor[v * 3] * (it.mir ? -1 : 1), ny = pz.nor[v * 3 + 1], nzz = pz.nor[v * 3 + 2];
               nor[o] = dx * nx + ex * nzz; nor[o + 1] = ny; nor[o + 2] = dz * nx + ez * nzz;
               var bi = pz.band[v], vv = vOf[bi];
+              if (vband) vband[vb + v] = bi;
               uv[(vb + v) * 2] = pz.uv[v * 2]; uv[(vb + v) * 2 + 1] = vv[0] + (2 + (vv[1] - 4) * pz.uv[v * 2 + 1]) / 1024;
               // the water's mark: masonry and timber darker and greener for a metre over the surface, darker under it
               var hw = (wy - wl) * METERS_PER_UNIT, damp = hw < -0.1 ? 0.55 : hw < 1.4 ? 0.62 + 0.38 * Math.max(0, hw / 1.4) : 1;
@@ -788,21 +862,42 @@
             }
             vb += n;
           }
+          // (BRIDGES-3, `bridgeLod120`) the near level: the road's own surfaces after the rest, drawn as a second group
+          var nA = ni;
+          if (vband) {
+            nA = 0;
+            for (var t1 = 0; t1 < ni; t1 += 3) if (deckB.indexOf(vband[ind[t1]]) < 0) nA += 3;
+            if (nA > 0 && nA < ni) {
+              var i2 = new ind.constructor(ni), p0 = 0, p1 = nA;
+              for (var t2 = 0; t2 < ni; t2 += 3) {
+                var dst = deckB.indexOf(vband[ind[t2]]) < 0 ? (p0 += 3) - 3 : (p1 += 3) - 3;
+                i2[dst] = ind[t2]; i2[dst + 1] = ind[t2 + 1]; i2[dst + 2] = ind[t2 + 2];
+              }
+              ind = i2;
+            }
+          }
           var geo = new TH.BufferGeometry();
           geo.setAttribute('position', new TH.BufferAttribute(pos, 3)); geo.setAttribute('normal', new TH.BufferAttribute(nor, 3));
           geo.setAttribute('uv', new TH.BufferAttribute(uv, 2)); geo.setAttribute('color', new TH.BufferAttribute(col, 3));
           geo.setIndex(new TH.BufferAttribute(ind, 1));
           geo.computeBoundingSphere();
           if (!centre) centre = geo.boundingSphere.center.clone();
-          geos.push(geo);
+          var gm = mat;
+          if (lod120) {
+            if (lv === 1) gm = matLo;
+            else if (nA > 0 && nA < ni) { geo.addGroup(0, nA, 0); geo.addGroup(nA, ni - nA, 1); gm = [mat, matLo]; }
+            else if (nA === 0) gm = matLo;
+            if (lv === 1) this.stats.trisLo = (this.stats.trisLo || 0) + ni / 3;
+          }
+          geos.push(geo); geoM.push(gm);
           if (lv === 0) tris += ni / 3;
         }
         if (!geos.length) continue;
         for (var gI = 0; gI < geos.length; gI++) {
           geos[gI].translate(-centre.x, -centre.y, -centre.z);
-          var me = new TH.Mesh(geos[gI], mat);
+          var me = new TH.Mesh(geos[gI], geoM[gI]);
           me.castShadow = true; me.receiveShadow = true; me.name = 'bridges120:' + rec.kind + ':' + s2 + ':' + (gI ? 'lo' : 'hi');
-          lod.addLevel(me, gI ? 110 : 0);
+          lod.addLevel(me, gI ? (lod120 ? (+this.LOD_NEAR || LOD_NEAR) : 110) : 0);   // (BRIDGES-3) the lo pieces past LOD_NEAR with the switch on (`Bridges120.LOD_NEAR`, read at the build)
         }
         lod.position.copy(centre); lod.name = 'bridges120:' + rec.kind + ':' + s2;
         lod.visible = !!this._texReady;

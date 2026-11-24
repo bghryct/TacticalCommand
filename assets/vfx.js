@@ -76,6 +76,16 @@
   // fills (`Game._smokeColumn120`), so fifteen wrecks in view cost what twelve would. The round-20 leak was smoke
   // with no cap at all.
   var PLUME_CAP = 480;
+  // (round 120, EFFECTS-2) THE NUMBERS BEHIND TWO SWITCHES, in one place so a probe can tune them live.
+  //  `game.flameCol120` — a flame graded as light: `hot` the lick sheet's heat ceiling (0.55 off), `occ` how much a
+  //  bright flame hides behind it by day (x its tone-mapped luminance), `tint` the smoke inside a tongue (0.07 / 0.055
+  //  / 0.045 off: near-black, which the grade turned blue-black), `glowG` the fire glow's green floor (it cooled to a
+  //  deep red that read pink on a pale field), `glowDay` how much of that glow daylight washes out.
+  //  `game.smokeCol120` — the colour a column's puffs walk toward as they climb: `haze` low, `hazeAloft` for the
+  //  long-lived puffs that carry the column up (`stretch` > 1 marks one, drawn that much taller), and how much their
+  //  cover thins on the way (`thin`, `thinAloft`).
+  var TUNE = { hot: 0.72, occ: 1.8, tint: [0.15, 0.11, 0.08], glowG: 0.3, glowDay: 0.5,
+               haze: [0.27, 0.25, 0.225], hazeAloft: [0.215, 0.2, 0.182], thin: 0.32, thinAloft: 0.26, frameAloft: 0.58 };
 
   // Which layer each behaviour draws in.
   var LAYER = {};
@@ -374,13 +384,14 @@
     'varying float vSoft;',
     'varying vec4 vColF;',
     'varying float vDepth;',
+    'varying float vFl;',        // (round 120, `flameCol120`) 1: a fire's glow (flagged +2 on iUv.x): toned as light
     '#ifdef PLUME',
     'attribute float iExt;',     // (round 120) the fire's glow on the puff's underside
     'varying vec2 vQ;',          // where in the puff, in the camera's plane (-0.5..0.5)
     'varying float vGlow;',
     '#endif',
     'void main() {',
-    '  vColF = iCol;',
+    '  vColF = iCol; vFl = 0.0;',
     '  vEr = uFlip.y > 0.5 ? iUv.y : (uMode > 1.5 ? 1.0 - iCol.a : 0.0);',
     '  vSoft = 1.0;',
     '  if (uFlip.y > 0.5) {',
@@ -388,7 +399,7 @@
     '    vMix = iUv.x - f;',
     '    vUvF = (uv + vec2(mod(f, G), G - 1.0 - floor(f / G))) * uAtlas;',
     '    vUvB = (uv + vec2(mod(f1, G), G - 1.0 - floor(f1 / G))) * uAtlas;',
-    '  } else { vUvF = uv * uAtlas + iUv; vUvB = vUvF; vMix = 0.0; }',
+    '  } else { vec2 iu = iUv; vFl = 0.0; if (iu.x > 1.5) { iu.x -= 2.0; vFl = 1.0; } vUvF = uv * uAtlas + iu; vUvB = vUvF; vMix = 0.0; }',
     // View-space billboard: the quad is built in the camera's own plane, so it
     // faces the eye by construction. No per-particle quaternion, no matrix.
     '  vec4 mv = modelViewMatrix * vec4(iPos, 1.0);',
@@ -423,6 +434,9 @@
     'uniform float uHeat;',    // how bright heat 1.0 is, linear — tone mapped after
     'uniform float uGlowOnly;', // 1 while PostFX draws the glow source: fire only, no smoke
     'uniform float uHot;',     // how far up the fire ramp this sheet's hottest texel goes
+    'uniform float uFlame;',   // (round 120, `game.flameCol120`) 1: this batch's fire is graded as light (`fireTone`)
+    'uniform float uFlameOcc;', // how much of what is behind it a bright flame hides by day, x its toned luminance
+    'uniform vec4 uTone;',     // the grade's exposure gain, 1/sqrt(pivot), shoulder, warmth (assets/grade.js)
     '#ifdef PLUME',
     'uniform vec3 uSunV;',     // (round 120) the sun, in view space
     'uniform float uAmb;',     // the shaded side's share of the light
@@ -430,6 +444,7 @@
     'varying float vGlow;',
     '#endif',
     'varying float vEr;',
+    'varying float vFl;',
     'uniform vec2 uFlip;',
     'varying vec2 vUvF;',
     'varying vec2 vUvB;',
@@ -446,6 +461,25 @@
     '  c = mix(c, vec3(1.0, 0.74, 0.32), smoothstep(0.5, 0.75, h));',
     '  return mix(c, vec3(1.0, 0.96, 0.86), smoothstep(0.75, 1.0, h));',
     '}',
+    // (round 120, `game.flameCol120`) FIRE TONED AS LIGHT. The box-art grade (assets/grade.js) is ACES, a contrast curve
+    // and a shoulder, then a split tone (+blue into everything darker than mid grey) and a painter's saturation (grey
+    // mixed into every colour). The last two are right for a lit surface and wrong for added light: a dim red flame
+    // came out magenta (4,1,10 for a linear 0.05,0.008,0), an orange one salmon (251,129,79), and a near-black soot
+    // edge blue-black. This is the same curve without them, so a flame is as bright as the scene says and keeps its hue.
+    '#ifdef TONE_MAPPING',
+    'vec3 fireTone(vec3 c) {',
+    '  c *= toneMappingExposure * uTone.x;',
+    '  const mat3 AI = mat3(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);',
+    '  const mat3 AO = mat3(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);',
+    '  vec3 v = AI * c;',
+    '  c = clamp(AO * ((v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081)), 0.0, 1.0);',
+    '  c = c * sqrt(c) * uTone.y;',
+    '  c = c / (1.0 + c * uTone.z);',
+    '  return clamp(c * vec3(1.0 + 0.105 * uTone.w, 1.0 + 0.012 * uTone.w, 1.0 - 0.115 * uTone.w), 0.0, 1.0);',
+    '}',
+    '#else',
+    'vec3 fireTone(vec3 c) { return clamp(c, 0.0, 1.0); }',
+    '#endif',
     'void main() {',
     '  vec4 t = texture2D(uMap, vUvF);',
     '  if (uFlip.y > 0.5) {',
@@ -469,6 +503,7 @@
     // white under the grade came out steel-blue in a muzzle plume's core.
     '      vec3 hot = mix(vColF.rgb, vec3(1.0, 0.9, 0.72), smoothstep(0.7, 1.0, heat) * 0.5);',
     '      e = vec4(hot * heat * uHeat * (1.0 - fog), vColF.a);',
+    '      if (uFlame > 0.5 && vFl > 0.5) { gl_FragColor = vec4(linearToOutputTexel(vec4(fireTone(e.rgb), 1.0)).rgb, e.a); return; }',
     '    } else if (uMode < 1.5) {',
     '      if (cov < 0.004) discard;',
     '#ifdef PLUME',
@@ -488,6 +523,21 @@
     '    } else {',
     // premultiplied: the smoke covers what is behind it, the fire adds on top
     '      if (cov < 0.003 && heat < 0.003) discard;',
+    // (round 120, `game.flameCol120`) A FLAME IS LIGHT, AND BY DAY IT HIDES WHAT IS BEHIND IT. Red light ADDED to a
+    // pale field is pink; a bright flame in daylight covers the field behind it in proportion to how bright it is
+    // (`fd`), and at night it is added as before. Its smoke is toned un-premultiplied: the old path toned smoke x
+    // coverage, so every soft edge was a near-black the grade turned blue. Both are encoded here, so they blend in
+    // the same space as every other particle.
+    '      if (uFlame > 0.5) {',
+    '        float dk = clamp((dot(uLight, vec3(0.3, 0.6, 0.1)) - 0.15) / 0.6, 0.0, 1.0);',
+    '        vec3 fr = fireRamp(heat);',
+    '        vec3 ft = fireTone(fr * heat * uHeat * vColF.a * (1.0 - fog));',
+    '        vec3 st = fireTone(mix(lit * vColF.rgb * uLight + fr * heat * 0.3, uFogColor, fog));',
+    '        float fd = clamp(dot(ft, vec3(0.2126, 0.7152, 0.0722)) * uFlameOcc, 0.0, 0.95) * dk;',
+    '        ft = linearToOutputTexel(vec4(ft, 1.0)).rgb; st = linearToOutputTexel(vec4(st, 1.0)).rgb;',
+    '        gl_FragColor = uGlowOnly > 0.5 ? vec4(ft, 0.0) : vec4(ft * (1.0 - dk + fd) + st * cov * (1.0 - fd), fd + cov * (1.0 - fd));',
+    '        return;',
+    '      }',
     '      vec3 smoke = mix(lit * vColF.rgb * uLight, uFogColor, fog);',
     '      vec3 fire = fireRamp(heat) * heat * uHeat * vColF.a * (1.0 - fog);',
     // In the glow pass only the fire: the smoke round it is lit grey, and a
@@ -544,6 +594,7 @@
     this.gnd = new Float32Array(cap).fill(-1e4);
     this.frames = o.frames || 0;
     this.additive = additive;
+    this.hot0 = o.hot || 1;      // (round 120) the sheet's own heat ceiling, put back when `flameCol120` is off
 
     var g = new THREE.InstancedBufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
@@ -580,6 +631,9 @@
         uHeat: { value: o.heat || 1 },
         uGlowOnly: { value: 0 },
         uHot: { value: o.hot || 1 },
+        uFlame: { value: 0 },
+        uFlameOcc: { value: TUNE.occ },
+        uTone: { value: new THREE.Vector4(1.55, 2.5, 0.06, 0.35) },
         uFogColor: { value: new THREE.Color(0xa9c6dd) },
         uFogDensity: { value: 0.002 },
         uAdditive: { value: additive ? 1 : 0 },
@@ -692,6 +746,7 @@
     // (round 120, `game.smokeCol120`) THE COLUMN OVER A BURNING WRECK, in a batch of its own (one draw while any
     // stands): the simulated puff sheet, each puff lit as a ball toward the sun and glowing at its foot.
     this.plumeN = 0; this.plumeCap = PLUME_CAP; this.sunX = 0.35; this.sunY = 0.8; this.sunZ = 0.45;
+    this.day = 1; this.flameOn = false;   // (round 120) daylight 0..1 from `setLight`; `game.flameCol120` as last read
     if (sh.billow) {
       this.batches[6] = new Batch(scene, sh.billow, false, PLUME_CAP, { enc: true, grid: bk.billow.grid, frames: bk.billow.frames, plume: true });
     }
@@ -849,6 +904,20 @@
       var pool = F118('fxPool118');
       if (camera) { this._camX = camera.position.x; this._camY = camera.position.y; this._camZ = camera.position.z; this._ve = ve; }
       var G = typeof window !== 'undefined' ? window.game : null; this._fpv = G && G.fpv ? 1 : 0;
+      // (round 120, `game.flameCol120`) one switch, read once a frame: the fire batches grade their flame as light
+      var flame = F118('flameCol120');
+      this.flameOn = flame;
+      if (b5) { b5.mat.uniforms.uFlame.value = flame ? 1 : 0; b5.mat.uniforms.uHot.value = flame ? TUNE.hot : b5.hot0; b5.mat.uniforms.uFlameOcc.value = TUNE.occ; }
+      b0.mat.uniforms.uFlame.value = flame ? 1 : 0;
+      b2.mat.uniforms.uFlame.value = flame ? 1 : 0; if (b3) b3.mat.uniforms.uFlame.value = flame ? 1 : 0;   // (main 03:28) bursts and fireballs too
+      if (flame) {
+        var GC = typeof window !== 'undefined' && window.Grade && window.Grade.current, tv;
+        if (GC) for (var bi = 0; bi < this.batches.length; bi++) {
+          if (!this.batches[bi]) continue;
+          tv = this.batches[bi].mat.uniforms.uTone.value;
+          tv.set(+GC.expo || 1.55, 1 / Math.sqrt(+GC.pivot || 0.16), +GC.shoulder || 0, +GC.warm || 0);
+        }
+      }
       if (b6 && ve) {                   // (round 120) the sun in view space, for the column batch
         var su = b6.mat.uniforms.uSunV.value, sx0 = this.sunX, sy0 = this.sunY, sz0 = this.sunZ;
         su.set(ve[0] * sx0 + ve[4] * sy0 + ve[8] * sz0, ve[1] * sx0 + ve[5] * sy0 + ve[9] * sz0, ve[2] * sx0 + ve[6] * sy0 + ve[10] * sz0);
@@ -896,7 +965,7 @@
         }
 
         // -- shade ---------------------------------------------------------
-        var a = this.alpha[i], sx = this.sz[i], sy = this.sz[i] * this.stretch[i];
+        var a = this.alpha[i], sx = this.sz[i], sy = this.sz[i] * this.stretch[i], fglow = 0;
         var cr = this.cr[i], cg = this.cg[i], cb = this.cb[i];
         var cellIdx = this.cell[i];
         if (k === K.SMOKE || k === K.DUST || k === K.TRAIL) {
@@ -921,6 +990,9 @@
             var h = t * t;
             cr *= 0.55 + h * 0.45; cg *= 0.12 + h * 0.88; cb *= h * h * 0.9;
             a *= Math.min(1, t * 3.5);
+            // (round 120, `flameCol120`) a glow that cooled to deep red read pink on a pale field: it stays orange,
+            // and daylight washes most of it out, as it does a real fire's
+            if (flame) { cg = Math.max(cg, cr * TUNE.glowG); a *= 1 - TUNE.glowDay * this.day; fglow = 1; }
           }
         } else if (k === K.SPARK || k === K.EMBER) {
           a *= t * t;
@@ -977,14 +1049,18 @@
           // glow (`dirz`) is on it only for its first seconds, while it is still over the flames.
           np++;
           var pa = 1 - t, hz = pa < 0.03 ? 0 : Math.min(1, (pa - 0.03) / 0.55), hb = this.dirx[i] || 1;
+          // (round 120, EFFECTS-2) a puff ALOFT (`stretch` > 1) carries the column up for most of a minute: it walks
+          // to a darker haze, thins less, and stays drawn that much taller, so a few of them read as one column
+          var alo = this.stretch[i] > 1.01, HZ = alo ? TUNE.hazeAloft : TUNE.haze;
           hz = hz * hz * (3 - 2 * hz);
-          cr += (0.36 * hb - cr) * hz; cg += (0.33 * hb - cg) * hz; cb += (0.29 * hb - cb) * hz;
-          a *= Math.min(1, pa * this.maxLife[i] / 0.6) * (1 - 0.42 * hz) * (t < 0.2 ? t / 0.2 : 1);
+          cr += (HZ[0] * hb - cr) * hz; cg += (HZ[1] * hb - cg) * hz; cb += (HZ[2] * hb - cb) * hz;
+          a *= Math.min(1, pa * this.maxLife[i] / 0.6) * (1 - (alo ? TUNE.thinAloft : TUNE.thin) * hz) * (t < 0.2 ? t / 0.2 : 1);
           pglow = this.dirz[i] * Math.max(0, 1 - pa / 0.2);
-          sy = sx * (1 + 0.9 * Math.max(0, 1 - pa / 0.3));    // drawn upright and long while it is still rising off the fire
+          sy = alo ? sx * this.stretch[i] : sx * (1 + 0.9 * Math.max(0, 1 - pa / 0.3));    // drawn upright and long while it is still rising off the fire
         } else if (k === K.DEBRIS || k === K.GIB) {
           a *= Math.min(1, t * 4);
         }
+        if (flame && (k === K.MFLASH || k === K.FLASH || k === K.STREAK)) fglow = 1;   // (round 120) muzzle flashes, blast flashes, tracers: light
         if (pool) this.vis[i] = this._visOf(k, this.px[i], this.py[i], this.pz[i], sx) * (0.4 + 0.6 * t);   // the old fade first
         if (a <= 0.003) continue;
 
@@ -999,8 +1075,10 @@
             B.col[at * 4] = cr; B.col[at * 4 + 1] = cg; B.col[at * 4 + 2] = cb; B.col[at * 4 + 3] = a;
             B.size[at * 3] = sx; B.size[at * 3 + 1] = sy; B.size[at * 3 + 2] = this.rot[i];
             // past the sheet's first frames (a knot), and only a little erosion: a column stays a column
-            var pg = 1 - t, per = pg > 0.55 ? (pg - 0.55) / 0.45 : 0;
-            B.uv[at * 2] = Math.min(B.frames - 1.001, (0.25 + pg * 0.75) * (B.frames - 1)); B.uv[at * 2 + 1] = per * per * 0.6;
+            var pg = 1 - t, per = pg > 0.55 ? (pg - 0.55) / 0.45 : 0, f0 = alo ? TUNE.frameAloft : 0.25;
+            // (round 120, EFFECTS-2) a puff aloft starts later in the sheet, where its frames fill the cell: a few of them
+            // cover the column's height without the gaps between balls a young knot leaves
+            B.uv[at * 2] = Math.min(B.frames - 1.001, (f0 + pg * (1 - f0)) * (B.frames - 1)); B.uv[at * 2 + 1] = per * per * 0.6;
             B.gnd[at] = this.gnd[i]; B.ext[at] = pglow;
             continue;
           }
@@ -1031,7 +1109,7 @@
         B.col[at * 4] = cr; B.col[at * 4 + 1] = cg; B.col[at * 4 + 2] = cb; B.col[at * 4 + 3] = a;
         B.size[at * 3] = sx; B.size[at * 3 + 1] = sy; B.size[at * 3 + 2] = this.rot[i];
         var gn = B.grid;
-        B.uv[at * 2] = (cellIdx % gn) / gn;
+        B.uv[at * 2] = (cellIdx % gn) / gn + (fglow ? 2 : 0);   // (round 120) +2: a fire's glow, toned as light
         B.uv[at * 2 + 1] = 1 - (Math.floor(cellIdx / gn) + 1) / gn;
       }
 
@@ -1045,6 +1123,7 @@
       b0.flush(n0); b1.flush(n1); b2.flush(n2); if (b3) b3.flush(n3); if (b4) b4.flush(n4); if (b5) b5.flush(n5);
       if (b6) { b6.flush(n6); b6.mesh.visible = n6 > 0; }   // (round 120) no column, no draw
       this.plumeN = np;
+      this.lickN = n5; this.lickCap = b5 ? b5.cap : 0;   // (round 120) tongues drawn this frame, of the batch's cap
       this.stats.live = this.n;
       this.stats.draws = (n0 > 0) + (n1 > 0) + (n2 > 0) + (n3 > 0) + (n4 > 0) + (n5 > 0) + (n6 > 0);
     },
@@ -1108,6 +1187,7 @@
 
     /** The light smoke and dust are seen by, linear RGB (1 at noon). */
     setLight: function (r, g, b) {
+      this.day = Math.max(0, Math.min(1, (0.3 * r + 0.6 * g + 0.1 * b - 0.15) / 0.6));   // (round 120) as the shader reads it
       for (var i = 0; i < this.batches.length; i++) this.batches[i].mat.uniforms.uLight.value.setRGB(r, g, b);
     },
 
@@ -1264,6 +1344,22 @@
       }
     },
 
+    /** (round 120, EFFECTS-2) A PALL over a burning wood, block or building: one big lit puff in the column batch
+     *  (`KIND.PLUME`: one draw for all of them, each shaded toward the sun, carried by the wind). The batch is SHARED
+     *  with the wrecks' columns (`plumeCap`, `plumeN` live), so a pall takes at most `o.share` of it (default 0.5) and
+     *  returns -1 past that: a burning wood never starves a column. `o`: size (u across at birth), grow (u/s), life
+     *  (s), vy (u/s), drag, dark (its soot: 0.15 black .. 0.4 grey), a, aloft (a long-lived puff, drawn 1.3x tall,
+     *  walking to `TUNE.hazeAloft`), glow (the fire's light on its underside, 0..1). Pictures only. */
+    pall: function (x, y, z, o) {
+      o = o || {};
+      if (!this.batches[6] || this.plumeN >= this.plumeCap * (o.share || 0.5)) return -1;
+      var d = o.dark === undefined ? 0.2 : o.dark;
+      return this.spawn(K.PLUME, { x: x, y: y, z: z, vx: this.windX * 0.5, vz: this.windZ * 0.5, vy: o.vy === undefined ? 1 : o.vy,
+        size: o.size || 4, grow: o.grow === undefined ? 0.35 : o.grow, life: o.life || 20, rot: this.rnd(-0.3, 0.3), spin: this.rnd(-0.03, 0.03),
+        r: d * 1.05, g: d, b: d * 0.92, a: o.a === undefined ? 0.85 : o.a, drag: o.drag === undefined ? 0.03 : o.drag,
+        stretch: o.aloft ? 1.3 : 1, dx: 0.85 + crand() * 0.3, dz: o.glow || 0 });
+    },
+
     /** Burning: a lick of flame plus the smoke off it.
      *  `tint` overrides the colour — white phosphorus does not burn orange,
      *  it burns a hard blue-white that is wrong enough to be frightening. */
@@ -1278,6 +1374,7 @@
         // glow under them, and sparks off the top. A tinted fire (phosphorus) is
         // not a wood fire and keeps its own white glow below.
         var m = Math.max(1, Math.round(n * 0.55)), f118 = F118('fxFire118');
+        var lt = F118('flameCol120') ? TUNE.tint : null;   // (round 120) the smoke in a tongue: soot-brown, not near-black
         for (var li = 0; li < m; li++) {
           // (round 118) a fire read as an orange dot from the playing camera: the
           // tongues are taller and the glow under them wider — no more particles
@@ -1286,7 +1383,7 @@
             x: x + this.rnd(-0.42, 0.42) * s, y: y + ls * 0.38, z: z + this.rnd(-0.42, 0.42) * s,
             vy: this.rnd(0.1, 0.45) * s, vx: this.rnd(-0.1, 0.1), vz: this.rnd(-0.1, 0.1),
             size: ls, grow: 0.12 * s, life: this.rnd(0.75, 1.3), rot: this.rnd(-0.14, 0.14), spin: this.rnd(-0.06, 0.06),
-            r: 0.07, g: 0.055, b: 0.045, a: this.rnd(0.82, 1), drag: 0.5,
+            r: lt ? lt[0] : 0.07, g: lt ? lt[1] : 0.055, b: lt ? lt[2] : 0.045, a: this.rnd(0.82, 1), drag: 0.5,
           });
         }
         if (crand() < (f118 ? 0.8 : 0.5)) {
@@ -1682,6 +1779,7 @@
     VERSION: VERSION,
     KIND: K,
     CELL: S,
+    TUNE: TUNE,      // (round 120) `flameCol120` / `smokeCol120` numbers, live
     install: function (api) { THREE = api.THREE; installed = true; return true; },
     create: function (scene, opts) {
       if (!installed) throw new Error('VFX.install() must run before create()');

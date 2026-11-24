@@ -37,7 +37,8 @@
     olive: 10, spruce: 11, pine: 12, stonepine: 13, cypress: 14, acacia: 15, palm: 16, coco: 17, ivy: 18, twigs: 19 };
   T.TWIG_CELL = 19;
   // evergreen: no bareness in the snow (the material's `uT120Dec` 0)
-  T.EVERGREEN = { spruce: 1, pine: 1, stonepine: 1, cypress: 1, olive: 1, datepalm: 1, coco: 1 };
+  T.EVERGREEN = { spruce: 1, pine: 1, stonepine: 1, cypress: 1, olive: 1, datepalm: 1, coco: 1,
+    juniper: 1, gorse: 1, maquis: 1, saltbush: 1, tropic: 1 };   // (round 120, FOLIAGE-3) the evergreen shrubs
   // bark styles (hedge.z on kind 3): 0 grain, 1 birch, 2 palm rings, 3 plane-smooth (beech)
   T.BARK = { birch: 1, datepalm: 2, coco: 2, beech: 3 };
 
@@ -1052,6 +1053,33 @@
     if (!sp) return null;
     var nv = T.pack().species[sp].length;
     return { sp: sp, vi: Math.floor(hash2(gx * 1.7 + 3.1, gz * 2.3 + 7.9) * nv) % nv };
+  };
+
+  // (round 120, FOLIAGE-3, `game.shrubs120`) THE SHRUBS BY THEATRE: what a placed 'bush' and 'scrub' are drawn as
+  // (assets/shrubs120.pack.js, grown by tools/blender/trees120.py's SHRUBS), with weights; stands as the trees'
+  T.SHRUB = {
+    west: { bush: W8({ hawthorn: 3, hazel: 2, elder: 1.5 }), scrub: W8({ gorse: 3, hawthorn: 1 }) },
+    lowlands: { bush: W8({ hawthorn: 2, elder: 2, hazel: 2 }), scrub: W8({ gorse: 2, hawthorn: 1 }) },
+    north: { bush: W8({ hazel: 2, juniper: 2, hawthorn: 1 }), scrub: W8({ juniper: 2, gorse: 1 }) },
+    east: { bush: W8({ hazel: 2, elder: 1, hawthorn: 1, juniper: 1 }), scrub: W8({ gorse: 1, juniper: 1 }) },
+    italy: { bush: W8({ maquis: 3, hawthorn: 1 }), scrub: W8({ maquis: 3, gorse: 1 }) },
+    desert: { bush: W8({ saltbush: 2, maquis: 1 }), scrub: W8({ saltbush: 1 }) },
+    pacific: { bush: W8({ tropic: 1 }), scrub: W8({ tropic: 1 }) },
+  };
+  /** Which shrub species and variant draws a placed bush or scrub (`kind`): a slow noise over the cells (stands of a
+   *  species), a little of the cell's own hash; the variant from the cell's hash. Cosmetic: never the battle's dice. */
+  T.pickShrub = function (theatre, kind, gx, gz) {
+    var th = T.SHRUB[theatre] || T.SHRUB.west, list = th[kind] || th.bush;
+    var sx = gx / 6, sz = gz / 6, ix = Math.floor(sx), iz = Math.floor(sz), fx = sx - ix, fz = sz - iz;
+    var v = (hash2(ix + 31.7, iz) * (1 - fx) + hash2(ix + 32.7, iz) * fx) * (1 - fz) + (hash2(ix + 31.7, iz + 1) * (1 - fx) + hash2(ix + 32.7, iz + 1) * fx) * fz;
+    v = v * 0.7 + hash2(gx + 5.3, gz + 0.9) * 0.3;
+    var tot = 0, i; for (i = 0; i < list.length; i++) tot += list[i][1];
+    var acc = 0, sp = list[list.length - 1][0];
+    for (i = 0; i < list.length; i++) { acc += list[i][1] / tot; if (v <= acc) { sp = list[i][0]; break; } }
+    if (!T.has(sp)) { sp = null; for (var j = 0; j < list.length; j++) if (T.has(list[j][0])) { sp = list[j][0]; break; } }
+    if (!sp) return null;
+    var nv = T.pack().species[sp].length;
+    return { sp: sp, vi: Math.floor(hash2(gx * 2.1 + 1.3, gz * 1.9 + 4.7) * nv) % nv };
   };
 
   /** Per frame, from PropBatcher.cull: the eye, the sun. */

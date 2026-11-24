@@ -1522,6 +1522,9 @@ body.fpv #tacMap { display: none !important; }
      (tools/blender/trees120.py), built into meshes, LOD'd and drawn far off as impostors by assets/trees120.js.
      Optional: without them (or with the switch off) the trees are round 113's. -->
 <script src="assets/trees120.pack.js"></script>
+<!-- (round 120, `game.shrubs120`) the bushes and the scrub as shrub species (tools/blender/trees120.py SHRUBS), joined to
+     the trees' pack as it loads. Optional: without it (or with the switch off) they are round 98's clumps. -->
+<script src="assets/shrubs120.pack.js"></script>
 <script src="assets/trees120.js"></script>
 <script src="assets/soldier.pack.js"></script>
 <script src="assets/gaits.js"></script>
@@ -19893,7 +19896,13 @@ class Terrain {
     const g120 = typeof window !== 'undefined' ? window.game : null;
     if (g120 && g120.debris120 === true && !this._scorch120) {
       this._scorch120 = true;
-      try { for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.addScorch(x + dx, z + dz, amt * (dx && dz ? 0.3 : dx || dz ? 0.5 : 1)); }
+      // (EFFECTS-2) the ring takes a smaller share and never goes black: a wreck's fire scorched all nine to 1, a dark
+      // disc three cells across (main, sheet4). Centre to 1, sides to 0.35, corners to 0.18.
+      try { for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const cap = dx && dz ? 0.18 : dx || dz ? 0.35 : 1;
+        if (!inGrid(x + dx, z + dz) || this.scorch[this.idx(x + dx, z + dz)] >= cap) continue;
+        this.addScorch(x + dx, z + dz, Math.min(cap - this.scorch[this.idx(x + dx, z + dz)], amt * (dx && dz ? 0.1 : dx || dz ? 0.25 : 1)));
+      } }
       finally { this._scorch120 = false; }
       return;
     }
@@ -21616,6 +21625,21 @@ const TREE_FX120 = { blk: 3, per: 1, cntMax: 5, near: 70, far: 220, farK: 0.3, c
 /** …a burning tree's ground fire is drawn as a TINTED glow (vfx.fire's tinted path, the additive batch): vfx draws at most
  *  256 tongues of flame (its lick batch), and with 300 trees alight 427 were live — the crowns need every one. */
 const TREE_GND_TINT120 = { r: 1, g: 0.55, b: 0.18 };
+/** (round 120, OBSTACLES-3, `game.burnLook120`) THE BURNING CROWN, READ FROM THE PLAYING CAMERA. On top of the thinned
+ *  emitters above (unchanged): per 3x3 block a tick ONE soft additive GLOW CARD over the block's burning crowns, at the
+ *  centre of those alight, `glow` x their top across (x 1 + `glowN` a tree alight there), alpha `glowA`, life `glowL` s
+ *  (spawned every 0.4 s tick, so about two overlap: a steady glow, not a blink); per emission a MASS OF FLAME through
+ *  the crown, `mass` additive flame/glow sprites (+1 for every 3 alight in the block), `massS` of the top each, rising
+ *  (additive batch: no tongue is taken from vfx's 256); and a DENSE PALL, `pall` puffs a tick shared over the whole
+ *  burning field (vfx.smoke's `dense` kind at `pallS` x the crown smoke's scale, a share `oily` dark). A smouldering
+ *  block: a dim ember glow at its foot (`ember` of the flaming card). Nothing is drawn within `nearK` x its own size of
+ *  the camera's eye (first person in the wood: no card over the whole screen). The spawn colours are above 1 so the
+ *  flame ramp (white -> amber -> red as a sprite dies) spends most of its life yellow-orange. Cosmetic stream only. */
+const TREE_LOOK120 = { glow: 1.15, glowN: 0.07, glowA: 0.3, glowL: 0.95, mass: 2, massS: 0.24, pall: 8, pallS: 1.7, oily: 0.4, nearK: 1.8, ember: 0.32,
+  smokeCut: 0.5, pallN: 1.5, pallMax: 0.12, pallSize: [3, 8], pallLife: [22, 30], pallVy: 0.7, pallDark: [0.16, 0.3] };
+/** …the PALL is EFFECTS-2's `vfx.pall` (the column batch, a share of it): `pallN` puffs a tick shared over the burning
+ *  blocks (at most `pallMax` a block a tick), each `pallSize` u across (the block's top x 0.9 + 0.08 a tree alight),
+ *  living `pallLife` s, rising `pallVy` u/s, soot `pallDark`; its underside lit by the fire, more at night. */
 /** …and a bullet goes on through a trunk whose chord along its line is under this (m): a sapling, or the bark's edge. */
 const TRUNK_PEN_M120 = 0.15;
 /** The species a kind falls back on when the drawing's pack is not loaded. */
@@ -26233,6 +26257,32 @@ class Obstacles {
     group.userData.t120 = pk.sp;
     return true;
   }
+  /** (round 120, `game.shrubs120`, FOLIAGE-3) A BUSH OR A SCRUB DRAWN AS A SHRUB OF ITS THEATRE — hawthorn, hazel,
+   *  elder, juniper, gorse, maquis, saltbush, tropical undergrowth (assets/shrubs120.pack.js, grown in the trees'
+   *  pipeline: a multi-stemmed skeleton with leaf cards, drawn by the trees' material in their LOD0 / LOD1 / impostor
+   *  bands) — in place of round 98's clump of balls (`_shrubVariant`). The variant drawn in `add` stays the
+   *  simulation's (its height, `_simV`); the shrub's TOP goes where that variant's top was, at a uniform scale. Rides
+   *  on `trees120` (its material, batcher, impostors). Built inside `add` (the cosmetic stream); it draws nothing from the cell's seed. */
+  _s120On() { const g = window.game, T = window.Trees120; return !!(g && g.shrubs120 === true && this._t120On() && T.pickShrub && T.has('gorse')); }
+  _s120Swap(group, kind, gx, gz) {
+    const T = window.Trees120, old = group.children.find(c => c.isMesh);
+    if (!T || !old) return false;
+    const md = window.game && window.game.mapDef;
+    if (this._s120Md !== md) { this._s120Md = md; this._s120Th = T.theatreOf(md); }
+    const pk = T.pickShrub(this._s120Th, kind, gx, gz);
+    const geo = pk && T.geometry(pk.sp, pk.vi, 0);
+    if (!geo) return false;
+    const og = old.geometry;
+    if (!og.boundingBox) og.computeBoundingBox();
+    const u = geo.userData.t120, k = og.boundingBox.max.y * old.scale.y / u.top, gs = group.scale;
+    const m = new THREE.Mesh(geo, this._t120Mat(u.ever));
+    m.castShadow = old.castShadow; m.receiveShadow = old.receiveShadow;
+    m.position.copy(old.position);
+    m.scale.set(k * gs.y / gs.x, k, k * gs.y / gs.z);
+    group.remove(old); group.add(m);
+    group.userData.s120 = pk.sp;
+    return true;
+  }
   /** What the simulation sees of a prop drawn as variant `v` (`PROP_VARIANT_H`),
    *  times any height scale of its own `k` (`sub`: the variant set, where the
    *  shapes differ by more than the index — a rock's stone): the factor on
@@ -26322,6 +26372,7 @@ class Obstacles {
       const bs = 0.85 + rng() * 0.35;
       b.scale.setScalar(bs); b.castShadow = true; group.add(b); this._simV(group, type, bv, bs);
       group.rotation.y = rng() * Math.PI * 2;
+      if (this._s120On()) this._s120Swap(group, 'bush', gx, gz);     // (round 120, `game.shrubs120`)
     } else if (type === 'wall') {
       // Round 98: a ruined wall of the place's stone, its top courses gone in
       // stretches (`_wallVariant(i, true, 'ruin', pal)`) — it was twelve
@@ -26650,6 +26701,7 @@ class Obstacles {
       const ss = 0.8 + rng() * 0.4;
       b.scale.setScalar(ss); group.add(b); this._simV(group, type, sv, ss);
       group.rotation.y = rng() * Math.PI * 2;
+      if (this._s120On()) this._s120Swap(group, 'scrub', gx, gz);    // (round 120, `game.shrubs120`)
     } else if (type === 'hedge') {
       // ONE mesh, from a cache of eight pre-merged variants.
       //
@@ -28695,9 +28747,20 @@ const SCORCHED = new THREE.Color(0.20, 0.155, 0.125);
 // from (u), the air's drag, the seconds its fire burns full, the LOD ranges (u from the camera), the fire's glow on
 // its foot by day and at night. The fire on the hull (`_wreckFx120`): seconds at full heat, seconds until it is out,
 // how far from the camera it is drawn, the flame interval and size. CHAR120: a burnt-out hull, rust under soot.
-const SMK120 = { rate: 1.5, base: 0.45, drag: 0.05, full: 90, near: 110, far: 240, glowDay: 0.08, glowNight: 0.6 };
+const SMK120 = { rate: 1.5, base: 0.45, drag: 0.05, full: 90, near: 110, far: 240, glowDay: 0.08, glowNight: 0.6,
+  // (round 120, EFFECTS-2) THE COLUMN THAT MARKS THE WRECK FROM THE NEXT FIELD. The low puffs live `life` (+`lifeR`) s
+  // and come faster in wind (`windK` per u/s, up to +`windMax`) so the foot stays as dense as it streams away; and one
+  // puff every ~4 s (`aloft` a second) leaves the foot at `aloftY`, climbs at `aloftV` slowed by `aloftD`, `aloftS` u
+  // across and growing `aloftG` u/s, for `aloftL` s, drawn `aloftTall` times taller (vfx.js `TUNE.hazeAloft`): a dozen
+  // of them hold a dark column ~55 u (220 m) up that leans away on the wind.
+  life: 11, lifeR: 3, windK: 1.0, windMax: 1.8, windSize: 0.3,
+  aloft: 0.5, aloftY: 2.2, aloftV: 1.35, aloftD: 0.012, aloftS: 5.2, aloftG: 0.2, aloftL: 46, aloftTall: 1.9 };
 const WRK120 = { full: 70, end: 200, reach: 240, every: 0.1, flame: 0.8 };
 const CHAR120 = new THREE.Color(0.16, 0.105, 0.075);
+// (round 120, EFFECTS-2) THE HULK'S SHARE OF THE UNIT SHADER'S FILL (assets/unitshade.js `uUsLive`). All of it drew a
+// charred hulk pale blue-white; none drew a black cut-out with no form (main, sheet6b); 0.35 keeps the bounce's sky-
+// over-ground split on its faces, dark (sheet7_hulk_floor.jpg). `_scorch` walks the paint's 1 down to it.
+const HULK_FILL120 = 0.35;
 /** A BURNT-OUT WRECK'S STEEL (round 106): soot over rust, the paint's pattern
  *  left only as a ghost — its lightness to a quarter power about the paint's
  *  mean (0.08). The wreck props charred by multiplying the baked paint toward
@@ -47714,6 +47777,7 @@ class Unit {
       if (!m.userData._paint) m.userData._paint = m.color.clone();
       m.color.copy(m.userData._paint).lerp(SCORCHED, k);
       if (m.specular) m.specular.setScalar(0.08 * (1 - this._scorchT));   // soot is matte
+      if (m.userData._usLive) m.userData._usLive.value = 1 - (1 - HULK_FILL120) * this._scorchT;   // (round 120) and the unit shader's fill goes with the paint
     }
   }
 
@@ -48025,6 +48089,9 @@ class Unit {
         if (this.game.wreckFx120 === true && this._scorchT != null) { if (m.color) m.color.lerp(CHAR120, 0.6); }
         else if (m.color) m.color.multiplyScalar(0.42);
         if (m.emissive) m.emissive.setRGB(0, 0, 0);
+        // (round 120, EFFECTS-2) THE WHITE WRECK: assets/unitshade.js adds a sky bounce and a dirt floor to every dark
+        // fragment whatever its albedo, so a hulk darkened to near-black drew pale blue-grey. No paint, no fill.
+        if (m.userData && m.userData._usLive) m.userData._usLive.value = HULK_FILL120;
         if ('metalness' in m) m.metalness = Math.min(1, (m.metalness || 0) * 0.5 + 0.1);
         if ('roughness' in m) m.roughness = Math.max(m.roughness || 0, 0.92);
       }
@@ -53161,10 +53228,10 @@ class Game {
     const lf = this._fireLitBy;
     if (lf && lf.life > 0) {
       const flick = 0.72 + Math.sin(this.time * 11.3 + lf.x) * 0.14 + Math.random() * 0.14;
-      const fade = Math.min(1, lf.life / 6);
-      this._fireLight.position.set(lf.x, lf.y + 1.1 + lf.r * 0.15, lf.z);
-      this._fireLight.distance = 12 + lf.r * 2.4;
-      this._fireLight.intensity = (0.9 + night * 2.6) * flick * fade * Math.min(1.6, lf.r * 0.35);
+      const fade = Math.min(1, lf.life / 6), lr = lf.tree120 && this.burnLook120 === true ? Math.max(lf.r, 4.5) : lf.r;   // (OBSTACLES-3) a crown fire
+      this._fireLight.position.set(lf.x, lf.y + 1.1 + lr * 0.15, lf.z);
+      this._fireLight.distance = 12 + lr * 2.4;
+      this._fireLight.intensity = (0.9 + night * 2.6) * flick * fade * Math.min(1.6, lr * 0.35);
     } else this._fireLight.intensity = 0;
     // Each live spotlight costs a shader slot, so only the handful nearest the
     // camera actually emit; the rest keep their lenses lit and go dark.
@@ -68108,7 +68175,9 @@ class Game {
     const age = c.age || 0, life = Math.max(SMK120.full + 1, c.life || 210);
     const burn = age < SMK120.full ? 1 : clamp(1 - (age - SMK120.full) / (life - SMK120.full), 0.2, 1);
     const k = lod * room, big = Math.min(1.6, 1 / Math.sqrt(k));
-    e.acc += SMK120.rate * k * E.q * Math.min(1, dens * 1.6) * (0.45 + 0.55 * burn) * dt;
+    const ws = hyp(E.wx, E.wz), wb = 1 + Math.min(SMK120.windMax, ws * SMK120.windK);   // (round 120, EFFECTS-2) denser in wind
+    const wsz = 1 + Math.min(0.5, ws * SMK120.windSize);                                 // …and broader, as it streams
+    e.acc += SMK120.rate * k * wb * E.q * Math.min(1, dens * 1.6) * (0.45 + 0.55 * burn) * dt;
     const night = 1 - (this._daylight == null ? 1 : this._daylight);
     let budget = 3;
     while (e.acc >= 1 && budget-- > 0) {
@@ -68118,10 +68187,25 @@ class Game {
       vfx.spawn(V.KIND.PLUME, {
         x: src.x + Math.cos(a) * rr, y: src.y + SMK120.base + Math.random() * 0.5, z: src.z + Math.sin(a) * rr,
         vx: E.wx * 0.5 + Math.cos(a) * 0.1, vy: (1.0 + Math.random() * 0.5) * (0.75 + 0.25 * burn), vz: E.wz * 0.5 + Math.sin(a) * 0.1,
-        size: (1.6 + Math.random() * 0.8) * big, grow: (0.32 + Math.random() * 0.22) * big,
-        life: 17 + Math.random() * 6, rot: (Math.random() - 0.5) * 0.5, spin: (Math.random() - 0.5) * 0.06,
+        size: (1.6 + Math.random() * 0.8) * big * wsz, grow: (0.32 + Math.random() * 0.22) * big,
+        life: SMK120.life + Math.random() * SMK120.lifeR, rot: (Math.random() - 0.5) * 0.5, spin: (Math.random() - 0.5) * 0.06,
         r: soot * 1.06, g: soot, b: soot * 0.9, a: Math.min(1, (0.84 + Math.random() * 0.14) * Math.min(1, dens * 1.4)),
         drag: SMK120.drag, dx: 0.8 + Math.random() * 0.4, dz: (SMK120.glowDay + SMK120.glowNight * night) * burn * (0.7 + Math.random() * 0.6),
+      });
+    }
+    // (round 120, EFFECTS-2) THE COLUMN ALOFT: few, big, long-lived puffs (`stretch` marks them for vfx.js) that leave
+    // the foot and keep climbing for most of a minute, growing and leaning with the wind. Same stream, same thinning.
+    e.acc2 = (e.acc2 || 0) + SMK120.aloft * room * E.q * Math.min(1, dens * 1.6) * (0.4 + 0.6 * burn) * dt;
+    if (e.acc2 >= 1) {
+      e.acc2 -= 1;
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * 0.6, soot = 0.12 + Math.random() * 0.05;
+      vfx.spawn(V.KIND.PLUME, {
+        x: src.x + Math.cos(a) * rr, y: src.y + SMK120.aloftY + Math.random() * 0.8, z: src.z + Math.sin(a) * rr,
+        vx: E.wx * 0.6, vy: SMK120.aloftV * (0.85 + Math.random() * 0.3) * (0.7 + 0.3 * burn), vz: E.wz * 0.6,
+        size: SMK120.aloftS * (0.85 + Math.random() * 0.3), grow: SMK120.aloftG * (0.8 + Math.random() * 0.4),
+        life: SMK120.aloftL * (0.85 + Math.random() * 0.3), rot: (Math.random() - 0.5) * 0.4, spin: (Math.random() - 0.5) * 0.03,
+        r: soot * 1.05, g: soot, b: soot * 0.92, a: Math.min(1, (0.8 + Math.random() * 0.15) * Math.min(1, dens * 1.4)),
+        drag: SMK120.aloftD, stretch: SMK120.aloftTall, dx: 0.85 + Math.random() * 0.3, dz: 0,
       });
     }
   }
@@ -68187,22 +68271,33 @@ class Game {
     const x = cv.getContext('2d');
     let seed = 4410;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-    // burnt grass round the edge, then soot and ash, darkest where the fuel ran out under the hull
-    for (let k = 0; k < 9; k++) {
-      const a = rnd() * 6.283, d = k ? 14 + rnd() * 22 : 0, r = k ? 18 + rnd() * 18 : 40;
-      const cx = 64 + Math.cos(a) * d, cy = 64 + Math.sin(a) * d, gr = x.createRadialGradient(cx, cy, 0, cx, cy, r);
-      gr.addColorStop(0, 'rgba(46,38,30,0.55)'); gr.addColorStop(0.75, 'rgba(70,56,38,0.4)'); gr.addColorStop(1, 'rgba(82,66,44,0)');
-      x.fillStyle = gr; x.beginPath(); x.arc(cx, cy, r, 0, 6.283); x.fill();
+    // (EFFECTS-2) NOT A DISC: a burnt patch is blotches, streaks thrown out from the hull, scattered scorch and a pale
+    // rim of ash and scorched grass (main, sheet4: the first one read as a uniform black disc)
+    const blot = (cx, cy, r, c0, c1) => { const gr = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+      gr.addColorStop(0, c0); gr.addColorStop(1, c1); x.fillStyle = gr; x.beginPath(); x.arc(cx, cy, r, 0, 6.283); x.fill(); };
+    for (let k = 0; k < 14; k++) {            // the rim: ash and singed grass, paler than the char
+      const a = k / 14 * 6.283 + rnd() * 0.4, d = 40 + rnd() * 14;
+      blot(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 8 + rnd() * 9, 'rgba(118,104,84,0.32)', 'rgba(118,104,84,0)');
     }
-    for (let k = 0; k < 6; k++) {
-      const a = rnd() * 6.283, d = rnd() * 16, r = 12 + rnd() * 14;
-      const cx = 64 + Math.cos(a) * d, cy = 64 + Math.sin(a) * d, gr = x.createRadialGradient(cx, cy, 0, cx, cy, r);
-      gr.addColorStop(0, 'rgba(14,12,11,0.85)'); gr.addColorStop(1, 'rgba(20,17,15,0)');
-      x.fillStyle = gr; x.beginPath(); x.arc(cx, cy, r, 0, 6.283); x.fill();
+    for (let k = 0; k < 7; k++) {             // blotches of char, uneven, none of them a ring
+      const a = rnd() * 6.283, d = 6 + rnd() * 26;
+      blot(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 9 + rnd() * 13, 'rgba(26,22,18,' + (0.45 + rnd() * 0.25).toFixed(2) + ')', 'rgba(40,33,26,0)');
     }
-    for (let k = 0; k < 40; k++) {            // ash flecks
-      const a = rnd() * 6.283, d = rnd() * 44;
-      x.fillStyle = 'rgba(120,112,100,' + (0.15 + rnd() * 0.25).toFixed(2) + ')';
+    for (let k = 0; k < 11; k++) {            // streaks thrown out from the hull
+      const a = rnd() * 6.283, l = 18 + rnd() * 34, w = 2 + rnd() * 4;
+      x.save(); x.translate(64, 64); x.rotate(a);
+      const gl = x.createLinearGradient(6, 0, 6 + l, 0);
+      gl.addColorStop(0, 'rgba(22,19,16,0.55)'); gl.addColorStop(1, 'rgba(30,26,21,0)');
+      x.fillStyle = gl; x.beginPath(); x.ellipse(6 + l * 0.5, 0, l * 0.5, w, 0, 0, 6.283); x.fill(); x.restore();
+    }
+    blot(64, 64, 16, 'rgba(12,10,9,0.7)', 'rgba(16,13,11,0)');   // soot where the fuel ran out under the hull
+    for (let k = 0; k < 28; k++) {            // scattered scorch
+      const a = rnd() * 6.283, d = 14 + rnd() * 46;
+      blot(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 1.5 + rnd() * 4, 'rgba(20,17,14,0.6)', 'rgba(20,17,14,0)');
+    }
+    for (let k = 0; k < 50; k++) {            // ash flecks
+      const a = rnd() * 6.283, d = rnd() * 52;
+      x.fillStyle = 'rgba(132,124,112,' + (0.15 + rnd() * 0.3).toFixed(2) + ')';
       x.fillRect(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 1 + rnd() * 2, 1 + rnd() * 2);
     }
     const tex = new THREE.CanvasTexture(cv);
@@ -68233,22 +68328,23 @@ class Game {
     K.scorch.visible = K.litter.visible = K.wheels.visible = true;
     // the char: about twice the hull's length across, turned at random
     const i = K.ns % 128; K.ns++;
-    const D = b.L * (1.7 + Math.random() * 0.5);
+    const D = b.L * (1.3 + Math.random() * 0.35);    // (EFFECTS-2) smaller: the patch, not a disc round the field
     K.e.set(0, Math.random() * 6.283, 0); K.q.setFromEuler(K.e);
     K.p.set(u.pos.x, gy + 0.02, u.pos.z); K.s.set(D, 1, D * (0.8 + Math.random() * 0.3));
     K.m.compose(K.p, K.q, K.s); K.scorch.setMatrixAt(i, K.m);
     K.scorch.count = Math.min(128, K.ns); K.scorch.instanceMatrix.needsUpdate = true;
     // the litter: thrown from the hull, landing out to about two hull lengths
-    const n = 9 + Math.floor(Math.random() * 6), roof = b.roof || b.H;
+    const n = 15 + Math.floor(Math.random() * 7), roof = b.roof || b.H, big = 1.55;   // (EFFECTS-2) read at 46 u
     const paint = u.flashMats && u.flashMats[0] && u.flashMats[0].userData && u.flashMats[0].userData._paint;
     for (let k = 0; k < n; k++) {
-      const kind = Math.random(), a = Math.random() * 6.283, sp = (0.6 + Math.random() * 1.8) * b.L / 1.6;
+      const kind = Math.random(), a = Math.random() * 6.283, sp = (0.7 + Math.random() * 2.2) * b.L / 1.6;
       let w, h, l, col;
       if (kind < 0.34) { w = 0.12 + Math.random() * 0.14; h = 0.012; l = 0.1 + Math.random() * 0.16; col = 0x2a2622; }          // a plate, burnt
       else if (kind < 0.58) { w = 0.1; h = 0.016; l = 0.3 + Math.random() * 0.35; col = 0x1e1d1b; }                               // a length of track
       else if (kind < 0.82) { w = 0.08 + Math.random() * 0.05; h = 0.06 + Math.random() * 0.04; l = 0.12 + Math.random() * 0.1;   // stowage: a box, a can
-        col = Math.random() < 0.5 ? 0x3c4030 : 0x2e2b25; }
+        col = Math.random() < 0.5 ? 0x4a5238 : 0x5a5040; }                                                                       // (EFFECTS-2) paler: read on dark ground
       else { w = 0.2; h = 0.07; l = 0.2; col = 0x252321; }                                                                       // a road wheel
+      w *= big; l *= big; h *= Math.sqrt(big);
       const wheel = kind >= 0.82;
       const fl = { wheel, i: -1, x: u.pos.x, y: gy + roof, z: u.pos.z, vx: Math.cos(a) * sp, vy: 1.2 + Math.random() * 2.2, vz: Math.sin(a) * sp,
         w, h, l, yaw: Math.random() * 6.283, spin: (Math.random() - 0.5) * 9, rx: 0, rz: 0, t: 0 };
@@ -73857,6 +73953,7 @@ class Game {
     if (!sm && !em) return;
     const n = T.last.get(k) || 1, lod = this._treeFxLod120(wx, wz);
     if (lod <= 0) return;
+    if (this.burnLook120 === true && E.vfx) this._treeLookFx120(o, ph, k, lod, oy);   // (OBSTACLES-3) the block's glow
     const p = Math.min(1, F.per / n) * Math.min(1, F.cap / T.blocks);
     if (lod < F.farK) {   // past `far`: a thin smoke over the wood, no flames
       if (ph === 1 && sm && vrandom() < p * lod * 2) E.smoke(wx, oy + top + 0.4 * K_FX, wz, 1);
@@ -73873,7 +73970,10 @@ class Game {
       const fs = clamp(top * METERS_PER_UNIT / 6, 1.2, 3.2) * (n >= 4 ? 1.25 : 1);   // a crown fire's tongues (~10-17 m on a 16 m tree)
       const fx = wx + Math.cos(a) * r, fy = oy + top * (0.78 + 0.2 * vrandom()), fz = wz + Math.sin(a) * r;
       if (V) V.fire(fx, fy, fz, c, fs); else E.fire(fx, fy, fz, c);
-      if (sm) { if (V) V.smoke(wx, oy + top * 1.02, wz, n >= 6 ? 2 : 1, { scale: s }); else E.smoke(wx, oy + top + 0.4 * K_FX, wz, 1); }
+      // (OBSTACLES-3, burnLook120) under the pall half the crown's small puffs go: the pall carries the wood's smoke
+      const cut = this.burnLook120 === true && V && typeof V.pall === 'function' && vrandom() < TREE_LOOK120.smokeCut;
+      if (sm && !cut) { if (V) V.smoke(wx, oy + top * 1.02, wz, n >= 6 ? 2 : 1, { scale: s }); else E.smoke(wx, oy + top + 0.4 * K_FX, wz, 1); }
+      if (this.burnLook120 === true && V) this._treeLookEmit120(V, n, wx, oy, wz, top, s, sm);   // (OBSTACLES-3) flame mass, pall
     } else {
       if (sm) E.smoke(wx, oy + top * 0.6, wz, 1);
       if (em) E.fire(wx, oy + 0.3 * K_FX, wz, 1);
@@ -73886,6 +73986,65 @@ class Game {
     if (d <= F.near) return 1;
     if (d <= F.far) return 1 - (1 - F.farK) * (d - F.near) / (F.far - F.near);
     return d <= F.cull ? F.cullSmoke : 0;
+  }
+  /** (round 120, OBSTACLES-3, `burnLook120`) THE GLOW OVER A BURNING BLOCK (`TREE_LOOK120`): once a block a tick, the
+   *  first of its trees to tick draws it, at the centre of the block's trees in the same phase, sized to the tallest.
+   *  Cosmetic (cosmeticClass): reads the records, writes only its own map on `_tfx120`. */
+  _treeLookFx120(o, ph, k, lod, oy) {
+    const T = this._tfx120, V = this.effects.vfx, TL = TREE_LOOK120, F = TREE_FX120, X = window.VFX;
+    if (!T || !V || !X) return;
+    if (!T.glow || !(T.glowT <= this.time)) T.glow = new Map();   // a new battle (the clock went back): start clean
+    T.glowT = this.time;
+    const key = k * 2 + (ph === 1 ? 0 : 1);
+    if (T.glow.get(key) === this.time) return;
+    T.glow.set(key, this.time);
+    if (T.glow.size > 8192) T.glow.clear();
+    if (ph !== 1 && vrandom() < 0.5) return;   // embers come and go
+    const O = this.obstacles, gx0 = Math.floor(o.gx / F.blk) * F.blk, gz0 = Math.floor(o.gz / F.blk) * F.blk;
+    let sx = 0, sz = 0, c = 0, tmax = 0;
+    for (let dz = 0; dz < F.blk; dz++) for (let dx = 0; dx < F.blk; dx++) {
+      const gx = gx0 + dx, gz = gz0 + dz, q = inGrid(gx, gz) ? O.at(gx, gz) : null;
+      if (!q || !q.burning || (q.burnPh === 1) !== (ph === 1)) continue;
+      sx += cellCenter(gx); sz += cellCenter(gz); c++;
+      const tq = q.height / (PROP_CROWN.has(q.type) ? HEDGE_LOS_OF_TOP : 1); if (tq > tmax) tmax = tq;
+    }
+    if (!c) return;
+    const bx = sx / c, bz = sz / c, by = oy + tmax * (ph === 1 ? 0.68 : 0.08);
+    const size = tmax * TL.glow * (1 + TL.glowN * Math.min(9, c)) * (ph === 1 ? 1 : TL.ember);
+    const cam = this.camera.position, ex = bx - cam.x, ey = by - cam.y, ez = bz - cam.z;
+    if (ex * ex + ey * ey + ez * ez < (TL.nearK * size) * (TL.nearK * size)) return;
+    const la = lod >= F.farK ? 0.55 + 0.45 * lod : 0.5;
+    V.spawn(X.KIND.FIRE, { x: bx, y: by, z: bz, vy: 0.04 * tmax, size, grow: size * 0.05, life: TL.glowL * vrand(0.9, 1.1),
+      rot: vrandom() * 6.2832, spin: vrand(-0.1, 0.1), cell: X.CELL.GLOW, drag: 0,
+      r: ph === 1 ? 1.3 : 1.2, g: ph === 1 ? 1.05 : 0.5, b: ph === 1 ? 0.45 : 0.12, a: TL.glowA * la * (ph === 1 ? 1 : 0.8) });
+    // THE PALL over a flaming block (vfx.pall, EFFECTS-2): a few puffs a tick over the whole burning field
+    if (ph === 1 && typeof V.pall === 'function' && vrandom() < Math.min(TL.pallMax, TL.pallN / Math.max(1, T.blocks))) {
+      const night = 1 - (this._daylight == null ? 1 : this._daylight), ps = clamp(tmax * (0.9 + 0.08 * Math.min(9, c)), TL.pallSize[0], TL.pallSize[1]);
+      const py = oy + tmax * 1.05, qx = bx - cam.x, qy = py - cam.y, qz = bz - cam.z;
+      if (qx * qx + qy * qy + qz * qz >= (1.5 * ps) * (1.5 * ps))
+        V.pall(bx + vrand(-0.25, 0.25) * tmax, py, bz + vrand(-0.25, 0.25) * tmax, { size: ps, grow: ps * 0.06, life: vrand(TL.pallLife[0], TL.pallLife[1]),
+          vy: TL.pallVy * vrand(0.8, 1.2), dark: vrand(TL.pallDark[0], TL.pallDark[1]), a: 0.82, aloft: vrandom() < 0.5, glow: 0.12 + 0.6 * night });
+    }
+  }
+  /** …and with each crown emission, the MASS OF FLAME through the crown and now and then a puff of the PALL. */
+  _treeLookEmit120(V, n, wx, oy, wz, top, s, sm) {
+    const TL = TREE_LOOK120, X = window.VFX, T = this._tfx120;
+    if (!X) return;
+    const cam = this.camera.position, m = TL.mass + Math.min(2, Math.floor(n / 4)), sz0 = top * TL.massS * (1 + 0.06 * Math.min(9, n));
+    for (let i = 0; i < m; i++) {
+      const a = vrandom() * 6.2832, r = top * 0.3 * Math.sqrt(vrandom()), sz = sz0 * vrand(0.75, 1.35);
+      const x = wx + Math.cos(a) * r, y = oy + top * (0.5 + 0.42 * vrandom()), z = wz + Math.sin(a) * r;
+      const ex = x - cam.x, ey = y - cam.y, ez = z - cam.z;
+      if (ex * ex + ey * ey + ez * ez < (TL.nearK * sz) * (TL.nearK * sz)) continue;
+      V.spawn(X.KIND.FIRE, { x, y, z, vx: vrand(-0.12, 0.12) * top, vy: vrand(0.5, 1.3) * top * 0.12, vz: vrand(-0.12, 0.12) * top,
+        size: sz, grow: sz * 0.25, life: vrand(0.45, 0.85), rot: vrand(-0.3, 0.3), spin: vrand(-0.4, 0.4),
+        cell: vrandom() < 0.5 ? X.CELL.FLAME : X.CELL.GLOW, r: 1.35, g: 1.1, b: 0.5, a: vrand(0.55, 0.85), drag: 0.9 });
+    }
+    if (typeof V.pall !== 'function' && sm && vrandom() < Math.min(0.6, TL.pall / Math.max(1, T ? T.blocks : 1))) {   // no vfx.pall: dense puffs instead
+      const ps = s * TL.pallS, px = wx + vrand(-0.3, 0.3) * top, py = oy + top * 1.08, pz = wz + vrand(-0.3, 0.3) * top;
+      const ex = px - cam.x, ey = py - cam.y, ez = pz - cam.z, R = TL.nearK * ps * 3.4 * K_FX;   // the puff's own size (vfx: up to 3.4 x scale x K)
+      if (ex * ex + ey * ey + ez * ez >= R * R) V.smoke(px, py, pz, 1, { scale: ps, dense: true, oily: vrandom() < TL.oily });
+    }
   }
   /** …and a burning tree's ground fire (`f.tree120`): the litter burning at its foot, drawn here instead of by
    *  `_fireFx` — low flames only (the wood's smoke is the trees' own), one fire a block, at the far rate over the LOD. */
@@ -73943,7 +74102,7 @@ class Game {
       // A fire big enough to matter also LIGHTS the ground it is on. One
       // pooled light follows the largest fire near the camera, which is the
       // only one anybody can see the light of anyway.
-      if (f.r >= 2.6 && camD < 90 && (!this._fireLitBy || this._fireLitBy.life <= 0
+      if ((f.r >= 2.6 || (f.tree120 && this.burnLook120 === true)) && camD < 90 && (!this._fireLitBy || this._fireLitBy.life <= 0
           || (f.r > this._fireLitBy.r && camD < this._fireLitD))) {
         this._fireLitBy = f; this._fireLitD = camD;
       }
@@ -77364,6 +77523,7 @@ cosmeticClass(Game, ['_spawnStrikePlane', '_craterLip', '_mineMesh', '_makeSmoke
   '_smokeBank', '_smokeColumn', '_smokeDust']);
 cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);
 cosmeticClass(Obstacles, ['_ashFx120']); cosmeticClass(Obstacles, ['_char120']);
+cosmeticClass(Game, ['_treeLookFx120', '_treeLookEmit120']);   // (round 120, OBSTACLES-3, `burnLook120`) the burning crown's glow, flame mass and pall
 cosmeticClass(Game, ['_treeFireFx120', '_treeGroundFx120']);   // (round 120, `treeBurn120`) the burning wood's picture, thinned   // (round 120, `treeBurn120`) the charred stump and the ash: the picture only   // (round 118) a felled tree's leaves and dust
 // (round 120) EFFECTS: a burning wreck's column (`smokeCol120`), the fire on its hull and the burnt-out hulk
 // (`wreckFx120`), what a brew-up throws and the char under it (`debris120`). Pictures only, on the cosmetic stream;
@@ -77372,6 +77532,9 @@ cosmeticClass(Game, ['_smokeColumn120', '_wreckFx120', '_fxKit120', '_wreckLitte
 Game.prototype.smokeCol120 = false;
 Game.prototype.wreckFx120 = false;
 Game.prototype.debris120 = false;
+// (round 120, EFFECTS-2) `flameCol120`: every flame graded as light (assets/vfx.js `fireTone`): orange-yellow by day,
+// covering the field behind it, instead of pink with blue-black edges; read once a frame by `VFX.update`. OFF = as before.
+Game.prototype.flameCol120 = true;   // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/effects/sheet4_1_flames.jpg and sheet5_4_dusk_other_light.jpg: orange where OFF is pink; cost within the noise at 1/5/15 wrecks; Det identical). false = the old grade on flames.
 // (round 118) THE EFFECTS SWITCHES — each OFF is the round-114 picture exactly. Read by
 // `VFX.burst`/`fire`/`strike` (assets/vfx.js), `Projectiles` (the ground strike) and `_smokeBank`.
 Game.prototype.snipers118 = true;     // (round 118) a sniper pair each side on Village and in the platoon/company presets
@@ -77395,6 +77558,7 @@ Game.prototype.obsHit120 = true;
 // burn (logs drawn singly), the picture thinned (burnFx120) and proven cosmetic. false is the 3-7 s burn.
 Game.prototype.treeBurn120 = true;
 Game.prototype.burnFx120 = true;   // (round 120) under treeBurn120: the burning wood's picture thinned (TREE_FX120); false = every tree drawn
+Game.prototype.burnLook120 = false;   // (round 120, OBSTACLES-3) under treeBurn120 + burnFx120: the burning crown's glow cards, flame mass and pall (TREE_LOOK120), the fire light on a burning wood. OFF until main has seen the sheets
 Game.prototype.treeTough120 = true;   // (round 120) trees take bullets as chips and blast by its charge (TREE_FELL_KG120): the owner asked, 23 Nov. false = round 118's trees
 // (round 118) CARRIED STATE: what a battle builds once per PAGE must not move the next battle's sim stream. ON: the
 // felled tree's log kit and still crown are built on the cosmetic stream; `Obstacles.clear` drops the last map's falls.
@@ -77414,6 +77578,9 @@ Game.prototype.shadowSet119 = true;    // ON: no worse at any camera on Village 
 // ON (main, 23 Nov 2026, from .claude/wip120/trees/sheet1_village_off_on.jpg and sheet3_*): Village's playing camera
 // -10 ms, zoom limit about half; first person facing open country +1.4 ms; seeded battles identical.
 Game.prototype.trees120 = true;
+// (round 120, FOLIAGE-3) THE BUSHES AND THE SCRUB AS SHRUB SPECIES by theatre, in the trees' pipeline and bands
+// (`Obstacles._s120Swap`, assets/shrubs120.pack.js); needs trees120. OFF: round 98's clumps exactly. Read at map load.
+Game.prototype.shrubs120 = false;
 Game.prototype.fpvExpo118 = true;     // ON: the same A/B; the first-person whiteout is gone
 Game.prototype.fxTracer118 = true;    // ON: instanced streaks read by night and day (r118fx/cap/fx8), no mesh per round
 // (round 118, first-person near field) the props on the hedgerow material — fences, crates, carts, trunks, hedges —
@@ -77426,8 +77593,10 @@ Game.prototype.fpvNear118 = true;     // ON: against the sun a fence 16->41/255,
 Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of px under 30/255, the pine's crown 66% -> 53% (r118vis s4)
 Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
 Game.prototype.fpvGround118 = false;
-Game.prototype.haze120 = false;      // (round 120, LOOK) aerial perspective (assets/look120.js): the haze brighter and warmer toward the sun, cooler away, lying in a layer over the low ground, the dome's horizon in the same colours. OFF is the old FogExp2 exactly; OFF until main has seen the sheets (.claude/wip120/look)
-Game.prototype.grade120 = false;     // (round 120, LOOK) a filmic split on the box-art grade, amber highlights and slate shadows (assets/look120.js, in the tone curve). OFF is the old curve exactly; OFF until main has seen the sheets
+Game.prototype.haze120 = true;       // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/look/sheets/s9-s10; quiet re-time Village play +0.28, fpv +0.135, nulls -0.08/+0.03). (round 120, LOOK / LOOK-2) aerial perspective (assets/look120.js): a far haze past a CLEAR NEAR ZONE (rifle range in first person; the RTS camera's distance to its target + 45 u), warm and luminous in the theatre's dust (summer gold, desert/steppe ochre, winter blue-white; greyer under a deck and in rain), brighter toward the sun, units at 0.4 of it, the dome's horizon in the same colours. Drawing only: sight and fog of war read the same density. OFF is the old FogExp2 exactly; OFF until main has seen the sheets (.claude/wip120/look)
+Game.prototype.grade120 = false;     // (round 120, LOOK / LOOK-2) a filmic split folded into the box-art grade, amber highlights and slate shadows (assets/look120.js: a copy of the installed curve with a stronger split line, same ALU as OFF). OFF is the old curve exactly; OFF until main has seen the sheets
+Game.prototype.bridgeLod120 = true;    // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/bridges/sheet14_lod_arnhem_remagen.jpg: the same picture; Arnhem play +0.22 -> -0.11, deck +0.47 -> +0.04). (round 120, BRIDGES-3): the truss by distance — far sections the kit's lo pieces in a Lambert, the road's surfaces Lambert near too (assets/bridges120.js `_build`, `_materialLo`; .claude/wip120/bridges/NOTES.md ## BRIDGES-3)
+Game.prototype.bridgeBank120 = false;  // (round 120, BRIDGES-3) OFF until main has seen the sheets and the A/B: grass on the slopes `_embank` cut beside a bridge's ramp, setts only on the lane (assets/bridges120.js `_bankGrass`; a surface change on those cells only)
 Game.prototype.bridges120 = true;    // ON (main, 23 Nov 23:40, from .claude/wip120/bridges/sheet09-13_*_v2.jpg; the owner: 'turn bridges and water on when ready'): Arnhem's river bogging fixed (no sideways step off a deck, AI goals moved off the water, the dam's spurs gone), A/B 6 seeds: Pegasus inside the floor, Arnhem bogged/inWater better than OFF, the bridge a chokepoint where a 138 m dam was (crossings -11, German lost +19); lint 100%; maps without bridges identical; cost Arnhem play +0.33 ms, the other maps <= 0.    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
 Game.prototype.water120 = false;      // (round 120) the water, drawn (assets/water120.js): the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks reflected, foam, wet banks, rain rings. OFF is today's program exactly; ON until main has seen the sheets (.claude/wip120/water)
 Game.prototype.foliage120 = true;   // ON (main, 23 Nov, from .claude/wip120/foliage/sheets/s5_brush.jpg, s5_arras.jpg, s5_sunflowers.jpg). (round 120) THE GROUND FOLIAGE (assets/foliage.js `on120`): Blender drawings by kind and theatre (broom, juniper, maquis, scrub, sunflowers facing one way), the far bands as round 119 (the carpet opt-in: `field.carpet120 = true`). Quiet-machine A/B (ab8/ab7): playing camera -0.35..+0.35 ms, first person -0.70..+0.45; draws and triangles <= OFF; seeded battles identical. false = round 119's field

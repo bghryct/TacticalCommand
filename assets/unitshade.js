@@ -196,7 +196,7 @@
       // already there and shifts it toward earth, which is why a muddy olive
       // hull still reads as olive.
       '  float uLum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));',
-      '  vec3 uMud = vec3(' + d[0] + ', ' + d[1] + ', ' + d[2] + ') * (0.45 * uUsLight + 0.85 * uLum);',
+      '  vec3 uMud = vec3(' + d[0] + ', ' + d[1] + ', ' + d[2] + ') * (0.45 * uUsLight * uUsLive + 0.85 * uLum);',
       '  gl_FragColor.rgb = mix(gl_FragColor.rgb, uMud, clamp(uDust, 0.0, 0.85));',
       // ---- the edge -------------------------------------------------------
       // Fresnel against the view, off THIS FILE'S OWN VARYINGS.
@@ -215,7 +215,7 @@
       // Only where there is light to bounce: a rim light on a tank standing in
       // shadow is a glow, and glowing tanks are not what this is for.
       '  gl_FragColor.rgb += vec3(' + c[0] + ', ' + c[1] + ', ' + c[2] + ') * uRim * ' +
-        (+o.rim).toFixed(3) + ' * smoothstep(0.02, 0.35, uLum) * uUsLight;',
+        (+o.rim).toFixed(3) + ' * smoothstep(0.02, 0.35, uLum) * uUsLight * uUsLive;',
       // ---- the sheen ------------------------------------------------------
       // Blinn-Phong off this file's own normal and view vector, against the
       // shared sun. Gated two ways, both of which are what actually happens:
@@ -237,12 +237,16 @@
       // uniform, a face or a helmet is painted — and keeps its darkness.
       '  float uBlood = clamp((diffuseColor.r - max(diffuseColor.g, diffuseColor.b)) / (diffuseColor.r + 0.002) * 3.3 - 2.0, 0.0, 1.0)',
       '               * (1.0 - step(0.2, diffuseColor.r));',
-      '  gl_FragColor.rgb += uBnc * uDark * ' + (+o.bounce).toFixed(3) + ' * uUsLight * (1.0 - 0.9 * uBlood);',
+      // (round 120, EFFECTS-2) …AND NOT ON A BURNT-OUT HULL. The bounce is ADDED in proportion to how DARK the fragment
+      // is, whatever its albedo, and so is the dirt's floor: a hulk charred to near-black (`Unit._scorch`,
+      // `_becomeHulk`) took the whole of both and drew pale blue-grey, a white wreck on every authored model.
+      // `uUsLive` (per material, 1 = paint) goes to 0 as the paint burns off.
+      '  gl_FragColor.rgb += uBnc * uDark * ' + (+o.bounce).toFixed(3) + ' * uUsLight * uUsLive * (1.0 - 0.9 * uBlood);',
       '  vec3 uN = normalize(vUsVN), uV = normalize(vUsVP);',
       '  vec3 uH = normalize(uUsSun + uV);',
       '  float uSpec = pow(max(dot(uN, uH), 0.0), ' + (+o.gloss).toFixed(1) + ');',
       '  gl_FragColor.rgb += vec3(' + sc[0] + ', ' + sc[1] + ', ' + sc[2] + ') * uSpec * ' +
-        (+o.spec).toFixed(3) + ' * (1.0 - clamp(uDust, 0.0, 0.85)) * smoothstep(0.05, 0.40, uLum);',
+        (+o.spec).toFixed(3) + ' * (1.0 - clamp(uDust, 0.0, 0.85)) * smoothstep(0.05, 0.40, uLum) * uUsLive;',
       '}',
     ].join('\n');
   }
@@ -268,6 +272,10 @@
     // bounce — is still this file's.
     if (m.userData && m.userData.painted) { o.camo = null; o.plate = 0; o.gear = 0; o.dust = 0; }
     var prevCompile = m.onBeforeCompile;
+    // (round 120) THIS material's paint, 1, to burnt off, 0 (`Unit._scorch`, `_becomeHulk`): the light this file adds is
+    // the paint's, not the char's. Its own object, so a clone (userData is copied) is given a fresh one here.
+    var live = { value: 1 };
+    m.userData._usLive = live;
     m.onBeforeCompile = function (sh, renderer) {
       if (prevCompile) prevCompile.call(this, sh, renderer);
       var ok = true;
@@ -293,8 +301,9 @@
         '#include <project_vertex>\nvUsVP = -mvPosition.xyz;');
       sh.uniforms.uUsSun = U.sun;
       sh.uniforms.uUsLight = U.light;
+      sh.uniforms.uUsLive = live;
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
-        '#include <common>\nvarying float vUsH;\nvarying float vUsN;\nvarying vec3 vUsVN;\nvarying vec3 vUsVP;\nvarying vec3 vUsObj;\nuniform vec3 uUsSun;\nuniform float uUsLight;\n' + glslNoise());
+        '#include <common>\nvarying float vUsH;\nvarying float vUsN;\nvarying vec3 vUsVN;\nvarying vec3 vUsVP;\nvarying vec3 vUsObj;\nuniform vec3 uUsSun;\nuniform float uUsLight;\nuniform float uUsLive;\n' + glslNoise());
       // THE PAINT GOES ON THE ALBEDO, not on the lit result. `<color_fragment>`
       // is where `diffuseColor` has just taken the material colour and any
       // vertex colours, and is the last point before the light is applied — so
