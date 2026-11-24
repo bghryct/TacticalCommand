@@ -1892,6 +1892,10 @@ const RIVER_BED_DROP_M = 1.5;
  *  and that moves, so it has to clear the whole height range rather than a
  *  hair: the surface can sit as high as MAXH and the backdrop as low as MINH. */
 const WATER_DRY_Y = (MINH - MAXH) * 0.75 - 10;   // -40
+/** (round 120, WATER-5) THE WET RING: how many rings of vertices round the water `_maskWater` lifts to the level over
+ *  land that lies UNDER it (the sim's land; drawing only), and the depth over which the water's edge fades out
+ *  (world units: 0.04 = 16 cm). `terrain.wetRingK = 0` is the old plane exactly (no ring, no fade). */
+const WATER_RING_K = 3, WATER_EDGE_FADE = 0.04;
 // Battlefield scale: 1 world unit ≈ 4 m, so real muzzle velocities and
 // engagement ranges scale onto the map. mps() converts m/s → world units/s.
 const METERS_PER_UNIT = 4;
@@ -10594,6 +10598,7 @@ const WATER_U = {
 };
 const WATER_GLSL_F = `
 varying vec3 vWaterW;
+varying float vWaterD;
 uniform float uWaterT;
 uniform vec3 uWaterEye;
 uniform vec3 uWaterSun;
@@ -10639,6 +10644,10 @@ vec3 waterSurface(vec3 col, inout float alpha) {
   float fres = 0.02 + 0.6 * pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 5.0);
   float glint = pow(max(dot(r, L), 0.0), 300.0) * 2.4 * w.z;
   alpha = max(alpha, min(1.0, fres * 0.45 + glint));
+  // (round 120, WATER-5) THE EDGE: the depth under this pixel (the plane and the ground share the grid and its triangles,
+  // so the interpolated depth is exact, waves included) thins the water out over its last 16 cm: the bed shows through at
+  // the shore, no hard rim; and where the wet ring stops over land still under the level, the water fades out.
+  alpha *= smoothstep(0.0, ${WATER_EDGE_FADE.toFixed(3)}, vWaterD);
   return mix(col, sky, fres) + uWaterSunC * glint;
 }
 `;
@@ -10667,10 +10676,10 @@ function waterSurfaceMaterial(mat) {
   mat.onBeforeCompile = function (sh, renderer) {
     if (prev) prev.call(this, sh, renderer);
     Object.assign(sh.uniforms, WATER_U);
-    sh.vertexShader = 'varying vec3 vWaterW;\n' + WATER_GLSL_V119 + sh.vertexShader.replace(
+    sh.vertexShader = 'varying vec3 vWaterW;\nattribute float aWaterG;\nvarying float vWaterD;\n' + WATER_GLSL_V119 + sh.vertexShader.replace(
       '#include <begin_vertex>', '#include <begin_vertex>\n  waterWave119(transformed);').replace(
       '#include <project_vertex>',
-      'vWaterW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#include <project_vertex>');
+      'vWaterW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n  vWaterD = transformed.y - aWaterG;\n#include <project_vertex>');
     sh.fragmentShader = WATER_GLSL_F + sh.fragmentShader.replace(
       '#include <tonemapping_fragment>',
       '{ float wa = gl_FragColor.a; gl_FragColor.rgb = waterSurface(gl_FragColor.rgb, wa); gl_FragColor.a = wa; }\n#include <tonemapping_fragment>');
@@ -19517,6 +19526,7 @@ class Terrain {
     const wgeo = new THREE.PlaneGeometry((GRID - 1) * TILE, (GRID - 1) * TILE, GRID - 1, GRID - 1);
     wgeo.rotateX(-Math.PI / 2);
     wgeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    wgeo.setAttribute('aWaterG', new THREE.BufferAttribute(new Float32Array(N).fill(-1), 1));   // (round 120) ground - level
     this.water = new THREE.Mesh(wgeo, new PaintedMaterial({
       vertexColors: true, transparent: true, opacity: 0.82,
     }));
@@ -19590,6 +19600,7 @@ class Terrain {
       g.rotateX(-Math.PI / 2);
       g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
       if (m === this.mesh) Terrain._splatAttrs(g, N);
+      else g.setAttribute('aWaterG', new THREE.BufferAttribute(new Float32Array(N).fill(-1), 1));   // (round 120) ground - level
       m.geometry = g;
     }
     if (this.backdrop) {
@@ -19687,6 +19698,8 @@ class Terrain {
     const shallow = new THREE.Color(lagoon ? 0x7ab8c4 : 0x4a6e66), mid = new THREE.Color(lagoon ? 0x2e6a88 : 0x2a4a52), deep = new THREE.Color(lagoon ? 0x102c42 : 0x10242e);
     const c = new THREE.Color();
     const B = this._waterBox || { x0: 0, z0: 0, x1: GRID - 1, z1: GRID - 1 };
+    // (round 120, WATER-5) ground - level per vertex, for the edge's fade (`aWaterG`)
+    const ag = this.water.geometry.attributes.aWaterG, E = this._waterEdge, fade = (this.wetRingK != null ? this.wetRingK : WATER_RING_K) > 0;
     for (let z = B.z0; z <= B.z1; z++) for (let x = B.x0; x <= B.x1; x++) {
       const i = z * GRID + x;
       const dh120 = this._drawH120, depth = this.waterY - (dh120 && dh120[i] === dh120[i] ? dh120[i] : this.h[i]) * HSCALE;   // (round 120)
@@ -19694,10 +19707,12 @@ class Terrain {
       else if (depth < 0.7) c.copy(shallow).lerp(mid, (depth - 0.18) / 0.52);
       else c.copy(mid).lerp(deep, Math.min(1, (depth - 0.7) / 0.5));
       col.setXYZ(i, c.r, c.g, c.b);
+      if (ag) ag.array[i] = !fade ? -1 : (E && E[i] ? 0.08 : -depth);   // an edge vertex of the ring: over the crest (faded)
     }
     col.updateRange.offset = B.z0 * GRID * 3;
     col.updateRange.count = Math.max(0, (B.z1 - B.z0 + 1) * GRID * 3);
     col.needsUpdate = true;
+    if (ag) { ag.updateRange.offset = B.z0 * GRID; ag.updateRange.count = Math.max(0, (B.z1 - B.z0 + 1) * GRID); ag.needsUpdate = true; }
     if (window.Water120) window.Water120.dirty = true;   // (round 120) the bed or the level moved: the water's data again
   }
 
@@ -19908,7 +19923,10 @@ class Terrain {
       // (EFFECTS-2) the ring takes a smaller share and never goes black: a wreck's fire scorched all nine to 1, a dark
       // disc three cells across (main, sheet4). Centre to 1, sides to 0.35, corners to 0.18.
       try { for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-        const cap = dx && dz ? 0.18 : dx || dz ? 0.35 : 1;
+        // (round 120, EFFECTS-3) …and on a bright field (sand, chalk) a soot stain, not a black hole: every cap x the
+        // field's key against the reference (0.5 at the brightest)
+        const gk120 = Math.min(1, Math.max(0.5, Math.pow(GROUND_KEY_REF / Math.max(GROUND_KEY_REF, this.groundKey || GROUND_KEY_REF), 0.9)));
+        const cap = (dx && dz ? 0.18 : dx || dz ? 0.35 : 1) * gk120;
         if (!inGrid(x + dx, z + dz) || this.scorch[this.idx(x + dx, z + dz)] >= cap) continue;
         this.addScorch(x + dx, z + dz, Math.min(cap - this.scorch[this.idx(x + dx, z + dz)], amt * (dx && dz ? 0.1 : dx || dz ? 0.25 : 1)));
       } }
@@ -20415,6 +20433,42 @@ class Terrain {
     this.tintBackdrop();
   }
 
+  /** (round 120, WATER-5) The wet ring (see `_maskWater`): lifts to the level (B = 0) every vertex 8-adjacent to a
+   *  wet vertex whose ground is under the level, ring by ring up to `WATER_RING_K`; marks the edge; grows the box. */
+  _wetRing(B) {
+    const G = GRID, N = G * G, K = this.wetRingK != null ? this.wetRingK : WATER_RING_K, lvl = this.waterY, dh = this._drawH120;
+    const E = this._waterEdge && this._waterEdge.length === N ? this._waterEdge.fill(0) : (this._waterEdge = new Uint8Array(N));
+    this._ringN = 0; this._edgeN = 0;
+    if (!(K > 0)) return;
+    const under = i => (dh && dh[i] === dh[i] ? dh[i] : this.h[i]) * HSCALE < lvl;
+    let front = [];
+    for (let i = 0; i < N; i++) if (B[i] === 0 && under(i)) front.push(i);   // a wet vertex under the level opens the ring
+    let x0 = G, z0 = G, x1 = -1, z1 = -1;
+    for (let k = 1; k <= K && front.length; k++) {
+      const next = [];
+      for (const i of front) {
+        const x = i % G, z = (i / G) | 0;
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx, zz = z + dz;
+          if (xx < 0 || zz < 0 || xx >= G || zz >= G) continue;
+          const j = zz * G + xx;
+          if (B[j] === 0) continue;
+          B[j] = 0; this._ringN++;
+          if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (zz < z0) z0 = zz; if (zz > z1) z1 = zz;
+          if (under(j)) next.push(j);
+        }
+      }
+      front = next;
+    }
+    for (const j of front) E[j] = 1;
+    this._edgeN = front.length;
+    // the box the colours, the waves and the cull walk: the ring's too (a ring vertex outside it would be black)
+    const o = this._waterBox;
+    if (x1 >= 0) this._waterBox = (o && o.x1 >= o.x0)
+      ? { x0: Math.min(o.x0, Math.max(0, x0 - 1)), z0: Math.min(o.z0, Math.max(0, z0 - 1)), x1: Math.max(o.x1, Math.min(G - 1, x1 + 1)), z1: Math.max(o.z1, Math.min(G - 1, z1 + 1)) }
+      : { x0: Math.max(0, x0 - 1), z0: Math.max(0, z0 - 1), x1: Math.min(G - 1, x1 + 1), z1: Math.min(G - 1, z1 + 1) };
+  }
+
   /** PARK THE DRY PART OF THE WATER PLANE OUT OF SIGHT.
    *
    *  The plane covers the whole field, so a surface at a realistic river height
@@ -20426,7 +20480,14 @@ class Terrain {
    *  SKIRT. It is buried where the bank stands over the level, but where the
    *  land in front lies under it (a flood's fields, a beach) it stood in view as
    *  a sheet; the water's shader drops any face steeper than 60 degrees
-   *  (`waterSurface`), so the plane ends at its last wet triangle. */
+   *  (`waterSurface`), so the plane ends at its last wet triangle.
+   *  (round 120, WATER-5) THE WET RING. That left land lying UNDER the level drawn as its dry bed between the last wet
+   *  vertex and the shore (a gravel strip short of the water at Purple Heart Lane and the Waal, a dark seam on
+   *  Vierville's sand). So every vertex beside a wet vertex that stands under the level is wet too, for up to
+   *  `WATER_RING_K` rings: the plane is flat at the level there and the ground, drawn on the same grid and triangles,
+   *  cuts it where it really crosses the level, so the shore is drawn where the bank meets the water. A ring vertex still
+   *  under the level at the last ring is an EDGE (`_waterEdge`): the water fades out toward it (`aWaterG`). Drawing
+   *  only: the sim's water is `type`, and nothing reads this plane. */
   _maskWater() {
     const B = this._waterBase;
     B.fill(WATER_DRY_Y);
@@ -20438,6 +20499,7 @@ class Terrain {
         if (vx < GRID && vz < GRID) B[vz * GRID + vx] = 0;
       }
     }
+    this._wetRing(B);
     const pos = this.water.geometry.attributes.position;
     for (let i = 0; i < GRID * GRID; i++) pos.setY(i, B[i]);
     pos.updateRange.offset = 0; pos.updateRange.count = -1;
@@ -21649,11 +21711,22 @@ const TREE_GND_TINT120 = { r: 1, g: 0.55, b: 0.18 };
  *  block: a dim ember glow at its foot (`ember` of the flaming card). Nothing is drawn within `nearK` x its own size of
  *  the camera's eye (first person in the wood: no card over the whole screen). The spawn colours are above 1 so the
  *  flame ramp (white -> amber -> red as a sprite dies) spends most of its life yellow-orange. Cosmetic stream only. */
-const TREE_LOOK120 = { glow: 1.15, glowN: 0.07, glowA: 0.3, glowL: 0.95, mass: 2, massS: 0.24, pall: 8, pallS: 1.7, oily: 0.4, nearK: 1.8, ember: 0.32,
-  smokeCut: 0.5, pallN: 1.5, pallMax: 0.12, pallSize: [3, 8], pallLife: [22, 30], pallVy: 0.7, pallDark: [0.16, 0.3] };
+const TREE_LOOK120 = { glow: 1.15, glowN: 0.07, glowA: 0.22, glowL: 0.95, mass: 1, massS: 0.11, pall: 8, pallS: 1.7, oily: 0.4, nearK: 1.8, ember: 0.32,
+  smokeCut: 0.5, pallN: 1.5, pallMax: 0.12, pallSize: [3, 8], pallLife: [22, 30], pallVy: 0.7, pallDark: [0.16, 0.3],
+  massN: 6, lick: [1.9, 2.9], lickLife: [0.3, 0.6], lickUp: [0.7, 1.2], lickShrink: 0.6, night: 0.55, nightGlow: 0.4, nightSize: 0.85,
+  glowFlat: 1.6, glowNear: [20, 55, 0.35],
+  occ: 1, occH: [0.4, 0.68, 0.96, 1.35], glowUp: [0.68, 0.84, 0.97], glowUpS: [1, 0.6, 0.36], occT: 0.8, occMove: 1.5, occStep: 1.5, occN: 128, occBldH: 8 };
 /** …the PALL is EFFECTS-2's `vfx.pall` (the column batch, a share of it): `pallN` puffs a tick shared over the burning
  *  blocks (at most `pallMax` a block a tick), each `pallSize` u across (the block's top x 0.9 + 0.08 a tree alight),
  *  living `pallLife` s, rising `pallVy` u/s, soot `pallDark`; its underside lit by the fire, more at night. */
+/** (OBSTACLES-4) …the FLAME MASS is TONGUES: `mass` an emission (+1 at `massN` or more alight in the block), each the FLAME
+ *  cell `massS` of the top wide (x 1 + 0.04 a tree alight) and `lick` times as tall, rising `lickUp` of its own height a
+ *  second while it narrows by `lickShrink` of its width, living `lickLife` s; at night (`_daylight` 0) a tongue's alpha is
+ *  `night` of the day's and the block's card `nightGlow` as bright and `nightSize` as big (the night clusters merged into
+ *  saturated blobs). THE CARD'S DEPTH (`occ`; 0 = none): the glow pass draws the additive batch with no depth, so the eye
+ *  asks whether it sees `occH` heights up the crown (x its top; `Game._treeLookVis120`: the ground and the buildings, a line
+ *  sampled every `occStep` u, at most `occN` samples), kept `occT` s while the eye moves under `occMove` u; the card sits at
+ *  `glowUp` and is `glowUpS` as big by the lowest height that shows, and is not drawn when none does. */
 /** …and a bullet goes on through a trunk whose chord along its line is under this (m): a sapling, or the bark's edge. */
 const TRUNK_PEN_M120 = 0.15;
 /** The species a kind falls back on when the drawing's pack is not loaded. */
@@ -21664,6 +21737,11 @@ const OBS_SHAPE120 = { tree: 1, oak: 1, pine: 1, bush: 2, scrub: 2, rock: 3, hay
 /** A bush's or scrub's drawn clump: the radius whose mean chord is its drawn footprint's, as a share of its drawn top
  *  (oh120.js in the page, Village: 29 bushes 0.94, 526 scrub 1.18 — a bush is about as wide as it is tall). */
 const BUSH_R120 = { bush: 0.94, scrub: 1.18 };
+/** (round 120, OBSTACLES-4, `game.bushHit120`) …AS DRAWN TODAY. Those two were the BOUNDING BOX of the old mound, and a box
+ *  reads a round clump 4/pi (27%) wide. FOLIAGE-4 raycast today's shrubs (shrubs120; LOD0 leaf cards + stems, the mean
+ *  half-width over 72 bearings as a share of the top): Village bush 0.73, scrub 0.96 (Monte Cassino's maquis 0.97,
+ *  Kasserine's saltbush 1.07; the old mound by the same method 0.755 / 0.954). Table figures, never the mesh. */
+const BUSH_DRAWN120 = { bush: 0.73, scrub: 0.96 };
 /** …and a round inside the clump meets a stem this often (a bullet; a shell's fuze, a grenade knocked down). */
 const BUSH_STOP120 = { light: 0.08, heavy: 0.15 };
 /** Hard props by their drawn footprint, a cylinder at the cell's centre, world units: the radius whose mean chord is
@@ -25963,6 +26041,7 @@ class Obstacles {
   segHit120(ax, ay, az, bx, by, bz, heavy, ap, noDice) {
     const NB = this._sh120, SO = this._shO120;
     if (!NB || !SO) return null;
+    const BR = typeof game !== 'undefined' && game && game.bushHit120 === true ? BUSH_DRAWN120 : BUSH_R120;   // (OBSTACLES-4) the clump as drawn
     // nothing shaped within 3 cells of either end (the count grid `_sh120Touch` keeps): an open field asks nothing
     if (!(NB[worldToCell(az) * GRID + worldToCell(ax)] || NB[worldToCell(bz) * GRID + worldToCell(bx)])) return null;
     const ux = bx - ax, uy = by - ay, uz = bz - az, L2 = ux * ux + uz * uz;
@@ -25979,7 +26058,7 @@ class Obstacles {
       // the line's closest approach to the axis, in plan; nothing of it reaches the step: on (before the ground is asked)
       const tc = L2 > 1e-12 ? ((cx - ax) * ux + (cz - az) * uz) / L2 : 0.5, tcc = tc < 0 ? 0 : tc > 1 ? 1 : tc;
       const ex = ax + ux * tcc - cx, ez = az + uz * tcc - cz;
-      const reach = sh === 1 ? top * TREE_HIT_OFF120[4] : sh === 2 ? (BUSH_R120[o.type] || 0.5) * top : (PROP_BODY120[o.type] || 0);
+      const reach = sh === 1 ? top * TREE_HIT_OFF120[4] : sh === 2 ? (BR[o.type] || 0.5) * top : (PROP_BODY120[o.type] || 0);
       if (ex * ex + ez * ez > reach * reach) continue;
       const y0 = this.floorAt(o, gx, gz, cx, cz);
       if (yhi < y0 || ylo > y0 + top) continue;
@@ -26013,7 +26092,7 @@ class Obstacles {
       } else if (sh === 2) {
         // a bush or scrub: leaves on thin stems, its drawn clump a cylinder round its cell's centre
         if (!noDice && tc >= 0 && tc < 1) {
-          const rb = (BUSH_R120[o.type] || 0.5) * top, yc = ay + uy * tc;
+          const rb = (BR[o.type] || 0.5) * top, yc = ay + uy * tc;
           if (d2 < rb * rb && yc >= y0 && yc <= y0 + top) n = this._cand120(n, tc, heavy ? BUSH_STOP120.heavy : BUSH_STOP120.light, o, 3);
         }
       } else {
@@ -28809,12 +28888,21 @@ const SMK120 = { rate: 1.5, base: 0.45, drag: 0.05, full: 90, near: 110, far: 24
   // of them hold a dark column ~55 u (220 m) up that leans away on the wind.
   life: 11, lifeR: 3, windK: 1.0, windMax: 1.8, windSize: 0.3,
   aloft: 0.5, aloftY: 2.2, aloftV: 1.35, aloftD: 0.012, aloftS: 5.2, aloftG: 0.2, aloftL: 46, aloftTall: 1.9 };
+// (round 120, EFFECTS-3) THE COLUMN'S FILL. Its cost was the puffs aloft (~23 a column, 5-14 u across, ~10x overlap):
+// half as many, born a little bigger and drawn taller, climbing faster for a shorter life, hold the same ~58 u column
+// with about half the drawn area; denser each, so the column is not thinner.
+Object.assign(SMK120, { aloft: 0.25, aloftV: 1.65, aloftS: 6.0, aloftG: 0.17, aloftL: 36, aloftTall: 2.4, aloftA: 0.93 });
 const WRK120 = { full: 70, end: 200, reach: 240, every: 0.1, flame: 0.8 };
 const CHAR120 = new THREE.Color(0.16, 0.105, 0.075);
 // (round 120, EFFECTS-2) THE HULK'S SHARE OF THE UNIT SHADER'S FILL (assets/unitshade.js `uUsLive`). All of it drew a
 // charred hulk pale blue-white; none drew a black cut-out with no form (main, sheet6b); 0.35 keeps the bounce's sky-
 // over-ground split on its faces, dark (sheet7_hulk_floor.jpg). `_scorch` walks the paint's 1 down to it.
 const HULK_FILL120 = 0.35;
+// (round 120, EFFECTS-3) `game.unitLight120`: the unit shader's fill is the paint x the scene's light (assets/unitshade.js
+// `U.amb`, written by `_updateDaylight`): its gain by day and at night (blended by `night`), and the luminance the paint
+// is floored at so a near-black tunic still has a hue for the light to show. `game.hulkChar120`: the burnt steel
+// REPLACES the paint (unitshade `uUsChar`, the same programs), walked in with the scorch.
+const UNIT_LIGHT120 = { k: 1.5, kNight: 2.6, floor: 0.25 };
 /** A BURNT-OUT WRECK'S STEEL (round 106): soot over rust, the paint's pattern
  *  left only as a ghost — its lightness to a quarter power about the paint's
  *  mean (0.08). The wreck props charred by multiplying the baked paint toward
@@ -29554,6 +29642,7 @@ class Pathfinder {
     this.climbMax = climb || CLIMB;
     this.crushing = crush || 0;
     this.wcls120 = this._wclsNext120 | 0; this._wclsNext120 = 0;   // (round 120) the vehicle's weight class, this search only
+    const noWade120 = this._noWadeNext120 === true; this._noWadeNext120 = false;   // (round 120, BRIDGES-4) `bridgeWet120`, this search only
     // WATER IS NOT A WALL TO ANYTHING WITH TRACKS. A vehicle may be driven into
     // a river — it will bog there, which is the point — so the search has to be
     // able to reach a destination in the water rather than silently snapping
@@ -29568,6 +29657,9 @@ class Pathfinder {
     // switch off `wcls120` is 0 and this line is inert; the named maps carry only class-3 decks, which refuse nobody.
     if (this.wading && this.wcls120 > 1 && this.deck120 && !this.amphibious && window.Bridges120 && window.Bridges120.minCls < this.wcls120
       && this.terrain.typeAt(ex, ez) !== TYPE.water) this.wading = false;
+    // (round 120, `game.bridgeWet120`, BRIDGES-4) the computer's vehicle on a map with a bridge (`Unit._setPathTo`): the
+    // river is a wall — the route goes by a deck, or walks out to the nearest bank (the partial rule) and holds
+    if (noWade120 && this.wading && !this.amphibious && this.terrain.typeAt(ex, ez) !== TYPE.water) this.wading = false;
     // (round 113) a search on foot crosses trees, scrub and small props —
     // exactly the searches `_wasmSearch` runs, whose grid blocks on 1 alone
     this.foot = !this.floating && !this.crushing && !this.amphibious;
@@ -37195,10 +37287,19 @@ class Unit {
     // the computer's destination in the water moves to the nearest dry ground. Maps with a bridge only.
     if (this.def.vehicle && !this.def.amphib && !this.def.floats && this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any
       && !(this.team === this.game.playerTeam && !this._underAI()) && this.game.terrain.typeAt(worldToCell(fdx), worldToCell(fdz)) === TYPE.water) {
-      const dry120 = this.game.pathfinder.nearestPassable(worldToCell(fdx), worldToCell(fdz), 10);
+      // (BRIDGES-4, `game.bridgeWet120`) …as far out as the river is wide: a Puma 'advancing' to a point 11 cells into the Rhine
+      // found no dry cell within 10, kept its goal in the water, waded for it (the goal-in-water exemption) and, refused
+      // every step by the switch, stood at the bank for 873 s (stuck4.js, Arnhem seed 23); 40 reaches a bank on every bridged river
+      const dry120 = this.game.pathfinder.nearestPassable(worldToCell(fdx), worldToCell(fdz), this.game.bridgeWet120 === true ? 40 : 10);
       if (dry120) { fdx = cellCenter(dry120.x); fdz = cellCenter(dry120.z); }
     }
     if (this.def.vehicle && this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any) this.game.pathfinder._wclsNext120 = window.Bridges120.clsOf(this.def, this.type);   // (round 120)
+    // (round 120, `game.bridgeWet120`, BRIDGES-4) …AND IT DOES NOT PLAN TO WADE EITHER. Its goals in the water are moved
+    // (above), but its ROUTE could still be searched through the river (WATER_DETOUR is a preference of 120 cells): a
+    // halftrack's bound on Arnhem's embankment ran three waypoints through the Rhine and bogged (pw4.js, seed 31). This
+    // search only (`find`); not the player's own order; maps with a bridge only.
+    if (this.game.bridgeWet120 === true && this.def.vehicle && !this.def.amphib && !this.def.floats && this.game.bridges120 === true && window.Bridges120 && window.Bridges120.any
+      && !(this.team === this.game.playerTeam && !this._underAI())) this.game.pathfinder._noWadeNext120 = true;
     const path = this.game.pathfinder.find(
       worldToCell(this.pos.x), worldToCell(this.pos.z),
       worldToCell(fdx), worldToCell(fdz), this.def.floats, climbOf(this.def),
@@ -44431,6 +44532,13 @@ class Unit {
   _wetStep120(nx, nz, dx, dz) {
     const T = this.game.terrain, W = TYPE.water;
     if (T.typeAt(worldToCell(nx), worldToCell(nz)) !== W || T.typeAt(worldToCell(this.pos.x), worldToCell(this.pos.z)) === W) return false;
+    // (round 120, `game.bridgeWet120`, BRIDGES-4) THE COMPUTER'S VEHICLE NEVER MEANS TO WADE ON A MAP WITH A BRIDGE: its
+    // search keeps out of the river (`find`) and its goals in the water are moved (`_setPathTo`), so a step into the water
+    // is never its route's. The leg test below reads the leg from where the hull NOW stands, and a hull that had drifted
+    // off its line (onto the shoulder beside the deck, round a corner it slid by) found its leg to a DRY waypoint running
+    // down the water beside the deck — two samples and more — and drove in (pw4.js, Arnhem with bridgeBank120, seeds 7
+    // and 31: both routes planned with no water on them). Refused outright; it turns and slides by the dry side.
+    if (this.game.bridgeWet120 === true && !(this.team === this.game.playerTeam && !this._underAI())) { this._wetRefused120 = (this._wetRefused120 || 0) + 1; return true; }
     const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (TILE * 0.5)));
     // the leg itself crosses water — two samples or more, not the corner of a water cell a diagonal clips (probe_water.js,
     // Arnhem seed 23: a halftrack's leg from the shoulder to the deck's first cell clipped one and it drove in)
@@ -47829,7 +47937,10 @@ class Unit {
     for (const m of this.flashMats || []) {
       if (!m || !m.color) continue;
       if (!m.userData._paint) m.userData._paint = m.color.clone();
-      m.color.copy(m.userData._paint).lerp(SCORCHED, k);
+      // (round 120, EFFECTS-3) `game.hulkChar120`: the paint is not darkened, it is REPLACED by the burnt steel
+      // (unitshade `uUsChar`, which reads the paint's lightness for its ghost), so the colour stays the paint's
+      if (this.game.hulkChar120 === true && m.userData._usChar) { m.color.copy(m.userData._paint); m.userData._usChar.value.set(this._scorchT, (this.id * 7.31) % 41); }
+      else m.color.copy(m.userData._paint).lerp(SCORCHED, k);
       if (m.specular) m.specular.setScalar(0.08 * (1 - this._scorchT));   // soot is matte
       if (m.userData._usLive) m.userData._usLive.value = 1 - (1 - HULK_FILL120) * this._scorchT;   // (round 120) and the unit shader's fill goes with the paint
     }
@@ -48140,7 +48251,13 @@ class Unit {
         if (!m || seen.has(m)) continue;
         seen.add(m);
         // (round 120) `game.wreckFx120`: burnt steel is rust and soot with its form still showing, not black
-        if (this.game.wreckFx120 === true && this._scorchT != null) { if (m.color) m.color.lerp(CHAR120, 0.6); }
+        // (round 120, EFFECTS-3) `game.hulkChar120`: the burnt steel replaces the paint (unitshade `uUsChar`), on every
+        // material of the hull; the colour goes back to the paint, which the char reads only as a ghost
+        if (this.game.hulkChar120 === true && m.userData && m.userData._usChar) {
+          if (m.color && m.userData._paint) m.color.copy(m.userData._paint);
+          m.userData._usChar.value.set(1, (this.id * 7.31) % 41);
+        }
+        else if (this.game.wreckFx120 === true && this._scorchT != null) { if (m.color) m.color.lerp(CHAR120, 0.6); }
         else if (m.color) m.color.multiplyScalar(0.42);
         if (m.emissive) m.emissive.setRGB(0, 0, 0);
         // (round 120, EFFECTS-2) THE WHITE WRECK: assets/unitshade.js adds a sky bounce and a dirt floor to every dark
@@ -68258,7 +68375,7 @@ class Game {
         vx: E.wx * 0.6, vy: SMK120.aloftV * (0.85 + Math.random() * 0.3) * (0.7 + 0.3 * burn), vz: E.wz * 0.6,
         size: SMK120.aloftS * (0.85 + Math.random() * 0.3), grow: SMK120.aloftG * (0.8 + Math.random() * 0.4),
         life: SMK120.aloftL * (0.85 + Math.random() * 0.3), rot: (Math.random() - 0.5) * 0.4, spin: (Math.random() - 0.5) * 0.03,
-        r: soot * 1.05, g: soot, b: soot * 0.92, a: Math.min(1, (0.8 + Math.random() * 0.15) * Math.min(1, dens * 1.4)),
+        r: soot * 1.05, g: soot, b: soot * 0.92, a: Math.min(1, ((SMK120.aloftA || 0.8) + Math.random() * 0.07) * Math.min(1, dens * 1.4)),
         drag: SMK120.aloftD, stretch: SMK120.aloftTall, dx: 0.85 + Math.random() * 0.3, dz: 0,
       });
     }
@@ -68387,6 +68504,8 @@ class Game {
     K.p.set(u.pos.x, gy + 0.02, u.pos.z); K.s.set(D, 1, D * (0.8 + Math.random() * 0.3));
     K.m.compose(K.p, K.q, K.s); K.scorch.setMatrixAt(i, K.m);
     K.scorch.count = Math.min(128, K.ns); K.scorch.instanceMatrix.needsUpdate = true;
+    // (round 120, EFFECTS-3) the char decal as dark as the field takes it: on sand a soot stain (the key's share, >= 0.5)
+    { const gk = (T && T.groundKey) || GROUND_KEY_REF; K.scorch.material.opacity = Math.min(1, Math.max(0.5, Math.pow(GROUND_KEY_REF / Math.max(GROUND_KEY_REF, gk), 0.9))); }
     // the litter: thrown from the hull, landing out to about two hull lengths
     const n = 15 + Math.floor(Math.random() * 7), roof = b.roof || b.H, big = 1.55;   // (EFFECTS-2) read at 46 u
     const paint = u.flashMats && u.flashMats[0] && u.flashMats[0].userData && u.flashMats[0].userData._paint;
@@ -73429,6 +73548,23 @@ class Game {
     // glowing tanks and a smoke screen standing in the dark like a lamp.
     const wl = w.light == null ? 1 : w.light;
     if (window.UnitShade && window.UnitShade.light) window.UnitShade.light.value = 0.12 + 0.88 * day * (0.7 + 0.3 * wl);
+    // (round 120, EFFECTS-3) `game.unitLight120`: what the unit shader's fill is lit by, once a frame: the sky and the
+    // flat ambient above, the LIT field below (its albedo x the sun on it + the sky on it). OFF = the round-61 lift.
+    if (window.UnitShade && window.UnitShade.amb) {
+      const A = window.UnitShade.amb, on = this.unitLight120 === true;
+      A.lt.value.x = on ? 1 : 0;
+      if (on && this.ambientLight && this.hemiLight && this.sun) {
+        const al = this.ambientLight.color, ai = this.ambientLight.intensity, hc = this.hemiLight.color, hi = this.hemiLight.intensity;
+        const so = this.sunOffset, sy = this.sun.intensity * Math.max(0, so.y / (so.length() || 1)), sc2 = this.sun.color;
+        const gc = this.terrain && this.terrain.groundColor;
+        const sr = al.r * ai + hc.r * hi, sg = al.g * ai + hc.g * hi, sb = al.b * ai + hc.b * hi;
+        A.sky.value.set(sr, sg, sb);
+        A.gnd.value.set(al.r * ai + (gc ? gc.r : 0.26) * (sc2.r * sy + sr), al.g * ai + (gc ? gc.g : 0.23) * (sc2.g * sy + sg),
+          al.b * ai + (gc ? gc.b : 0.18) * (sc2.b * sy + sb));
+        A.lt.value.y = UNIT_LIGHT120.k + (UNIT_LIGHT120.kNight - UNIT_LIGHT120.k) * night;
+        A.lt.value.z = UNIT_LIGHT120.floor;
+      }
+    }
     const vfx = this.effects && this.effects.vfx;
     if (vfx && vfx.setLight) {
       const k = 0.75 + 0.25 * wl;
@@ -74023,7 +74159,10 @@ class Game {
       const s = clamp(top * METERS_PER_UNIT / 10, 0.8, 2.4), c = 2;
       const fs = clamp(top * METERS_PER_UNIT / 6, 1.2, 3.2) * (n >= 4 ? 1.25 : 1);   // a crown fire's tongues (~10-17 m on a 16 m tree)
       const fx = wx + Math.cos(a) * r, fy = oy + top * (0.78 + 0.2 * vrandom()), fz = wz + Math.sin(a) * r;
-      if (V) V.fire(fx, fy, fz, c, fs); else E.fire(fx, fy, fz, c);
+      // (OBSTACLES-4, burnLook120) a crown the eye cannot see, nor the air over it (the block's `_treeLookVis120` answer): its
+      // lick would only shine through the house in the glow pass (no depth there)
+      const vk = this.burnLook120 === true && T.vis ? T.vis.get(k) : null, hid = !!vk && (vk.m & 12) === 0;
+      if (V) { if (!hid) V.fire(fx, fy, fz, c, fs); } else E.fire(fx, fy, fz, c);
       // (OBSTACLES-3, burnLook120) under the pall half the crown's small puffs go: the pall carries the wood's smoke
       const cut = this.burnLook120 === true && V && typeof V.pall === 'function' && vrandom() < TREE_LOOK120.smokeCut;
       if (sm && !cut) { if (V) V.smoke(wx, oy + top * 1.02, wz, n >= 6 ? 2 : 1, { scale: s }); else E.smoke(wx, oy + top + 0.4 * K_FX, wz, 1); }
@@ -74047,7 +74186,7 @@ class Game {
   _treeLookFx120(o, ph, k, lod, oy) {
     const T = this._tfx120, V = this.effects.vfx, TL = TREE_LOOK120, F = TREE_FX120, X = window.VFX;
     if (!T || !V || !X) return;
-    if (!T.glow || !(T.glowT <= this.time)) T.glow = new Map();   // a new battle (the clock went back): start clean
+    if (!T.glow || !(T.glowT <= this.time)) { T.glow = new Map(); T.vis = new Map(); }   // a new battle (the clock went back): start clean
     T.glowT = this.time;
     const key = k * 2 + (ph === 1 ? 0 : 1);
     if (T.glow.get(key) === this.time) return;
@@ -74067,10 +74206,28 @@ class Game {
     const size = tmax * TL.glow * (1 + TL.glowN * Math.min(9, c)) * (ph === 1 ? 1 : TL.ember);
     const cam = this.camera.position, ex = bx - cam.x, ey = by - cam.y, ez = bz - cam.z;
     if (ex * ex + ey * ey + ez * ez < (TL.nearK * size) * (TL.nearK * size)) return;
-    const la = lod >= F.farK ? 0.55 + 0.45 * lod : 0.5;
-    V.spawn(X.KIND.FIRE, { x: bx, y: by, z: bz, vy: 0.04 * tmax, size, grow: size * 0.05, life: TL.glowL * vrand(0.9, 1.1),
-      rot: vrandom() * 6.2832, spin: vrand(-0.1, 0.1), cell: X.CELL.GLOW, drag: 0,
-      r: ph === 1 ? 1.3 : 1.2, g: ph === 1 ? 1.05 : 0.5, b: ph === 1 ? 0.45 : 0.12, a: TL.glowA * la * (ph === 1 ? 1 : 0.8) });
+    // (OBSTACLES-4) WHAT THE EYE SEES OF THE CROWN. The glow pass (assets/postfx.js) draws this batch again with NO depth, so
+    // a card behind a house shone through its wall. A line from the eye to three heights up the crown (`_treeLookVis120`:
+    // the ground and the buildings), kept `occT` s while the eye stays put; the card covers only the part that shows (over a
+    // roof or a crest a smaller one, higher up), and none when nothing does. The flame mass reads the same answer.
+    let vm = 7;
+    if (TL.occ !== 0 && typeof this._treeLookVis120 === 'function') {
+      const VM = T.vis || (T.vis = new Map()), e = VM.get(k);
+      if (e && this.time >= e.t && this.time - e.t < TL.occT * (0.75 + 0.5 * ((k * 0.618034) % 1)) && Math.abs(e.x - cam.x) + Math.abs(e.y - cam.y) + Math.abs(e.z - cam.z) < TL.occMove) vm = e.m;
+      else { vm = this._treeLookVis120(bx, oy, bz, tmax); if (VM.size > 8192) VM.clear(); VM.set(k, { m: vm, t: this.time, x: cam.x, y: cam.y, z: cam.z }); }
+    }
+    const up = vm & 1 ? 0 : vm & 2 ? 1 : vm & 4 ? 2 : 3, day = this._daylight == null ? 1 : this._daylight;
+    const la = (lod >= F.farK ? 0.55 + 0.45 * lod : 0.5) * (TL.nightGlow + (1 - TL.nightGlow) * day);
+    if (up < 3 && (ph === 1 || up === 0)) {   // an ember glow at the foot only when the crown's foot shows
+      const cy = ph === 1 ? oy + tmax * TL.glowUp[up] : by, cs = size * TL.glowUpS[up] * (TL.nightSize + (1 - TL.nightSize) * day);
+      // (OBSTACLES-4) a glow LAYER over the canopy, not a ball: as tall as a level disc looks from the eye, and faded close
+      // to it (the tongues carry the picture there); one card a block, so a full wood's cards run together
+      const dh = Math.sqrt(ex * ex + ez * ez), el = Math.abs(ey) / Math.max(0.01, Math.sqrt(dh * dh + ey * ey)), GN = TL.glowNear;
+      const fl = clamp(TL.glowFlat * el, 0.35, 0.8), dk = Math.sqrt(dh * dh + ey * ey), nf = dk >= GN[1] ? 1 : dk <= GN[0] ? GN[2] : GN[2] + (1 - GN[2]) * (dk - GN[0]) / (GN[1] - GN[0]);
+      V.spawn(X.KIND.FIRE, { x: bx, y: cy, z: bz, vy: 0.04 * tmax, size: cs, grow: cs * 0.05, stretch: fl, life: TL.glowL * vrand(0.9, 1.1),
+        rot: vrand(-0.08, 0.08), spin: vrand(-0.03, 0.03), cell: X.CELL.GLOW, drag: 0,
+        r: ph === 1 ? 1.3 : 1.2, g: ph === 1 ? 1.05 : 0.5, b: ph === 1 ? 0.45 : 0.12, a: TL.glowA * la * nf * (ph === 1 ? 1 : 0.8) });
+    }
     // THE PALL over a flaming block (vfx.pall, EFFECTS-2): a few puffs a tick over the whole burning field
     if (ph === 1 && typeof V.pall === 'function' && vrandom() < Math.min(TL.pallMax, TL.pallN / Math.max(1, T.blocks))) {
       const night = 1 - (this._daylight == null ? 1 : this._daylight), ps = clamp(tmax * (0.9 + 0.08 * Math.min(9, c)), TL.pallSize[0], TL.pallSize[1]);
@@ -74084,21 +74241,56 @@ class Game {
   _treeLookEmit120(V, n, wx, oy, wz, top, s, sm) {
     const TL = TREE_LOOK120, X = window.VFX, T = this._tfx120;
     if (!X) return;
-    const cam = this.camera.position, m = TL.mass + Math.min(2, Math.floor(n / 4)), sz0 = top * TL.massS * (1 + 0.06 * Math.min(9, n));
+    // (OBSTACLES-4) TONGUES, NOT BALLS. Half the mass was the round GLOW cell and the rest a FLAME cell drawn as wide as it was
+    // tall, so close in and at night a crown read as clusters of orange spheres. Each is now the FLAME cell (hot at its root,
+    // narrowing to a torn tip) drawn `lick` times taller than wide, rising about its own height a second while it narrows,
+    // gone in `lickLife` s: a flicker of licks off the top of the crown, spaced so their sum stays orange, and fainter at night
+    // (`night`), where the eye's exposure made them merge. A crown the eye cannot see (the block's `_treeLookVis120` answer,
+    // kept by `_treeLookFx120`) puts up none: the glow pass has no depth.
+    const e = T && T.vis ? T.vis.get(Math.floor(worldToCell(wx) / TREE_FX120.blk) * 4096 + Math.floor(worldToCell(wz) / TREE_FX120.blk)) : null;
+    const day = this._daylight == null ? 1 : this._daylight, na = TL.night + (1 - TL.night) * day;
+    const cam = this.camera.position, m = e && !e.m ? 0 : TL.mass + (n >= TL.massN ? 1 : 0), w0 = top * TL.massS * (1 + 0.04 * Math.min(9, n));
     for (let i = 0; i < m; i++) {
-      const a = vrandom() * 6.2832, r = top * 0.3 * Math.sqrt(vrandom()), sz = sz0 * vrand(0.75, 1.35);
-      const x = wx + Math.cos(a) * r, y = oy + top * (0.5 + 0.42 * vrandom()), z = wz + Math.sin(a) * r;
+      const a = vrandom() * 6.2832, r = top * 0.3 * Math.sqrt(vrandom()), w = w0 * vrand(0.7, 1.25), st = vrand(TL.lick[0], TL.lick[1]), h = w * st;
+      const lf = vrand(TL.lickLife[0], TL.lickLife[1]);
+      const x = wx + Math.cos(a) * r, y = oy + top * (0.6 + 0.3 * vrandom()) + h * 0.35, z = wz + Math.sin(a) * r;
       const ex = x - cam.x, ey = y - cam.y, ez = z - cam.z;
-      if (ex * ex + ey * ey + ez * ez < (TL.nearK * sz) * (TL.nearK * sz)) continue;
-      V.spawn(X.KIND.FIRE, { x, y, z, vx: vrand(-0.12, 0.12) * top, vy: vrand(0.5, 1.3) * top * 0.12, vz: vrand(-0.12, 0.12) * top,
-        size: sz, grow: sz * 0.25, life: vrand(0.45, 0.85), rot: vrand(-0.3, 0.3), spin: vrand(-0.4, 0.4),
-        cell: vrandom() < 0.5 ? X.CELL.FLAME : X.CELL.GLOW, r: 1.35, g: 1.1, b: 0.5, a: vrand(0.55, 0.85), drag: 0.9 });
+      if (ex * ex + ey * ey + ez * ez < (TL.nearK * h) * (TL.nearK * h)) continue;
+      V.spawn(X.KIND.FIRE, { x, y, z, vx: vrand(-0.04, 0.04) * top, vy: h * vrand(TL.lickUp[0], TL.lickUp[1]), vz: vrand(-0.04, 0.04) * top,
+        size: w, grow: -w * TL.lickShrink / lf, stretch: st, life: lf, rot: vrand(-0.1, 0.1), spin: vrand(-0.25, 0.25),
+        cell: X.CELL.FLAME, r: 1.3, g: 0.95, b: 0.42, a: vrand(0.6, 0.9) * na, drag: 0.6 });
     }
     if (typeof V.pall !== 'function' && sm && vrandom() < Math.min(0.6, TL.pall / Math.max(1, T ? T.blocks : 1))) {   // no vfx.pall: dense puffs instead
       const ps = s * TL.pallS, px = wx + vrand(-0.3, 0.3) * top, py = oy + top * 1.08, pz = wz + vrand(-0.3, 0.3) * top;
       const ex = px - cam.x, ey = py - cam.y, ez = pz - cam.z, R = TL.nearK * ps * 3.4 * K_FX;   // the puff's own size (vfx: up to 3.4 x scale x K)
       if (ex * ex + ey * ey + ez * ez >= R * R) V.smoke(px, py, pz, 1, { scale: ps, dense: true, oily: vrandom() < TL.oily });
     }
+  }
+  /** (round 120, OBSTACLES-4, `burnLook120`) HOW MUCH OF A BURNING CROWN THE EYE CAN SEE, for the glow pass (assets/postfx.js
+   *  draws the additive batch into its own target with no depth). A bit for each of `TREE_LOOK120.occH` heights up the crown
+   *  (x `top` over `oy`, at x, z): 1 when a straight line from the camera reaches it over the ground and through no building
+   *  (`Structures.raySegment`, the test a round makes: a window lets it through). The ground in one pass for all three (the
+   *  lowest height the line clears every sample at); the buildings only when a sampled cell on the way holds one.
+   *  Cosmetic: reads only. */
+  _treeLookVis120(x, oy, z, top) {
+    const TL = TREE_LOOK120, H = TL.occH, c = this.camera.position, Tr = this.terrain;
+    const S = this.structures && this.structures.any && typeof this.structures.raySegment === 'function' ? this.structures : null;
+    const dx = x - c.x, dz = z - c.z, L = Math.sqrt(dx * dx + dz * dz), n = Math.min(TL.occN, Math.max(2, Math.ceil(L / TL.occStep)));
+    let yMin = -1e9, bld = false;
+    const y0 = oy + top * H[0] - c.y;   // the lowest line's rise: a building cell counts only where that line passes low over it
+    for (let i = 1; i < n; i++) {
+      const t = i / n, px = c.x + dx * t, pz = c.z + dz * t, gy = Tr ? Tr.heightAt(px, pz) : 0;
+      if (Tr) { const need = c.y + (gy - c.y) / t; if (need > yMin) yMin = need; }
+      if (S && !bld && c.y + y0 * t < gy + TL.occBldH && S.has(worldToCell(px), worldToCell(pz))) bld = true;
+    }
+    let m = 0;
+    for (let j = 0; j < H.length; j++) {
+      const y = oy + top * H[j];
+      if (y < yMin) continue;
+      if (bld && S.raySegment(c.x, c.y, c.z, x, y, z)) continue;
+      m |= 1 << j;
+    }
+    return m;
   }
   /** …and a burning tree's ground fire (`f.tree120`): the litter burning at its foot, drawn here instead of by
    *  `_fireFx` — low flames only (the wood's smoke is the trees' own), one fire a block, at the far rate over the LOD. */
@@ -74108,6 +74300,10 @@ class Game {
     const lod = this._treeFxLod120(f.x, f.z);
     if (lod < F.farK) { f.emitT = 1; return; }
     f.emitT = F.gnd * Math.max(1, n / F.per) / lod;
+    // (OBSTACLES-4, burnLook120) the foot of a crown the eye cannot see: its glow would only shine through the house (the
+    // glow pass has no depth)
+    const vk = this.burnLook120 === true && T && T.vis ? T.vis.get(Math.floor(worldToCell(f.x) / F.blk) * 4096 + Math.floor(worldToCell(f.z) / F.blk)) : null;
+    if (vk && (vk.m & 1) === 0) return;
     this.effects.fire(f.x + vrand(-f.r * 0.3, f.r * 0.3), f.y + 0.2 * K_FX, f.z + vrand(-f.r * 0.3, f.r * 0.3), 2, TREE_GND_TINT120);
   }
   _updateFires(dt) {
@@ -77579,16 +77775,23 @@ cosmeticClass(Game, ['_treeFallFx', '_treeLandFx']);
 cosmeticClass(Obstacles, ['_ashFx120']); cosmeticClass(Obstacles, ['_char120']);
 cosmeticClass(Obstacles, ['_s120Land']);   // (round 120, FOLIAGE-4) the shrubs swapped in when their pack lands
 cosmeticClass(Game, ['_treeLookFx120', '_treeLookEmit120']);   // (round 120, OBSTACLES-3, `burnLook120`) the burning crown's glow, flame mass and pall
+cosmeticClass(Game, ['_treeLookVis120']);   // (round 120, OBSTACLES-4, `burnLook120`) the eye's line to a burning crown (reads only)
 cosmeticClass(Game, ['_treeFireFx120', '_treeGroundFx120']);   // (round 120, `treeBurn120`) the burning wood's picture, thinned   // (round 120, `treeBurn120`) the charred stump and the ash: the picture only   // (round 118) a felled tree's leaves and dust
 // (round 120) EFFECTS: a burning wreck's column (`smokeCol120`), the fire on its hull and the burnt-out hulk
 // (`wreckFx120`), what a brew-up throws and the char under it (`debris120`). Pictures only, on the cosmetic stream;
 // OFF = round 119 exactly. Read each step by `_updateSmokeInstanced`; `wreckFx120` also by `_updateCorpse`/`_becomeHulk`.
 cosmeticClass(Game, ['_smokeColumn120', '_wreckFx120', '_fxKit120', '_wreckLitter120', '_debris120Tick']);
-Game.prototype.smokeCol120 = false;
+Game.prototype.smokeCol120 = true;   // ON (main, 24 Nov 08:56 UTC, from .claude/wip120/effects/sheet10_column.jpg: a tall, leaning column; +0.27/+0.09/-0.74 ms at 1/5/15 wrecks). false = the round-119 column.
 Game.prototype.wreckFx120 = false;
 Game.prototype.debris120 = false;
 // (round 120, EFFECTS-2) `flameCol120`: every flame graded as light (assets/vfx.js `fireTone`): orange-yellow by day,
 // covering the field behind it, instead of pink with blue-black edges; read once a frame by `VFX.update`. OFF = as before.
+// (round 120, EFFECTS-3) `unitLight120`: the unit shader's fill is the paint x the scene's light (sky above, the lit
+// field below; assets/unitshade.js `U.amb`, written by `_updateDaylight`), not a sky-blue lift in proportion to how dark
+// a fragment is: dark-painted units no longer draw pale blue-grey at dusk. `hulkChar120`: a burnt-out hull's steel
+// (charcoal, rust, ash) REPLACES its paint (`uUsChar`: a uniform in the programs units already draw with). OFF = as before.
+Game.prototype.unitLight120 = true;   // ON (main, 24 Nov 08:56 UTC, from .claude/wip120/effects/sheet8_unitlight_*.jpg: no pale ghosts at dusk; cost in the noise; Det identical).
+Game.prototype.hulkChar120 = true;   // ON (main, 24 Nov 08:56 UTC, from .claude/wip120/effects/sheet9_hulk_char.jpg: charcoal and rust with form; no new programs).
 Game.prototype.flameCol120 = true;   // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/effects/sheet4_1_flames.jpg and sheet5_4_dusk_other_light.jpg: orange where OFF is pink; cost within the noise at 1/5/15 wrecks; Det identical). false = the old grade on flames.
 // (round 118) THE EFFECTS SWITCHES — each OFF is the round-114 picture exactly. Read by
 // `VFX.burst`/`fire`/`strike` (assets/vfx.js), `Projectiles` (the ground strike) and `_smokeBank`.
@@ -77606,6 +77809,7 @@ Game.prototype.treeFall118 = true;    // ON: measured no worse (handoff, round 1
 // ON (main, 24 Nov 00:00 UTC; the owner asked for it): seeded A/Bs, 30 seeds on Village, Hedgerow Hell, Ardennes (12) and
 // El Alamein, every outcome inside the floor; rounds into trees 629 -> 162 (Village), 667 -> 160 (Ardennes), against the
 // drawing's own 5-7% (.claude/wip120/obstacles/NOTES.md); ~2 shaped tests a frame. false is the whole-cell test.
+Game.prototype.bushHit120 = false;   // (round 120, OBSTACLES-4) obsHit120's bush/scrub clump as today's shrubs are drawn (BUSH_DRAWN120: bush 0.73, scrub 0.96 of the top, was the old mound's bounding box 0.94 / 1.18). OFF until the seeded A/B says no worse
 Game.prototype.obsHit120 = true;
 // (round 120) a burning tree flames for minutes, smoulders, then collapses into a charred stump and ash, not a log
 // (`TREE_BURN120`, `_burnTree120`, `Obstacles._ash120`). ON (main, 24 Nov 01:00 UTC; the owner asked for it): A/B 6 seeds
@@ -77613,7 +77817,7 @@ Game.prototype.obsHit120 = true;
 // burn (logs drawn singly), the picture thinned (burnFx120) and proven cosmetic. false is the 3-7 s burn.
 Game.prototype.treeBurn120 = true;
 Game.prototype.burnFx120 = true;   // (round 120) under treeBurn120: the burning wood's picture thinned (TREE_FX120); false = every tree drawn
-Game.prototype.burnLook120 = false;   // (round 120, OBSTACLES-3) under treeBurn120 + burnFx120: the burning crown's glow cards, flame mass and pall (TREE_LOOK120), the fire light on a burning wood. OFF until main has seen the sheets
+Game.prototype.burnLook120 = true;    // ON (main, 24 Nov 08:56 UTC, from .claude/wip120/obstacles/sheet_o4_1_shapes.jpg: tongues, a flat card, a wood ablaze in first person; fpv +0.1..0.3, play ~0; Det one fingerprint). (round 120, OBSTACLES-3) under treeBurn120 + burnFx120: the burning crown's glow cards, flame mass and pall (TREE_LOOK120), the fire light on a burning wood. OFF until main has seen the sheets
 Game.prototype.treeTough120 = true;   // (round 120) trees take bullets as chips and blast by its charge (TREE_FELL_KG120): the owner asked, 23 Nov. false = round 118's trees
 // (round 118) CARRIED STATE: what a battle builds once per PAGE must not move the next battle's sim stream. ON: the
 // felled tree's log kit and still crown are built on the cosmetic stream; `Obstacles.clear` drops the last map's falls.
@@ -77652,8 +77856,9 @@ Game.prototype.fpvField118 = true;   // ON: Winter Crossroads ferns 38% -> 9% of
 Game.prototype.fpvBark118 = true;    // ON: the posts' plates no longer smears (r118vis s4 V4_ag_stand_all); playing camera = null
 Game.prototype.fpvGround118 = false;
 Game.prototype.haze120 = true;       // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/look/sheets/s9-s10; quiet re-time Village play +0.28, fpv +0.135, nulls -0.08/+0.03). (round 120, LOOK / LOOK-2) aerial perspective (assets/look120.js): a far haze past a CLEAR NEAR ZONE (rifle range in first person; the RTS camera's distance to its target + 45 u), warm and luminous in the theatre's dust (summer gold, desert/steppe ochre, winter blue-white; greyer under a deck and in rain), brighter toward the sun, units at 0.4 of it, the dome's horizon in the same colours. Drawing only: sight and fog of war read the same density. OFF is the old FogExp2 exactly; OFF until main has seen the sheets (.claude/wip120/look)
-Game.prototype.grade120 = false;     // (round 120, LOOK / LOOK-2) a filmic split folded into the box-art grade, amber highlights and slate shadows (assets/look120.js: a copy of the installed curve with a stronger split line, same ALU as OFF). OFF is the old curve exactly; OFF until main has seen the sheets
+Game.prototype.grade120 = true;      // ON (main, 24 Nov 08:56 UTC, v3 from .claude/wip120/look/sheets/s10-s11: ~1 op a fragment, every view within the nulls). (round 120, LOOK / LOOK-2 / LOOK-3) a filmic split folded into the box-art grade, amber highlights and slate shadows (assets/look120.js: a copy of the installed curve with a stronger split; LOOK-3's v3 rewrites the copy exactly to ~1 op a fragment over OFF: Village quiet hold play -0.04 / fpv +0.04 ms, nulls -0.14/-0.09, where LOOK-2's copy read +0.27/+0.25). OFF is the old curve exactly; OFF until main judges it
 Game.prototype.bridgeLod120 = true;    // ON (main, 24 Nov 04:09 UTC, from .claude/wip120/bridges/sheet14_lod_arnhem_remagen.jpg: the same picture; Arnhem play +0.22 -> -0.11, deck +0.47 -> +0.04). (round 120, BRIDGES-3): the truss by distance — far sections the kit's lo pieces in a Lambert, the road's surfaces Lambert near too (assets/bridges120.js `_build`, `_materialLo`; .claude/wip120/bridges/NOTES.md ## BRIDGES-3)
+Game.prototype.bridgeWet120 = false;   // (round 120, BRIDGES-4) OFF until main has seen the A/B: the computer's vehicles do not wade on a map with a bridge — the search keeps out of the river and a step into it is refused (`_setPathTo`, `Pathfinder.find`, `Unit._wetStep120`; .claude/wip120/bridges/NOTES.md ## BRIDGES-4)
 Game.prototype.bridgeBank120 = false;  // (round 120, BRIDGES-3) OFF until main has seen the sheets and the A/B: grass on the slopes `_embank` cut beside a bridge's ramp, setts only on the lane (assets/bridges120.js `_bankGrass`; a surface change on those cells only)
 Game.prototype.bridges120 = true;    // ON (main, 23 Nov 23:40, from .claude/wip120/bridges/sheet09-13_*_v2.jpg; the owner: 'turn bridges and water on when ready'): Arnhem's river bogging fixed (no sideways step off a deck, AI goals moved off the water, the dam's spurs gone), A/B 6 seeds: Pegasus inside the floor, Arnhem bogged/inWater better than OFF, the bridge a chokepoint where a 138 m dam was (crossings -11, German lost +19); lint 100%; maps without bridges identical; cost Arnhem play +0.33 ms, the other maps <= 0.    // (round 120) BRIDGES (assets/bridges120.js): decks with weight classes and parapets, the kit drawn, the named maps' bridges, the editor tool. OFF is the old game exactly; OFF until main has seen the sheets (.claude/wip120/bridges)
 Game.prototype.water120 = false;      // (round 120) the water, drawn (assets/water120.js): the bed in the shallows, depth, Fresnel, rivers that flow, the sky and the banks reflected, foam, wet banks, rain rings. OFF is today's program exactly; ON until main has seen the sheets (.claude/wip120/water)

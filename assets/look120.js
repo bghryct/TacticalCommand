@@ -37,8 +37,12 @@
  *   game.grade120  A FILMIC SPLIT folded INTO the box-art grade (LOOK-2): the
  *                  Cineon slot holds a copy of the installed CustomToneMapping
  *                  whose gentle split line is replaced by a stronger one -
- *                  amber into the light, slate into the shade - so ON costs the
- *                  same few ALU as OFF (no second function, no pass).
+ *                  amber into the light, slate into the shade (no second
+ *                  function, no pass). LOOK-3: the copy is then rewritten
+ *                  EXACTLY (same picture) to cost about one op a fragment more
+ *                  than OFF; LOOK-2's copy cost ~8 and measured +0.25 ms in first
+ *                  person, where every material tones its own fragments and so
+ *                  pays for the foliage overdraw (section 3).
  *
  * HOW THE SWITCHES REACH EVERY PROGRAM (and why OFF is the old drawing exactly)
  *   three r128 keys a program on its parameters; editing a ShaderChunk at run
@@ -65,7 +69,7 @@
 (function (root) {
   'use strict';
   var THREE = root.THREE;
-  var L = root.Look120 = { ok: false, gradeOk: false, reason: '', gradeReason: '', version: 2 };
+  var L = root.Look120 = { ok: false, gradeOk: false, reason: '', gradeReason: '', version: 3 };
 
   // Tunables (probe knobs; the defaults are the ones the LOOK-2 sheets were taken at).
   L.cfg = {
@@ -99,7 +103,8 @@
   // grade120: the split folded into the installed grade (see installGrade). l is linear luma (before the encode).
   // The split tapers to nothing at white ((1 - l)) and stops growing at l 0.38: s7's straight split turned a snowfield
   // beige, and s9's (hi 0.30) still creamed it.
-  L.gradeCfg = { pivot: 0.18, lo: -0.16, hi: 0.20, split: [0.70, 0.15, -0.70] };
+  // `fold` 3 (LOOK-3): the cheaper exact rewrite; 2: LOOK-2's text (the A/B arm). Read when the copy is made.
+  L.gradeCfg = { pivot: 0.18, lo: -0.16, hi: 0.20, split: [0.70, 0.15, -0.70], fold: 3 };
 
   // ---------------------------------------------------------------- 1. the shared haze uniform
   // ONE Float32Array; FIVE vec4 uniforms, each a VIEW into it, put into every built-in ShaderLib's uniforms. three's
@@ -209,7 +214,8 @@
   // ---------------------------------------------------------------- 3. the grade, folded
   // At load the Cineon slot gets a FALLBACK (the installed grade, then the split: a second function), between markers.
   // The first time grade120 is ON (and whenever the installed grade's text changes), `syncGrade` replaces it with a COPY
-  // of the installed CustomToneMapping whose gentle split line is the stronger one: the same ALU count as OFF.
+  // of the installed CustomToneMapping carrying the stronger split (`foldText`: LOOK-2's copy, which swapped the split
+  // line alone, was NOT the same ALU as OFF but ~8 ops a fragment more; LOOK-3's v3 below is ~1).
   var G_HEAD = 'vec3 CustomToneMapping( vec3 color ) {', G_M0 = '// <grade120>', G_M1 = '// </grade120>';
   var SPLIT_RE = /\n([ \t]*)color \+= [0-9.]+ \* \(l - 0\.5\) \* vec3\([^)]*\);/;
   function v3(a) { return 'vec3( ' + a.map(function (x) { return (+x).toFixed(4); }).join(', ') + ' )'; }
@@ -236,6 +242,60 @@
       '}', G_M1, ''].join('\n');
     return true;
   }
+  // (round 120, LOOK-3) A CHEAPER FOLD, THE SAME PICTURE. In three r128 every material tones its own output, so the curve
+  // runs once a FRAGMENT and first person pays for the foliage overdraw: LOOK-2's copy (the split as a second multiply
+  // after the warm bias, ~8 scalar ops more than OFF) measured +0.25 ms there. v3 rewrites the copy EXACTLY (OFF's own
+  // curve is never touched), to about one op more than OFF:
+  //   (a) the warm bias and the split are ONE multiply:   color * W * (1 + t K) == color * (W + t (K W));
+  //   (b) the contrast's gain goes into the shoulder:     k y / (1 + s k y) == y / (1/k + s y),   y = c sqrt(c);
+  //   (c) a zero lift, x (1 - 0) + 0, is dropped;
+  //   (d) the exposure's constant goes into ACES's input matrix (a constant matrix times a constant).
+  // Each rewrite is anchored on grade.js's generated text and skipped (still exact) if its anchor moved; only the split
+  // line is required. A post pass was the other road and is dearer here: see the round-120 look-3 handoff section.
+  var WARM_RE = /\n([ \t]*)color \*= vec3\(1\.0 \+ ([0-9.]+) \* ([0-9.]+), 1\.0 \+ ([0-9.]+) \* ([0-9.]+), 1\.0 - ([0-9.]+) \* ([0-9.]+)\);/;
+  var CON_RE = /\n([ \t]*)color = color \* sqrt\(color\) \* ([0-9.]+);\n([ \t]*)color = color \/ \(1\.0 \+ color \* ([0-9.]+)\);/;
+  var LIFT0_RE = /\n[ \t]*color = color \* \(1\.0 - 0\.0+\) \+ 0\.0+;/;
+  var EXPO_RE = /\n([ \t]*)color \*= toneMappingExposure \* ([0-9.]+);/;
+  var ACESIN_RE = /const mat3 ACESIn = mat3\(([^)]*)\);/;
+  function v3n(a) { return 'vec3( ' + a.map(function (x) { return (+x).toFixed(6); }).join(', ') + ' )'; }
+  /** The installed CustomToneMapping `body` as the function `name` with the stronger split: `ver` 2 is LOOK-2's text,
+   *  anything else the v3 rewrite. '' when the body has no split line to fold into. What it did: L._foldOps. */
+  function foldText(body, ver, name) {
+    var g = L.gradeCfg, out = body.replace(G_HEAD, 'vec3 ' + (name || 'OptimizedCineonToneMapping') + '( vec3 color ) {');
+    if (!SPLIT_RE.test(out)) return '';
+    var wm = ver === 2 ? null : WARM_RE.exec(out), ops = [];
+    if (!wm) {
+      L._foldOps = ver === 2 ? 'v2' : 'v2 (the warm-bias line moved)';
+      return out.replace(SPLIT_RE, function (m, ind) { return splitLine(ind); });
+    }
+    // (a)
+    var W = [1 + wm[2] * wm[3], 1 + wm[4] * wm[5], 1 - wm[6] * wm[7]], KW = [g.split[0] * W[0], g.split[1] * W[1], g.split[2] * W[2]];
+    out = out.replace(WARM_RE, '').replace(SPLIT_RE, function (m, ind) {
+      return '\n' + ind + 'color *= ' + v3n(W) + ' + clamp( l - ' + (+g.pivot).toFixed(4) + ', ' + (+g.lo).toFixed(4) + ', ' + (+g.hi).toFixed(4) +
+        ' ) * max( 1.0 - l, 0.0 ) * ' + v3n(KW) + ';   // (round 120, grade120 v3) warm bias x split, one multiply: amber into the light, slate into the shade, white left white';
+    });
+    ops.push('warm+split');
+    // (b)
+    out = out.replace(CON_RE, function (m, i1, k, i2, s) {
+      ops.push('gain>shoulder');
+      return '\n' + i1 + 'color = color * sqrt(color);\n' + i2 + 'color = color / (' + (1 / +k).toFixed(6) + ' + color * ' + s + ');   // (grade120 v3) k y / (1 + s k y) == y / (1/k + s y)';
+    });
+    // (c)
+    if (LIFT0_RE.test(out)) { out = out.replace(LIFT0_RE, ''); ops.push('lift0'); }
+    // (d)
+    var em = EXPO_RE.exec(out), am = ACESIN_RE.exec(out);
+    if (em && am) {
+      var e = +em[2], ns = am[1].split(',').map(function (x) { return +x; });
+      if (ns.length === 9 && ns.every(isFinite) && isFinite(e) && e > 0) {
+        out = out.replace(EXPO_RE, '\n' + em[1] + 'color *= toneMappingExposure;   // (grade120 v3) its x' + em[2] + ' is in ACESIn')
+          .replace(ACESIN_RE, 'const mat3 ACESIn = mat3(' + ns.map(function (x) { return (x * e).toFixed(7); }).join(', ') + ');');
+        ops.push('expo>ACESIn');
+      }
+    }
+    L._foldOps = 'v3: ' + ops.join(', ');
+    return out;
+  }
+  L.foldText = foldText;
   /** Copy the installed grade into the Cineon slot with the stronger split. Returns true when the chunk was rewritten. */
   function syncGrade() {
     var C = THREE.ShaderChunk, t = C.tonemapping_pars_fragment;
@@ -244,15 +304,14 @@
     if (i0 < 0 || i1 < i0) { L.gradeReason = 'the grade120 markers are gone'; L._gradeSeen = t; return false; }
     var a = t.indexOf(G_HEAD), b = a < 0 ? -1 : t.indexOf('\n}', a);
     var body = (a >= 0 && b > a && a < i0) ? t.slice(a, b + 2) : '';
-    var fold = '';
-    if (body && body.indexOf('return color; }') < 0 && SPLIT_RE.test(body)) {
-      fold = body.replace(G_HEAD, 'vec3 OptimizedCineonToneMapping( vec3 color ) {').replace(SPLIT_RE, function (m, ind) { return splitLine(ind); });
-      L.gradeFolded = true; L.gradeReason = '';
+    var fold = (body && body.indexOf('return color; }') < 0) ? foldText(body, L.gradeCfg.fold, 'OptimizedCineonToneMapping') : '';
+    if (fold) {
+      L.gradeFolded = true; L.gradeReason = ''; L.gradeOps = L._foldOps;
     } else {
       L.gradeFolded = false; L.gradeReason = 'the installed grade has no split line to fold into: the fallback (a second function) stays';
     }
     if (fold) {
-      C.tonemapping_pars_fragment = t.slice(0, i0) + G_M0 + '\n// (round 120, game.grade120) the installed box-art grade with a stronger split, folded (same ALU as OFF)\n' +
+      C.tonemapping_pars_fragment = t.slice(0, i0) + G_M0 + '\n// (round 120, game.grade120) the installed box-art grade with a stronger split, folded (' + L.gradeOps + ')\n' +
         fold + '\n' + t.slice(i1);
     }
     L._gradeSeen = C.tonemapping_pars_fragment;
@@ -491,7 +550,7 @@
   L.state = function (g) {
     g = g || root.game;
     var f = g && g.scene && g.scene.fog;
-    return { ok: L.ok, reason: L.reason, gradeOk: L.gradeOk, gradeReason: L.gradeReason, gradeFolded: !!L.gradeFolded, libs: L.libs,
+    return { ok: L.ok, reason: L.reason, gradeOk: L.gradeOk, gradeReason: L.gradeReason, gradeFolded: !!L.gradeFolded, gradeOps: L.gradeOps || '', libs: L.libs,
       unitsOk: !!L.unitsOk, domeOk: !!L.domeOk, haze: !!(f && f.isHaze120), toneMapping: g && g.renderer ? g.renderer.toneMapping : null,
       theatre: L._th ? { kind: L._th.kind, snow: L._th.snow, sand: L._th.sand, dry: L._th.dry, era: L._th.era } : null, Q: L._Q,
       hz: Array.prototype.slice.call(HZ).map(function (x) { return +x.toFixed(5); }) };

@@ -108,6 +108,25 @@
    *  (see `_syncUnitSun`), read by every patched material. */
   U.sun = { value: new THREE.Vector3(0.35, 0.82, 0.45) };
 
+  /** (round 120, EFFECTS-3, `game.unitLight120`) THE FILL IS THE SCENE'S LIGHT ON THE PAINT.
+   *
+   *  The bounce below was a LIFT: a fixed sky-blue / earth-brown added in proportion to how dark a fragment is,
+   *  whatever its paint, scaled by `U.light` — which follows `day`, and `day` saturates at six degrees of sun. At
+   *  dusk the camera opens (exposure ~0.84 against noon's stopped-down ~0.45), the field goes dim under a grazing
+   *  sun, and the lift stayed at its noon size: every dark-painted unit drew pale blue-grey (sheet6b/sheet7).
+   *  ON, the fill is the paint's OWN colour (its luminance floored at `lt.z` so a near-black tunic still has a
+   *  hue to show, the hue kept) times the light that actually reaches the face: the sky and flat ambient above
+   *  (`sky`), the LIT ground below (`gnd` = the field's albedo x the sun on it + the sky on it), times a gain
+   *  `lt.y`. By day the sunlit field throws a strong warm bounce (form, as before); at dusk that bounce
+   *  collapses with the sun and the fill goes with it; at night it is the moonlit sky's, blue, on the paint.
+   *  Written once a frame by `Game._updateDaylight`; `lt.x` is the switch (0 = the round-61 lift), so turning it
+   *  never recompiles a program. */
+  U.amb = {
+    sky: { value: new THREE.Vector3(0.14, 0.135, 0.13) },
+    gnd: { value: new THREE.Vector3(0.30, 0.26, 0.20) },
+    lt: { value: new THREE.Vector4(0, 1.5, 0.25, 0) },
+  };
+
   /** The same cheap hash noise the canopy uses — no `sin`, and one octave is
    *  enough when the thing being broken up is a painted surface rather than a
    *  silhouette. */
@@ -177,6 +196,26 @@
       L.push('  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(' + g[0] + ', ' + g[1] + ', ' + g[2] +
              '), clamp(usG, 0.0, 0.9));');
     }
+    // ---- the char (round 120, EFFECTS-3, `game.hulkChar120`) ----------------
+    // A burnt-out hull is not its paint darkened: a multiplier on an authored model's dark paint map stays black
+    // however the colour is lifted (EFFECTS-2). The steel's own surface REPLACES the albedo, as `charMaterial` does
+    // for the map's wreck props: charcoal and soot, rust where the paint burned off the sides, pale ash settled on
+    // the decks, the paint's pattern left only as a ghost (its lightness to a quarter power). `uUsChar` is per
+    // material (x 0 paint .. 1 char, y a per-hull offset into the noise so two hulks of one model differ), so this
+    // is the SAME program a live unit draws with: no compile when a tank brews up.
+    L.push('  if (uUsChar.x > 0.0) {');
+    L.push('    float chL = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));');
+    L.push('    float chG = pow(clamp(chL / 0.08, 0.25, 4.0), 0.25);');
+    L.push('    vec3 chP = vUsObj * 2.3 + vec3(uUsChar.y, 0.37 * uUsChar.y, 0.0);');
+    L.push('    float chA = usNoise(chP), chB = usNoise(chP * 3.1 + 7.7);');
+    L.push('    float chUp = clamp(vUsN, 0.0, 1.0);');
+    L.push('    float chR = smoothstep(0.36, 0.56, chA + 0.2 * (chB - 0.5)) * (1.0 - 0.55 * chUp);');
+    L.push('    float chS = smoothstep(0.42, 0.62, chB) * chUp;');
+    L.push('    vec3 chC = mix(vec3(0.062, 0.054, 0.048), vec3(0.25, 0.14, 0.08), chR * 0.85);');
+    L.push('    chC = mix(chC, vec3(0.25, 0.24, 0.225), chS * 0.7);');
+    L.push('    chC *= chG * (0.8 + 0.4 * chB);');
+    L.push('    diffuseColor.rgb = mix(diffuseColor.rgb, chC, clamp(uUsChar.x, 0.0, 1.0));');
+    L.push('  }');
     L.push('}');
     return L.join('\n');
   }
@@ -196,7 +235,11 @@
       // already there and shifts it toward earth, which is why a muddy olive
       // hull still reads as olive.
       '  float uLum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));',
+      '  float uSky = clamp(vUsN * 0.5 + 0.5, 0.0, 1.0);',
+      // (round 120, EFFECTS-3) the light on this face from the scene: sky above, the lit field below (U.amb)
+      '  vec3 uAmbN = mix(uUsAmbG, uUsAmbS, uSky);',
       '  vec3 uMud = vec3(' + d[0] + ', ' + d[1] + ', ' + d[2] + ') * (0.45 * uUsLight * uUsLive + 0.85 * uLum);',
+      '  uMud = mix(uMud, vec3(' + d[0] + ', ' + d[1] + ', ' + d[2] + ') * (uAmbN * (0.6 * uUsLt.y * uUsLive) + 0.85 * uLum), uUsLt.x);',
       '  gl_FragColor.rgb = mix(gl_FragColor.rgb, uMud, clamp(uDust, 0.0, 0.85));',
       // ---- the edge -------------------------------------------------------
       // Fresnel against the view, off THIS FILE'S OWN VARYINGS.
@@ -226,7 +269,6 @@
       //     shadow is a lamp, and there are no lamps on a tank at midday.
       // ---- the bounce -----------------------------------------------------
       '  float uDark = 1.0 - smoothstep(0.0, 0.26, uLum);',
-      '  float uSky = clamp(vUsN * 0.5 + 0.5, 0.0, 1.0);',
       '  vec3 uBnc = mix(vec3(' + bg[0] + ', ' + bg[1] + ', ' + bg[2] + '), vec3(' +
         bs[0] + ', ' + bs[1] + ', ' + bs[2] + '), uSky);',
       // …BUT NOT ON BLOOD (round 106). The bounce lifts what is dark, and a
@@ -241,7 +283,12 @@
       // is, whatever its albedo, and so is the dirt's floor: a hulk charred to near-black (`Unit._scorch`,
       // `_becomeHulk`) took the whole of both and drew pale blue-grey, a white wreck on every authored model.
       // `uUsLive` (per material, 1 = paint) goes to 0 as the paint burns off.
-      '  gl_FragColor.rgb += uBnc * uDark * ' + (+o.bounce).toFixed(3) + ' * uUsLight * uUsLive * (1.0 - 0.9 * uBlood);',
+      '  gl_FragColor.rgb += uBnc * uDark * ' + (+o.bounce).toFixed(3) + ' * (1.0 - uUsLt.x) * uUsLight * uUsLive * (1.0 - 0.9 * uBlood);',
+      // (round 120, EFFECTS-3, `game.unitLight120`) ON: the paint's own colour, its luminance floored at uUsLt.z
+      // (hue kept), times the light reaching this face (uAmbN) times the gain; the material's own bounce weight kept
+      '  float uAL = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));',
+      '  vec3 uAF = diffuseColor.rgb * (max(uAL, uUsLt.z) / max(uAL, 1e-4));',
+      '  gl_FragColor.rgb += uAF * uAmbN * (uUsLt.x * uUsLt.y * ' + (+o.bounce / 0.30).toFixed(3) + ') * uDark * uUsLive * (1.0 - 0.9 * uBlood);',
       '  vec3 uN = normalize(vUsVN), uV = normalize(vUsVP);',
       '  vec3 uH = normalize(uUsSun + uV);',
       '  float uSpec = pow(max(dot(uN, uH), 0.0), ' + (+o.gloss).toFixed(1) + ');',
@@ -276,6 +323,10 @@
     // the paint's, not the char's. Its own object, so a clone (userData is copied) is given a fresh one here.
     var live = { value: 1 };
     m.userData._usLive = live;
+    // (round 120, EFFECTS-3) THIS material's char (x 0..1, y the hull's own place in the noise): `Unit._scorch`,
+    // `_becomeHulk` under `game.hulkChar120`. Its own object, as `live` is, so a clone gets a fresh one.
+    var char = { value: new THREE.Vector2(0, 0) };
+    m.userData._usChar = char;
     m.onBeforeCompile = function (sh, renderer) {
       if (prevCompile) prevCompile.call(this, sh, renderer);
       var ok = true;
@@ -302,8 +353,12 @@
       sh.uniforms.uUsSun = U.sun;
       sh.uniforms.uUsLight = U.light;
       sh.uniforms.uUsLive = live;
+      sh.uniforms.uUsChar = char;
+      sh.uniforms.uUsAmbS = U.amb.sky;
+      sh.uniforms.uUsAmbG = U.amb.gnd;
+      sh.uniforms.uUsLt = U.amb.lt;
       sh.fragmentShader = rep(sh.fragmentShader, '#include <common>',
-        '#include <common>\nvarying float vUsH;\nvarying float vUsN;\nvarying vec3 vUsVN;\nvarying vec3 vUsVP;\nvarying vec3 vUsObj;\nuniform vec3 uUsSun;\nuniform float uUsLight;\nuniform float uUsLive;\n' + glslNoise());
+        '#include <common>\nvarying float vUsH;\nvarying float vUsN;\nvarying vec3 vUsVN;\nvarying vec3 vUsVP;\nvarying vec3 vUsObj;\nuniform vec3 uUsSun;\nuniform float uUsLight;\nuniform float uUsLive;\nuniform vec2 uUsChar;\nuniform vec3 uUsAmbS;\nuniform vec3 uUsAmbG;\nuniform vec4 uUsLt;\n' + glslNoise());
       // THE PAINT GOES ON THE ALBEDO, not on the lit result. `<color_fragment>`
       // is where `diffuseColor` has just taken the material colour and any
       // vertex colours, and is the last point before the light is applied — so

@@ -254,7 +254,9 @@
       // cuts one column's run short (Remagen) — each side's widest run
       var side = function (sg) {
         var q = null;
-        for (var dd = 1; dd <= 12; dd++) { var r = run(sg < 0 ? lo - dd : hi + dd); if (r) q = q ? [Math.min(q[0], r[0]), Math.max(q[1], r[1])] : r; }
+        // (BRIDGES-4) `s.near`: a site may look fewer columns out (no site sets it yet: 12 for all). Vierzon's Cher meanders,
+        // so the union over 12 columns is a rectangle far wider than the river there (the arch's 'pool'); band4.js measures it
+        for (var dd = 1; dd <= (s.near || 12); dd++) { var r = run(sg < 0 ? lo - dd : hi + dd); if (r) q = q ? [Math.min(q[0], r[0]), Math.max(q[1], r[1])] : r; }
         return q;
       };
       var rl = side(-1), rr = side(1);

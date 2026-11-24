@@ -335,6 +335,21 @@ vec4 w120Bank(vec3 wp, vec3 r, float jit) {
 #ifdef FOG_EXP2
   float fd = fogDensity * hitT;
   c = mix(c, fogColor, 1.0 - exp(-fd * fd));
+#else
+  // (round 120, haze120; LOOK-3's hook) look120.js's stand-in fog is linear and carries the game's density in fogNear
+  float fd = fogNear * hitT;
+  c = mix(c, fogColor, 1.0 - exp(-fd * fd));
+  // the aerial haze the bank's light gathers on its reflected leg: the part of (eye->water + hitT) past the near zone
+  // that the water pixel's own fog (eye->water) does not already apply. Camera from the view matrix: r128 uploads
+  // cameraPosition only to Phong/Standard/Toon/Shader materials.
+  if (uHz120a.w > 0.5) {
+    vec3 hzCam = -(viewMatrix[3].xyz * mat3(viewMatrix));
+    float hzE = length(wp - hzCam);
+    float hzA = uHz120b.w * (max(hzE + hitT - uHz120d.x, 0.0) - max(hzE - uHz120d.x, 0.0))
+              * exp(-uHz120d.y * max(wp.y + 0.5 * sl * hitT - uHz120d.w, 0.0));
+    float hzW = 1.0 / (1.0 + uHz120d.z * (1.0 - dot(r, uHz120a.xyz))); hzW *= hzW;
+    c = mix(c, mix(uHz120c.xyz, uHz120b.xyz, hzW), uHz120c.w * (1.0 - exp(-hzA)));
+  }
 #endif
 #endif
   return vec4(c, 1.0 - smoothstep(45.0, 100.0, hitT));
@@ -560,15 +575,19 @@ void w120Composite() {
     sh.vertexShader = vs.replace('void main() {', V_PARS + 'void main() {')
       .replace('waterWave119(transformed);', 'waterWave119(transformed);' + V_SWELL)
       .replace('#include <project_vertex>', V_MAIN + '\n#include <project_vertex>');
-    const mapF = (W.marchLod ? '#define W120_MAP(p) textureLod(uW120Map, p, 0.0)\n' : '#define W120_MAP(p) texture2D(uW120Map, p)\n') + (W.liteNow ? '#define W120_LITE\n' : '') + (W.dropAlpha ? '#define W120_DROP_ALPHA\n' : '');
+    const mapF = (W.marchLod ? '#define W120_MAP(p) textureLod(uW120Map, p, 0.0)\n' : '#define W120_MAP(p) texture2D(uW120Map, p)\n') + (W.liteNow ? '#define W120_LITE\n' : '') + (W.dropAlpha ? '#define W120_DROP_ALPHA\n' : '')
+      + (W.nearN > 0 ? '#define W120_NEAR ' + (+W.nearN).toFixed(2) + '\n' : '');   // (WATER-5 probe) the full shader only near the eye
     sh.fragmentShader = fs.replace('void main() {', mapF + F_PARS + 'void main() {')
       .replace('#include <color_fragment>', '#include <color_fragment>' + F_ALB)
       .replace(OFF_SURF, 'w120Lin = gl_FragColor.rgb;')
       .replace('#include <encodings_fragment>', '#include <encodings_fragment>\n  w120Composite();');
+    if (W.nearN > 0) sh.fragmentShader = sh.fragmentShader   // (WATER-5 probe) the ON shader only near the eye, OFF's surface beyond
+      .replace('w120Lin = gl_FragColor.rgb;', 'bool w120Far = distance(vWaterW, uWaterEye) > W120_NEAR;\n  if (w120Far) ' + OFF_SURF + ' else { w120Lin = gl_FragColor.rgb; }')
+      .replace('\n  w120Composite();', '\n  if (!w120Far) w120Composite();');
     return true;
   };
   /** The material's program key: `|w120` only while ON (OFF keeps today's program). */
-  W.key = function () { return W.on ? '|w120:' + W.ver + (W.marchLod ? 'L' : '') + (W.liteNow ? 'lite' : '') + (W.dropAlpha ? 'A' : '') : ''; };
+  W.key = function () { return W.on ? '|w120:' + W.ver + (W.marchLod ? 'L' : '') + (W.liteNow ? 'lite' : '') + (W.dropAlpha ? 'A' : '') + (W.nearN > 0 ? 'n' + W.nearN : '') : ''; };
 
   // ---------------------------------------------------------------- GLSL: the ground (wet banks, the bed)
   const G_PARS = `
@@ -1301,7 +1320,8 @@ void main() {
       U.uW120Bank.value.x = 0; U.uW120RingN.value = 0; this.rings.length = 0;
       if (T && T.water) {
         const geo = T.water.geometry, pos = geo.attributes.position, DRY = typeof WATER_DRY_Y !== 'undefined' ? WATER_DRY_Y : -40;
-        if (this._fordV && this._fordGeo === geo && this._fordV.length) { for (const i of this._fordV) pos.setY(i, DRY); pos.updateRange.offset = 0; pos.updateRange.count = -1; pos.needsUpdate = true; }
+        if (this._fordV && this._fordGeo === geo && this._fordV.length) { const WB = T._waterBase;   // (WATER-5) a ford vertex in the wet ring stays wet
+          for (const i of this._fordV) pos.setY(i, WB && WB[i] === 0 ? 0 : DRY); pos.updateRange.offset = 0; pos.updateRange.count = -1; pos.needsUpdate = true; }
         if (this._boxMine && T._waterBox === this._boxMine) T._waterBox = this._boxOrig;
         T.water.visible = !!T._hasWater;
       }
